@@ -47,6 +47,11 @@ node capture.js --out out/nachher
 node compare.js out/vorher/metrics.json:Vorher out/nachher/metrics.json:Nachher
 ```
 
+Der Web-Client ist in den Host eingebettet: nach Änderungen in `wwwroot` den Desktop-Host neu
+bauen (`dotnet build Platforms/AgOpenWeb.Desktop/AgOpenWeb.Desktop.csproj`), sonst misst man den
+alten Stand. Mit `AGOPENWEB_REPO=<Checkout> restart-host.sh` läuft der Host aus einem anderen
+Checkout, etwa einem Feature-Branch, während die Skripte von hier kommen.
+
 Ohne `restart-host.sh`: `AGOPENWEB_DATA=<leerer Ordner> dotnet run --project
 Platforms/AgOpenWeb.Desktop/AgOpenWeb.Desktop.csproj -- --headless` und einen älteren Host vorher
 beenden, sonst misst man den alten Build auf `:5174`.
@@ -69,11 +74,14 @@ beenden, sonst misst man den alten Build auf `:5174`.
    nicht blind umgeschaltet).
 3. Fahrbild mit Simulator-Leiste, AB- und Flaggen-Flyout, Tracks-Dialog, Fields and Jobs,
    AutoSteer-Konfiguration, Fahrzeug-Konfiguration.
-4. Fahrbild Heading-Up ohne Simulator-Leiste, Tag und Nacht, jeweils auch mit simulierter
+4. Simulator zurück an den Start und bearbeitete Fläche des Testfelds gelöscht (immer dieselbe
+   Stelle, 400 m freie Leitlinie voraus), dann
+   Fahrbild Heading-Up ohne Simulator-Leiste, Tag und Nacht, jeweils auch mit simulierter
    Blendung (CSS-Filter `contrast(0.45) brightness(1.45) saturate(0.6)`; nur ein grober Ersatz
    für echtes Sonnenlicht).
 5. Zweiter Client als Observer, ein 7"-Tablet (1024×600) mit und ohne AutoSteer-Panel, zuletzt
-   der AutoSteer-Assistent.
+   der AutoSteer-Assistent (Start und Schritt mit dem Motortreiber; es wird nichts gespeichert).
+   Die AutoSteer-Konfiguration wird zusätzlich auf dem Hardware-Reiter fotografiert.
 
 Die Namen der Ansichten (`01-start-no-field`, `13-day-driving-clean`, …) sind fest, damit
 `compare.js` Läufe vergleichen kann.

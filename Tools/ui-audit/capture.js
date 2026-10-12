@@ -136,12 +136,20 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
   await p.click('#bn-flags'); await record(p, '07-bottom-flags-flyout'); await p.click('#bn-flags'); await close();
   await p.click('#bn-abmenu'); await p.waitForTimeout(300); await p.click('#bn-tracks'); await record(p, '08-tracks-dialog'); await close();
   await p.click('#ln-fieldops'); await p.waitForTimeout(300); await p.click('#fo-fields'); await record(p, '09-fields-dialog'); await close();
-  await p.click('#ln-autosteer'); await p.waitForTimeout(300); await p.click('#as-expand'); await record(p, '10-autosteer-expanded'); await close();
+  await p.click('#ln-autosteer'); await p.waitForTimeout(300); await p.click('#as-expand'); await record(p, '10-autosteer-expanded');
+  await p.click('[data-tab="as-hw"]'); await record(p, '10b-autosteer-hardware'); await close();
   await p.click('#ln-vehicle'); await p.waitForTimeout(300); await p.click('#vth-vehconfig'); await record(p, '11-vehicle-config'); await close();
 
   // --- Fahrbild, Heading-Up, ohne Simulator-Leiste -------------------------------------------
   if (await simBarOpen()) await p.click('#sim-close');
+  // Für vergleichbare Läufe immer vom selben Punkt aus: Simulator zurück an den Start
+  // (60 m vor der Südgrenze, Richtung Nord, vor der Linie 400 m frei), wieder 8 km/h.
+  // Die bearbeitete Fläche des Testfelds löschen, sonst läge die Leitlinie voraus auf Grün.
+  await send('sim.reset'); await p.waitForTimeout(800);
+  await send('field.deleteApplied'); await p.waitForTimeout(1000);
+  for (let i = 0; i < 16; i++) await send('sim.speedUp');
   await ensureOn();
+  await p.waitForTimeout(4000);
   await p.evaluate(() => { cameraMode = 1; }); // Heading-Up: Fahrzeug mittig, Leitlinie senkrecht
   const vp = args.viewport;
   const gl = { y: Math.round(vp.height * 0.3), x0: Math.round(vp.width / 2 - 60), x1: Math.round(vp.width / 2 + 60) };
@@ -173,6 +181,12 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
   // --- Assistent (Vollbild, deshalb zuletzt) -------------------------------------------------
   await p.click('#ln-tools'); await p.waitForTimeout(300); await p.click('#tl-wizard');
   await record(p, '18-steer-wizard', { wait: 1200 });
+  // Bis zum Schritt „Hardware-Konfiguration“ (Motortreiber) blättern; nichts wird gespeichert.
+  for (let i = 0; i < 8; i++) {
+    if (await p.evaluate(() => !!document.querySelector('[data-activekey="autosteer.motorDriver"]'))) break;
+    await p.click('#wz-next'); await p.waitForTimeout(600);
+  }
+  await record(p, '18b-steer-wizard-hardware', { wait: 800 });
 
   const meta = { date: new Date().toISOString(), url: args.url, viewport: vp, localStorage: args.ls };
   fs.writeFileSync(path.join(args.out, 'metrics.json'), JSON.stringify({ meta, views }, null, 1));
