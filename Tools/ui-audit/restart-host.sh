@@ -5,9 +5,11 @@
 #   Tools/ui-audit/restart-host.sh [DATENORDNER]
 #
 # Standard-Datenordner: /tmp/agopenweb-ui-audit (wird geleert!).
+# AGOPENWEB_REPO=<Pfad> startet den Host aus einem anderen Checkout (z. B. einem Feature-Branch),
+# während die Skripte aus diesem Ordner laufen.
 set -euo pipefail
 
-REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO="${AGOPENWEB_REPO:-$(cd "$(dirname "$0")/../.." && pwd)}"
 DATA="${1:-/tmp/agopenweb-ui-audit}"
 BIN="$REPO/Platforms/AgOpenWeb.Desktop/bin/Debug/net10.0/AgOpenWeb.Desktop"
 LOG="$DATA.log"
