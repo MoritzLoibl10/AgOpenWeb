@@ -1173,6 +1173,177 @@
     .bp-statlbl { font-size: 12px; color: var(--text-dim); }
     .bp-statval { font-size: 18px; font-weight: 700; }
   </style>
+  <!-- ===== Tablet UI (Phase 1) ===================================================
+       Everything for the cab tablet in one block, so it rebases cleanly on upstream:
+       UI scale (Normal / Large / Glove), labelled drive buttons, the sun theme and the
+       lower-right cluster placement. Driven by attributes on <html> that the "Tablet UI"
+       section at the end of app.js sets from per-device settings (localStorage):
+         data-tui-scale="normal|large|glove"   data-tui-sun (sun theme, day theme only)
+       Only sizes, colours and positions change; every button sends what it sent before. -->
+  <style id="tablet-ui">
+    :root {
+      --tui-tap: 0px;          /* minimum control size in panels/dialogs (0 = upstream sizes) */
+      --tui-nav: 56px;         /* left nav, bottom nav, on-screen buttons */
+      --tui-ln: min(var(--tui-nav), calc((100vh - var(--tui-sb-h) - 44px) / 8 - 6px));
+      --tui-bn: min(var(--tui-nav), calc((100vw - 2 * var(--tui-ln) - 64px) / 12 - 6px));
+      --tui-rn-w: 72px; --tui-rn-h: 66px; --tui-rn-ic: 34px; --tui-rn-fs: 11px;
+      --tui-sb-h: 46px;        /* status bar height */
+      --tui-dy: 0px;           /* how much taller the status bar got; everything below moves */
+      --tui-sec-w: 46px; --tui-sec-h: 38px; --tui-sec-fs: 13px;
+      --tui-cp: 44px;          /* camera pad cell */
+      --tui-sim: 40px;         /* simulator bar (bench tool, kept smaller) */
+      --tui-chk: 18px;
+    }
+    :root[data-tui-scale="large"] {
+      --tui-tap: 48px; --tui-nav: 64px;
+      --tui-rn-w: 84px; --tui-rn-h: 76px; --tui-rn-ic: 40px; --tui-rn-fs: 12px;
+      --tui-sb-h: 56px; --tui-dy: 10px;
+      --tui-sec-w: 58px; --tui-sec-h: 52px; --tui-sec-fs: 17px;
+      --tui-cp: 52px; --tui-sim: 44px; --tui-chk: 48px;
+    }
+    :root[data-tui-scale="glove"] {
+      --tui-tap: 64px; --tui-nav: 72px;
+      --tui-rn-w: 96px; --tui-rn-h: 84px; --tui-rn-ic: 44px; --tui-rn-fs: 13px;
+      --tui-sb-h: 64px; --tui-dy: 18px;
+      --tui-sec-w: 72px; --tui-sec-h: 64px; --tui-sec-fs: 20px;
+      --tui-cp: 64px; --tui-sim: 48px; --tui-chk: 64px;
+    }
+
+    /* --- Navigation bars -------------------------------------------------------- */
+    .ln-btn { width: var(--tui-ln); height: var(--tui-ln); }
+    #bottomnav .bn-btn { width: var(--tui-bn); height: var(--tui-bn); }
+    .osb-btn { width: var(--tui-nav); height: var(--tui-nav); }
+    .osb-row { gap: var(--tui-nav); }
+    #campad { grid-template-columns: repeat(3, var(--tui-cp)); grid-template-rows: repeat(3, var(--tui-cp)); }
+    #sectionbar .sec-row { max-width: calc(100vw - 2 * var(--tui-ln) - 2 * var(--tui-rn-w) - 40px); }
+    #sectionbar .sec-btn { width: var(--tui-sec-w); flex: 0 1 auto; min-width: 34px; height: var(--tui-sec-h);
+      font-size: var(--tui-sec-fs); } /* shrink only when many sections must share the row */
+
+    /* Right nav: icon + name + state, so a button reads without knowing the icons. */
+    .rn-btn { width: var(--tui-rn-w); height: var(--tui-rn-h); padding: 4px 2px; gap: 1px; }
+    .rn-btn .rn-ic { width: var(--tui-rn-ic); height: var(--tui-rn-ic); flex: none; }
+    .tui-rn-lbl { font: 700 var(--tui-rn-fs)/1.1 system-ui, sans-serif; color: var(--text); white-space: nowrap;
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis; pointer-events: none; }
+    .tui-rn-st { font: 800 calc(var(--tui-rn-fs) - 1px)/1.2 system-ui, sans-serif; letter-spacing: 0.04em;
+      text-transform: uppercase; padding: 0 5px; border-radius: 4px; color: var(--text-muted); pointer-events: none; }
+    .rn-btn.tui-on { box-shadow: inset 0 0 0 3px #1f8f3f; }
+    .rn-btn.tui-on .tui-rn-st { background: #12602a; color: #fff; }
+    #rn-steer.not-steering .tui-rn-st { background: #fff; color: #b00000; }
+
+    /* --- Status bar ------------------------------------------------------------- */
+    #statusbar { height: var(--tui-sb-h); }
+    #sb-diag { top: calc(var(--sat) + var(--tui-sb-h)); }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #statusbar button {
+      min-height: var(--tui-sb-h); min-width: var(--tui-sb-h); padding: 0 10px; justify-content: center; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #sb-fs { width: var(--tui-sb-h); height: var(--tui-sb-h); border-width: 0 0 0 1px; border-radius: 0; }
+    /* Fix/age and the rotating line side by side, so the fix button can use the full height. */
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) .sb-left { flex-direction: row; align-items: center; gap: 10px;
+      min-width: 0; flex: 0 1 auto; max-width: 46vw; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) .sb-rot { min-width: 0; flex: 1 1 auto; font-size: 16px; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #sb-speed,
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #sb-hdg { font-size: 30px; }
+    :root[data-tui-scale="glove"] #sb-speed, :root[data-tui-scale="glove"] #sb-hdg { font-size: 34px; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #sb-unit,
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #sb-hdglabel { font-size: 12px; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #sb-roletext { font-size: 16px; }
+
+    /* --- Everything below the status bar moves down by --tui-dy -------------------- */
+    #leftnav, #rightnav, .ln-panel { top: calc(56px + var(--tui-dy) + var(--sat)); }
+    .ln-panel { left: calc(var(--tui-ln) + 24px + var(--sal)); max-width: calc(100vw - var(--tui-ln) - 40px); }
+    #lb { top: calc(74px + var(--tui-dy) + var(--sat)); }
+    #maptap-hint { top: calc(60px + var(--tui-dy) + var(--sat)); }
+    #draw-toolbar { top: calc(100px + var(--tui-dy) + var(--sat)); }
+    #maptap-cancel { top: calc(102px + var(--tui-dy) + var(--sat)); }
+    #headland-hud { top: calc(120px + var(--tui-dy) + var(--sat)); }
+    #reverse-badge { top: calc(122px + var(--tui-dy) + var(--sat)); }
+    #onscreenbtns { top: calc(96px + var(--tui-dy) + var(--sat)); left: calc(var(--tui-ln) + 70px + var(--sal)); }
+    #uturn-indicator { top: calc(96px + var(--tui-dy) + var(--sat)); right: calc(var(--tui-rn-w) + 50px + var(--sar)); }
+    .dlg-card { margin-top: calc(60px + var(--tui-dy)); }
+    /* Lower-right cluster: app.js moves it left of the right nav / above the bottom stack
+       (sim bar, sections, bottom nav) when they would overlap (e.g. 1024x600, bigger buttons). */
+    #lowerright { right: calc(var(--tui-lr-right, 14px) + var(--sar)); bottom: calc(var(--tui-lr-bottom, 72px) + var(--sab)); }
+
+    /* --- Large / Glove: minimum touch size for every other control ------------------ */
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"])
+      :is(button, select, input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=hidden]), summary):not(
+        .ln-btn, .bn-btn, .rn-btn, .sec-btn, .osb-btn, #campad button, #simbar *, #statusbar button, #sim-launch) {
+      min-height: var(--tui-tap); min-width: var(--tui-tap); }
+    /* Bars sized above; the clock gives way to the wider bottom nav on narrow screens. */
+    @media (max-width: 1199px) { :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #clock { display: none; } }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) .ln-panel {
+      max-height: calc(100vh - 64px - var(--tui-dy) - var(--sat)); overflow-y: auto; box-sizing: border-box; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) .ln-x { width: var(--tui-tap); height: var(--tui-tap); font-size: 22px; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) .sa-panel { width: 560px; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) .nio-panel { width: 440px; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) .bn-row { font-size: 15px; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #simbar :is(button, input) { min-height: var(--tui-sim); min-width: var(--tui-sim); }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #sim-launch { height: var(--tui-tap); min-width: var(--tui-tap); }
+    /* Checkboxes: drawn as a large box with a tick (the native one cannot be scaled cleanly). */
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) input[type=checkbox] {
+      -webkit-appearance: none; appearance: none; width: var(--tui-chk); height: var(--tui-chk); margin: 0; flex: none;
+      border: 3px solid var(--text-muted); border-radius: 10px; background: var(--bg-input) center / 70% no-repeat; cursor: pointer; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) input[type=checkbox]:checked {
+      border-color: #1f6fb2; background-color: #1f6fb2;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M4 12.5l5 5L20 6.5' fill='none' stroke='%23fff' stroke-width='3.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+    /* Sliders: full-height touch strip with a big thumb (tapping the track still jumps). */
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) input[type=range] {
+      -webkit-appearance: none; appearance: none; height: var(--tui-tap); min-width: var(--tui-tap); background: transparent; margin: 0; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) input[type=range]::-webkit-slider-runnable-track {
+      height: 10px; border-radius: 5px; background: var(--border); }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: calc(var(--tui-tap) * 0.7); height: calc(var(--tui-tap) * 0.7); margin-top: calc(5px - var(--tui-tap) * 0.35);
+      border-radius: 50%; background: #1f6fb2; border: 3px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) input[type=range]::-moz-range-track {
+      height: 10px; border-radius: 5px; background: var(--border); }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) input[type=range]::-moz-range-thumb {
+      width: calc(var(--tui-tap) * 0.7); height: calc(var(--tui-tap) * 0.7); border-radius: 50%; background: #1f6fb2; border: 3px solid #fff; }
+
+    /* --- Settings rows added to Screen & Alerts ----------------------------------- */
+    .tui-seg { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 4px; }
+    .tui-opt { height: 40px; border: 1px solid var(--border); border-radius: 6px; background: rgba(var(--ov),0.06);
+      color: var(--text-2); cursor: pointer; font: 600 13px system-ui, sans-serif; padding: 0 8px; }
+    .tui-opt.active { background: #1f6fb2; border-color: #4A90D9; color: #fff; }
+    .tui-hint { color: var(--text-muted); font: 400 12px/1.4 system-ui, sans-serif; margin: 4px 0 8px; }
+    .tui-keya { margin-top: 8px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);
+      background: rgba(var(--ov),0.05); color: var(--text-2); font: 400 12px/1.45 system-ui, sans-serif; }
+    .tui-keya b { color: var(--text); }
+    .wz-rows > .tui-keya { grid-column: 1 / -1; } /* wizard: full width under the motor driver row */
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) .tui-keya { font-size: 14px; }
+
+    /* --- Sun theme: high contrast on the day palette ------------------------------ */
+    :root[data-theme="day"][data-tui-sun] {
+      --text: #000; --text-2: #000; --text-muted: #262626; --text-dim: #333;
+      --bg-input: #fff; --panel: #fff; --bg-sunken: #efefef; --bg-raised: #e6e6e6;
+      --border: #000; --border-2: #000; --dot-off: #555; --sel: #9cc8f0; --ov: 0,0,0;
+      --float-bg: #fff; --float-bg2: #fff; --chip-bg: #fff; --flyout-bg: #fff;
+    }
+    :root[data-theme="day"][data-tui-sun] #statusbar { border-bottom: 2px solid #000; font-weight: 700; }
+    :root[data-theme="day"][data-tui-sun] #sb-speed { color: #7a3300; }
+    :root[data-theme="day"][data-tui-sun] #sb-hdg { color: #7a0049; }
+    :root[data-theme="day"][data-tui-sun] .sb-rot { color: #003d73; }
+    :root[data-theme="day"][data-tui-sun] #sb-roletext { color: #000 !important; }
+    :root[data-theme="day"][data-tui-sun] #sb-gpscard .gc-ll { color: #5c4600; }
+    :root[data-theme="day"][data-tui-sun] :is(#leftnav, #rightnav, #bottomnav .bn-bar, #sectionbar, .ln-panel, .bn-flyout) {
+      border: 2px solid #000; }
+    :root[data-theme="day"][data-tui-sun] :is(.sa-tgl, .tui-opt, .ln-segbtn).active { background: #0b4f8a; color: #fff; }
+    :root[data-theme="day"][data-tui-sun] .rn-btn.tui-on { box-shadow: inset 0 0 0 4px #005a24; }
+    :root[data-theme="day"][data-tui-sun] .rn-btn.tui-on .tui-rn-st { background: #005a24; }
+    /* Sections: app.js puts the state code on each button (data-st), so the colours can be
+       swapped for ones that keep ≥ 7:1 with their number. Same meaning as upstream:
+       0 off (red) · 1 manual (yellow) · 2 auto (green) · 3 turning off · 4 turning on · 5 auto-off */
+    :root[data-theme="day"][data-tui-sun] #sectionbar .sec-btn { border: 2px solid #000; color: #fff; }
+    :root[data-theme="day"][data-tui-sun] #sectionbar .sec-btn[data-st="0"] { background: #8b0000 !important; }
+    :root[data-theme="day"][data-tui-sun] #sectionbar .sec-btn[data-st="1"] { background: #ffd400 !important; color: #000; }
+    :root[data-theme="day"][data-tui-sun] #sectionbar .sec-btn[data-st="2"] { background: #005a24 !important; }
+    :root[data-theme="day"][data-tui-sun] #sectionbar .sec-btn[data-st="3"] { background: #004a5e !important; }
+    :root[data-theme="day"][data-tui-sun] #sectionbar .sec-btn[data-st="4"] { background: #ff9f1a !important; color: #000; }
+    :root[data-theme="day"][data-tui-sun] #sectionbar .sec-btn[data-st="5"] { background: #d9d9d9 !important; color: #000; border-style: dashed; }
+    /* Text drawn straight on the (now light) map. */
+    :root[data-theme="day"][data-tui-sun] :is(#lb, #uti-distval, #clock) { color: #000; text-shadow: 0 0 3px #fff, 0 0 6px #fff; }
+    :root[data-theme="day"][data-tui-sun] #lb * { color: #000 !important; } /* arrow colour is set inline */
+    :root[data-theme="day"][data-tui-sun] #roll-deg { fill: #000; }
+    :root[data-theme="day"][data-tui-sun] #rollgauge { filter: drop-shadow(0 0 2px #fff); }
+  </style>
 </head>
 <body>
   <canvas id="ck"></canvas>
