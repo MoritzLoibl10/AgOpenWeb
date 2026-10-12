@@ -1,0 +1,162 @@
+name: Fork Test Pre-Release
+
+# Fork-only: a manually started test build for one tablet/PC — Windows x64 zip + Android APK —
+# published as a GitHub *pre-release* with free-form release notes. Kept separate from
+# build-deploy-bundles.yml (unchanged from upstream) so rebasing on upstream stays conflict-free.
+# The build steps mirror build-deploy-bundles.yml's `windows` and `android` jobs.
+#
+# Start: Actions → "Fork Test Pre-Release" → Run workflow (or the REST API), with
+#   tag   — e.g. 26.7.0-moritz.1 (no leading "v": v* tags would also start the upstream release)
+#   notes — release text (Markdown)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Pre-release tag, e.g. 26.7.0-moritz.1 (no leading v)'
+        required: true
+      notes:
+        description: 'Release text (Markdown)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  windows:
+    runs-on: ubuntu-latest   # cross-publishes win-x64 from Linux
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build Windows launcher bundle (x64)
+        run: ./deploy/windows/package.sh --arch x64 --out "$GITHUB_WORKSPACE/dist"
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agopenweb-win-x64
+          path: dist/agopenweb-win-x64.zip
+          retention-days: 14
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'microsoft'
+          java-version: '17'
+
+      - name: Install Android workload
+        run: |
+          for i in 1 2 3; do
+            dotnet workload install android && break
+            echo "Attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+
+      - name: Restore dependencies
+        run: dotnet restore Platforms/AgOpenWeb.Android/AgOpenWeb.Android.csproj
+
+      # Same secrets as upstream (ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD, alias
+      # agopenweb). Without them the APK is signed with the runner's throw-away debug key.
+      - name: Decode signing keystore
+        id: keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/agopenweb-release.keystore"
+            echo "path=$RUNNER_TEMP/agopenweb-release.keystore" >> "$GITHUB_OUTPUT"
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::ANDROID_KEYSTORE_BASE64 secret not set — APK signed with the runner's ephemeral debug key (uninstall before installing the next build)."
+          fi
+
+      - name: Build Android APK
+        env:
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          ARGS=(publish Platforms/AgOpenWeb.Android/AgOpenWeb.Android.csproj
+                -c Release -f net10.0-android -o publish/android)
+          if [ "${{ steps.keystore.outputs.present }}" = "true" ]; then
+            ARGS+=(-p:AndroidKeyStore=true
+                   "-p:AndroidSigningKeyStore=${{ steps.keystore.outputs.path }}"
+                   -p:AndroidSigningKeyAlias=agopenweb
+                   -p:AndroidSigningStorePass=env:KS_PASS
+                   -p:AndroidSigningKeyPass=env:KS_PASS)
+          fi
+          dotnet "${ARGS[@]}"
+
+      - name: Collect signed APK
+        run: |
+          mkdir -p dist
+          APK=$(find publish/android -type f -name "*-Signed.apk" | head -1)
+          [ -n "$APK" ] || { echo "No signed APK found!"; exit 1; }
+          cp "$APK" dist/agopenweb-android.apk
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agopenweb-android
+          path: dist/agopenweb-android.apk
+          retention-days: 14
+
+  prerelease:
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # create the tag + pre-release
+    steps:
+      - name: Check tag
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          case "$TAG" in
+            v*) echo "::error::Use a tag without a leading v (v* tags start the upstream release workflow)."; exit 1 ;;
+            *[!A-Za-z0-9._-]*|"") echo "::error::Tag may only contain letters, digits, '.', '_' and '-'."; exit 1 ;;
+          esac
+
+      - name: Download bundle artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Write release notes
+        env:
+          NOTES: ${{ inputs.notes }}
+        run: printf '%s\n' "$NOTES" > notes.md
+
+      - name: Publish pre-release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ inputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ inputs.tag }}
+          prerelease: true
+          draft: false
+          body_path: notes.md
+          files: |
+            dist/**/agopenweb-win-x64.zip
+            dist/**/agopenweb-android.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
