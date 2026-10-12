@@ -1,0 +1,12 @@
+{
+  "name": "agopenweb-ui-audit",
+  "private": true,
+  "description": "Screenshots und Messungen (Tippflächen, Schrift, Kontrast) des AgOpenWeb-Web-Clients",
+  "scripts": {
+    "capture": "node capture.js",
+    "compare": "node compare.js"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

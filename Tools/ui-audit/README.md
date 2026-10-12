@@ -1,0 +1,87 @@
+# UI-Audit
+
+Skripte, mit denen die Screenshots und Messwerte in
+[docs/UI-UX-Analyse.md](../../docs/UI-UX-Analyse.md) entstanden sind. Sie starten den Host
+headless, fahren im Simulator ein festes Szenario ab, machen von jeder Hauptansicht einen
+Screenshot und messen:
+
+- **Tippflächen:** Breite × Höhe jedes sichtbaren Bedienelements, das am Mittelpunkt oben liegt
+  (`button`, `input`, `select`, `a[href]`, Teilbreiten-Knöpfe).
+- **Schriftgrößen:** berechnete `font-size` jedes sichtbaren Textknotens.
+- **Kontrast:** WCAG-Verhältnis jedes DOM-Textes gegen die nächste deckende Hintergrundfarbe,
+  zugeordnet zu Bereichen (Statusleiste, Teilbreiten, Panels, …). Texte direkt über der Karte
+  haben keinen deckenden Hintergrund und fehlen deshalb.
+- **Leitlinie:** Kontrast der Leitlinie zur Karte, aus dem Screenshot. Jede Spalte um die
+  Bildmitte wird über 80 Zeilen gemittelt; Hintergrund ist der Median, Leitlinie die Spalte, die
+  sich am stärksten abhebt. Gemessen in der Heading-Up-Ansicht, in der die Linie senkrecht steht.
+
+> **Nur ohne angeschlossene Module laufen lassen.** Das Szenario schaltet im Simulator
+> Teilbreiten-Automatik und AutoSteer ein, und der Host schickt seine Lenk- und
+> Maschinenkonfiguration an jedes Modul im Netz. `capture.js` bricht ab, wenn es ein
+> AutoSteer- oder Maschinenmodul sieht; trotzdem auf einem Rechner ohne AiO-Board im Netz
+> messen.
+
+## Voraussetzungen
+
+- .NET 10 SDK (der Host wird bei Bedarf gebaut)
+- Node.js ≥ 18 und Playwright 1.56: `cd Tools/ui-audit && npm install && npx playwright install chromium`
+  (wo Playwright global installiert ist, reicht `NODE_PATH=$(npm root -g)`)
+- Linux (für `restart-host.sh`; auf anderen Systemen den Host selbst starten, siehe unten)
+
+## Ablauf
+
+```bash
+# 1. Host mit leerem Datenordner (neu) starten. Der Ordner wird geleert!
+Tools/ui-audit/restart-host.sh /tmp/agopenweb-ui-audit
+
+# 2. Messen. Ergebnis: out/vorher/screens/*.png und out/vorher/metrics.json
+cd Tools/ui-audit
+node capture.js --out out/vorher
+
+# Weitere Läufe brauchen jeweils einen frisch gestarteten Host, weil das Szenario ein Feld
+# anlegt und der Host den Zustand behält.
+../../Tools/ui-audit/restart-host.sh
+node capture.js --out out/nachher
+
+# 3. Vergleichstabelle (Markdown)
+node compare.js out/vorher/metrics.json:Vorher out/nachher/metrics.json:Nachher
+```
+
+Ohne `restart-host.sh`: `AGOPENWEB_DATA=<leerer Ordner> dotnet run --project
+Platforms/AgOpenWeb.Desktop/AgOpenWeb.Desktop.csproj -- --headless` und einen älteren Host vorher
+beenden, sonst misst man den alten Build auf `:5174`.
+
+## Optionen von `capture.js`
+
+| Option | Bedeutung |
+|---|---|
+| `--url URL` | Adresse des Hosts, Standard `http://localhost:5174/` |
+| `--out DIR` | Ausgabeordner, Standard `out` |
+| `--viewport BxH` | Fenstergröße, Standard `1280x800`; Ansicht 17 nutzt immer `1024x600` |
+| `--ls key=value` | Eintrag im `localStorage` vor dem Laden setzen (mehrfach möglich), z. B. für Client-Einstellungen wie die UI-Skalierung |
+| `CHROMIUM_PATH` (Umgebung) | anderes Chromium statt dem von Playwright |
+
+## Szenario
+
+1. Ohne Feld: Startbild, die acht Panels der linken Leiste, Modul- und GPS-Popup.
+2. Feld „Demo-Schlag“ (240 m × 460 m) mit 18 m Vorgewende, 8 Teilbreiten, Auftrag „Audit“,
+   A+-Linie bei 8 km/h; Teilbreiten-Automatik, AutoSteer und U-Turn an (nach Zustand im Tick,
+   nicht blind umgeschaltet).
+3. Fahrbild mit Simulator-Leiste, AB- und Flaggen-Flyout, Tracks-Dialog, Fields and Jobs,
+   AutoSteer-Konfiguration, Fahrzeug-Konfiguration.
+4. Fahrbild Heading-Up ohne Simulator-Leiste, Tag und Nacht, jeweils auch mit simulierter
+   Blendung (CSS-Filter `contrast(0.45) brightness(1.45) saturate(0.6)`; nur ein grober Ersatz
+   für echtes Sonnenlicht).
+5. Zweiter Client als Observer, ein 7"-Tablet (1024×600) mit und ohne AutoSteer-Panel, zuletzt
+   der AutoSteer-Assistent.
+
+Die Namen der Ansichten (`01-start-no-field`, `13-day-driving-clean`, …) sind fest, damit
+`compare.js` Läufe vergleichen kann.
+
+## Grenzen
+
+- Headless Chromium mit Software-WebGL (SwiftShader); Bildrate und Kantenglättung weichen von
+  einem echten Tablet ab.
+- Die physische Größe hängt vom Gerät ab: auf einem 10,1"-Tablet mit 1280×800 CSS-px ist 1 px
+  ≈ 0,17 mm.
+- Sind Bing-Kacheln nicht erreichbar, zeigt die Karte nur die Standard-Bodentextur.
