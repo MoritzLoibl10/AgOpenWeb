@@ -42,11 +42,14 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
     await page.screenshot({ path: path.join(shotDir, name + '.png') });
     const m = await L.measure(page);
     const contrast = await L.contrast(page);
-    const v = { sum: L.summarize(m), controls: m.controls, contrast, contrastByRegion: L.contrastByRegion(contrast) };
+    const v = { sum: L.summarize(m), controls: m.controls, contrast, contrastByRegion: L.contrastByRegion(contrast),
+      driveFonts: await L.driveFonts(page), overlaps: await L.overlaps(page) };
     if (guideline) v.guideline = await L.guidelineContrast(page, guideline);
     views[name] = v;
     console.log(name.padEnd(28), `n=${v.sum.n} <48=${v.sum.lt48} >=64=${v.sum.ge64} text<14=${v.sum.textLt14}/${v.sum.textNodes}`
+      + ` fahrwerte>=${v.driveFonts.min}px überlappt=${v.overlaps.length}`
       + (v.guideline ? ` leitlinie=${v.guideline.cr}:1` : ''));
+    for (const o of v.overlaps) console.log('   überlappt:', o);
   };
   const glareShot = async (page, name) => {
     const tag = await page.addStyleTag({ content: GLARE_CSS });
@@ -61,7 +64,7 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
   // (echter Klick, weil die Knöpfe auf pointerdown hören).
   const close = async () => {
     const found = await p.evaluate(() => {
-      const c = [...document.querySelectorAll('#dialoghost.open [id$="-close"], #dialoghost.open .dlg-cancel, .ln-panel.open .ln-closex, .ln-panel.open .ln-x, #as-close')]
+      const c = [...document.querySelectorAll('#dialoghost.open [id$="-close"], #dialoghost.open .dlg-cancel, .ln-panel.open .ln-closex, .ln-panel.open .ln-x, #as-close, .tui-sheet.open .x')]
         .filter(b => b.getClientRects().length && getComputedStyle(b).visibility !== 'hidden');
       if (!c.length) return false;
       c[c.length - 1].setAttribute('data-uiaudit-close', '1');
@@ -98,14 +101,29 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
     const op = await p.evaluate(() => tick.op);
     if (!op.sectionAuto || !op.autoSteer || !op.youturn) console.log('  Hinweis: nicht alles an:', JSON.stringify(op));
   };
+  // Terminal-Layout (Phase 2): ist die linke Leiste im Fahrmodus ausgeblendet, geht es über
+  // die Kachel im Menü; Einrichtungs-Kacheln schalten dabei in den Einrichtungsmodus.
+  const openNav = async (pg, id) => {
+    const direct = await pg.evaluate(id => { const b = document.getElementById(id); return !!b && b.getClientRects().length > 0; }, id);
+    if (direct) { await pg.click('#' + id); return; }
+    await pg.click('#tui-menu-btn'); await pg.waitForTimeout(300);
+    await pg.click(`[data-tile="${id}"]`);
+  };
+  const terminal = pg => pg.evaluate(() => typeof TabletTerminal !== 'undefined' && TabletTerminal.layout === 'terminal');
+  const toDrive = async pg => {
+    if (await pg.evaluate(() => typeof TabletTerminal !== 'undefined' && TabletTerminal.mode === 'setup')) {
+      await pg.click('#tui-menu-btn'); await pg.waitForTimeout(300);
+    }
+  };
   const simBarOpen = () => p.evaluate(() => getComputedStyle(document.getElementById('simbar')).display !== 'none');
 
   // --- ohne Feld ---------------------------------------------------------------------------
   await record(p, '01-start-no-field');
   for (const id of ['filemenu', 'screenalerts', 'tools', 'vehicle', 'autosteer', 'fieldops', 'fieldtools', 'network']) {
-    await p.click('#ln-' + id);
+    await openNav(p, 'ln-' + id);
     await record(p, '02-left-' + id);
     await close();
+    await toDrive(p);
   }
   await p.click('#sb-modbtn'); await record(p, '03-status-modules'); await p.click('#sb-modbtn'); await close();
   await p.click('#sb-fixbtn'); await record(p, '03-status-gps'); await p.click('#sb-fixbtn'); await close();
@@ -135,10 +153,10 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
   await p.click('#bn-abmenu'); await record(p, '07-bottom-ab-flyout'); await p.click('#bn-abmenu'); await close();
   await p.click('#bn-flags'); await record(p, '07-bottom-flags-flyout'); await p.click('#bn-flags'); await close();
   await p.click('#bn-abmenu'); await p.waitForTimeout(300); await p.click('#bn-tracks'); await record(p, '08-tracks-dialog'); await close();
-  await p.click('#ln-fieldops'); await p.waitForTimeout(300); await p.click('#fo-fields'); await record(p, '09-fields-dialog'); await close();
-  await p.click('#ln-autosteer'); await p.waitForTimeout(300); await p.click('#as-expand'); await record(p, '10-autosteer-expanded');
-  await p.click('[data-tab="as-hw"]'); await record(p, '10b-autosteer-hardware'); await close();
-  await p.click('#ln-vehicle'); await p.waitForTimeout(300); await p.click('#vth-vehconfig'); await record(p, '11-vehicle-config'); await close();
+  await openNav(p, 'ln-fieldops'); await p.waitForTimeout(300); await p.click('#fo-fields'); await record(p, '09-fields-dialog'); await close();
+  await openNav(p, 'ln-autosteer'); await p.waitForTimeout(300); await p.click('#as-expand'); await record(p, '10-autosteer-expanded');
+  await p.click('[data-tab="as-hw"]'); await record(p, '10b-autosteer-hardware'); await close(); await toDrive(p);
+  await openNav(p, 'ln-vehicle'); await p.waitForTimeout(300); await p.click('#vth-vehconfig'); await record(p, '11-vehicle-config'); await close(); await toDrive(p);
 
   // --- Fahrbild, Heading-Up, ohne Simulator-Leiste -------------------------------------------
   if (await simBarOpen()) await p.click('#sim-close');
@@ -152,13 +170,51 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
   await p.waitForTimeout(4000);
   await p.evaluate(() => { cameraMode = 1; }); // Heading-Up: Fahrzeug mittig, Leitlinie senkrecht
   const vp = args.viewport;
-  const gl = { y: Math.round(vp.height * 0.3), x0: Math.round(vp.width / 2 - 60), x1: Math.round(vp.width / 2 + 60) };
+  // Streifen zwischen den Anzeigen oben (Querabweichung, Lichtbalken, Vorgewende-Abstand) und
+  // dem Fahrzeug (Antennenpunkt bei ~45 % der Höhe): 42 % der Höhe, 24 Zeilen.
+  const gl = { y: Math.round(vp.height * 0.42), h: 24, x0: Math.round(vp.width / 2 - 60), x1: Math.round(vp.width / 2 + 60) };
   await record(p, '13-day-driving-clean', { wait: 3000, guideline: gl });
   await glareShot(p, '14-day-glare-simulated');
   await send('display.toggleTheme');
   await record(p, '15-night-driving', { wait: 1500, guideline: gl });
   await glareShot(p, '15b-night-glare-simulated');
   await send('display.toggleTheme'); await p.waitForTimeout(500);
+
+  // --- Querabweichung mit festem Wert (Testhaken in lib.js; der Simulator regelt sonst sofort aus)
+  // +0,23 m = rechts der Linie → nach links lenken; −0,41 m = links → nach rechts lenken.
+  await p.evaluate(() => { window.__auditXte = 0.23; });
+  await record(p, '25-xte-steer-left', { wait: 800 });
+  await p.evaluate(() => { window.__auditXte = -0.41; });
+  await record(p, '26-xte-steer-right', { wait: 800 });
+  await send('display.toggleTheme');
+  await record(p, '26b-xte-steer-right-night', { wait: 1200 });
+  await send('display.toggleTheme'); await p.waitForTimeout(500);
+  await p.evaluate(() => { window.__auditXte = null; });
+
+  // --- Terminal-Layout: Arbeitsseiten, Menü, Editoren, Einrichtungsmodus --------------------
+  if (await terminal(p)) {
+    // Seite 2 per Wischgeste auf der Modulspalte (Maus-Ziehen erzeugt dieselben Pointer-Ereignisse).
+    const card = await p.$('#tui-col .tui-card');
+    const b = card && await card.boundingBox();
+    if (b) {
+      await p.mouse.move(b.x + b.width - 10, b.y + b.height / 2); await p.mouse.down();
+      await p.mouse.move(b.x + 10, b.y + b.height / 2, { steps: 6 }); await p.mouse.up();
+    }
+    if (await p.evaluate(() => TabletTerminal.page) !== 1) { console.log('  Hinweis: Wischen hat die Seite nicht gewechselt'); await p.evaluate(() => TabletTerminal.goPage(1)); }
+    await record(p, '20-page-2', { wait: 1200 });
+    await p.evaluate(() => TabletTerminal.goPage(2));
+    await record(p, '21-page-3-dashboard', { wait: 1200 });
+    await send('display.toggleTheme');
+    await record(p, '21b-dashboard-night', { wait: 1200 });
+    await send('display.toggleTheme'); await p.waitForTimeout(500);
+    await p.evaluate(() => TabletTerminal.goPage(0));
+    await p.click('#tui-menu-btn'); await record(p, '19-menu');
+    await p.click('[data-tile="pages"]'); await record(p, '22-pages-editor'); await close();
+    await p.click('#tui-menu-btn'); await p.waitForTimeout(300); await p.click('[data-tile="quick"]'); await record(p, '23-quickbar-editor'); await close();
+    await openNav(p, 'ln-vehicle'); await p.waitForTimeout(300); await close();
+    await record(p, '24-setup-mode');
+    await toDrive(p);
+  }
 
   // --- zweites Gerät als Observer, 7"-Tablet -------------------------------------------------
   {
@@ -173,13 +229,24 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
     await page.waitForTimeout(2500);
     await page.evaluate(() => { cameraMode = 1; });
     await record(page, '17-7inch-1024x600', { wait: 1500 });
-    await page.click('#ln-autosteer');
+    await openNav(page, 'ln-autosteer');
     await record(page, '17b-7inch-autosteer-panel');
+    if (await terminal(page)) {
+      await page.evaluate(() => { if (typeof lnCloseAll === 'function') lnCloseAll(); TabletTerminal.setMode('drive'); });
+      await page.evaluate(() => TabletTerminal.goPage(2));
+      await record(page, '17c-7inch-dashboard', { wait: 1200 });
+      await page.evaluate(() => TabletTerminal.goPage(0));
+      await page.evaluate(() => { window.__auditXte = 0.23; });
+      await record(page, '17d-7inch-xte-steer-left', { wait: 800 });
+      await page.evaluate(() => { window.__auditXte = null; });
+      await page.click('#tui-menu-btn');
+      await record(page, '17e-7inch-menu');
+    }
     await ctx.close();
   }
 
   // --- Assistent (Vollbild, deshalb zuletzt) -------------------------------------------------
-  await p.click('#ln-tools'); await p.waitForTimeout(300); await p.click('#tl-wizard');
+  await openNav(p, 'ln-tools'); await p.waitForTimeout(300); await p.click('#tl-wizard');
   await record(p, '18-steer-wizard', { wait: 1200 });
   // Bis zum Schritt „Hardware-Konfiguration“ (Motortreiber) blättern; nichts wird gespeichert.
   for (let i = 0; i < 8; i++) {

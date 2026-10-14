@@ -12,7 +12,8 @@ Screenshot und messen:
   zugeordnet zu Bereichen (Statusleiste, Teilbreiten, Panels, …). Texte direkt über der Karte
   haben keinen deckenden Hintergrund und fehlen deshalb.
 - **Leitlinie:** Kontrast der Leitlinie zur Karte, aus dem Screenshot. Jede Spalte um die
-  Bildmitte wird über 80 Zeilen gemittelt; Hintergrund ist der Median, Leitlinie die Spalte, die
+  Bildmitte wird über 24 Zeilen bei 42 % der Bildhöhe gemittelt (zwischen den Anzeigen oben und dem
+  Fahrzeug); Hintergrund ist der Median, Leitlinie die Spalte, die
   sich am stärksten abhebt. Gemessen in der Heading-Up-Ansicht, in der die Linie senkrecht steht.
 
 > **Nur ohne angeschlossene Module laufen lassen.** Das Szenario schaltet im Simulator
