@@ -6455,8 +6455,11 @@ const TabletTerminal = (() => {
   function renderXte() {
     const want = !!(tick && tick.guidanceActive && scene && scene.hasField && !document.body.classList.contains('maptap')
       && !noMap() && (!terminal() || page().includes('xte')));
-    xteBox.classList.toggle('show', want);
-    if (want) root.setAttribute('data-tui-xte', ''); else root.removeAttribute('data-tui-xte');
+    if (want !== xteBox.classList.contains('show')) {
+      xteBox.classList.toggle('show', want);
+      if (want) root.setAttribute('data-tui-xte', ''); else root.removeAttribute('data-tui-xte');
+      stackNow = true; // re-stack the light bar and HUDs this frame
+    }
     if (!want) { xteLast = ''; return; }
     const i = xteInfo();
     const key = i.val + i.unit + i.dir + i.cap;
@@ -6470,8 +6473,9 @@ const TabletTerminal = (() => {
   // Everything under the status bar stacks top-down: readout, canvas light bar, #lb text,
   // headland HUD / reverse badge. Positions as CSS variables (and the bar's offset for the
   // lightbarSk wrapper in Phase 1), so they follow the status bar and readout heights.
-  let yKey = '';
+  let yKey = '', stackNow = true;
   function stackTop() {
+    stackNow = false;
     const r = sb && sb.style.display !== 'none' ? sb.getBoundingClientRect() : null;
     let y = (r ? r.bottom : 0) + 8, xb = 0, xr = 0, xt = 0;
     if (xteBox.classList.contains('show')) {
@@ -6908,7 +6912,7 @@ const TabletTerminal = (() => {
     root.setAttribute('data-tui-mode', mode);
     syncMenuBtn();
     built = ''; buildPage(); applyQuick(); syncLayoutOpts();
-    waKey = ''; yKey = ''; bandKey = '';
+    waKey = ''; yKey = ''; bandKey = ''; stackNow = true;
   }
   // Layout choice next to the Phase 1 size / sun buttons in Screen & Alerts.
   const sa = $('screenalerts');
@@ -6934,7 +6938,7 @@ const TabletTerminal = (() => {
     }
     buildPage();
     renderXte();
-    stackTop();
+    if (stackNow) stackTop(); // otherwise every 300 ms (layout reads stay out of the frame loop)
     renderCards();
     renderProxies();
     requestAnimationFrame(frame);
@@ -6975,8 +6979,8 @@ const TabletTerminal = (() => {
       if (stackRects.some(o => r.left < o.right && r.right > o.left && r.bottom > o.top - 4 && r.top < o.bottom)) row.classList.add('tui-osb-off');
     }
   }
-  setInterval(() => { placeBand(); placeWorkArea(); countSlots(); gaugeFit(); fitOverlays(); }, 300);
-  window.addEventListener('resize', () => { waKey = ''; yKey = ''; bandKey = ''; placeBand(); placeWorkArea(); });
+  setInterval(() => { stackTop(); placeBand(); placeWorkArea(); countSlots(); gaugeFit(); fitOverlays(); }, 300);
+  window.addEventListener('resize', () => { waKey = ''; yKey = ''; bandKey = ''; stackNow = true; placeBand(); placeWorkArea(); });
   frame();
   return { get layout() { return layout; }, get mode() { return mode; }, setMode, openMenu, goPage,
     get page() { return pageIdx; }, get pages() { return pages.map(p => p.slice()); } };

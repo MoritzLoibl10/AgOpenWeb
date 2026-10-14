@@ -15,6 +15,11 @@ Screenshot und messen:
   Bildmitte wird über 24 Zeilen bei 42 % der Bildhöhe gemittelt (zwischen den Anzeigen oben und dem
   Fahrzeug); Hintergrund ist der Median, Leitlinie die Spalte, die
   sich am stärksten abhebt. Gemessen in der Heading-Up-Ansicht, in der die Linie senkrecht steht.
+- **Fahrwerte:** Schriftgröße der Werte, die man beim Fahren abliest (Statusleiste,
+  Querabweichung, Lichtbalken-Text, HUDs, Teilbreiten, Beschriftung der Schnellzugriffe, Module;
+  Liste `DRIVE_READOUTS` in `lib.js`). Pro Ansicht die kleinste Größe und alle Einträge.
+- **Überlappungen:** feste Elemente über der Karte (Leisten, Anzeigen, Module, Kamera-Pad, …;
+  Liste `LAYOUT_BOXES` in `lib.js`), die sich in beiden Richtungen um mehr als 4 px schneiden.
 
 > **Nur ohne angeschlossene Module laufen lassen.** Das Szenario schaltet im Simulator
 > Teilbreiten-Automatik und AutoSteer ein, und der Host schickt seine Lenk- und
@@ -80,9 +85,20 @@ beenden, sonst misst man den alten Build auf `:5174`.
    Fahrbild Heading-Up ohne Simulator-Leiste, Tag und Nacht, jeweils auch mit simulierter
    Blendung (CSS-Filter `contrast(0.45) brightness(1.45) saturate(0.6)`; nur ein grober Ersatz
    für echtes Sonnenlicht).
-5. Zweiter Client als Observer, ein 7"-Tablet (1024×600) mit und ohne AutoSteer-Panel, zuletzt
+5. Querabweichung mit festem Wert: +0,23 m (rechts der Linie, „nach links lenken“) und
+   −0,41 m (links, „nach rechts lenken“), Tag und Nacht. Der Simulator lenkt einen Versatz
+   innerhalb eines Bildes aus; deshalb setzt ein Testhaken in `lib.js` (`window.__auditXte`)
+   den Wert in jedem Tick, nur im Browser des Audits.
+6. Nur im Terminal-Layout (Phase 2): Seite 2 per Wischgeste auf der Modulspalte, Seite 3 ohne
+   Karte (Tag und Nacht), Menü, Editor für Arbeitsseiten und Schnellzugriff, Einrichtungsmodus.
+7. Zweiter Client als Observer, ein 7"-Tablet (1024×600) mit und ohne AutoSteer-Panel (im
+   Terminal-Layout zusätzlich Seite ohne Karte, Querabweichung und Menü), zuletzt
    der AutoSteer-Assistent (Start und Schritt mit dem Motortreiber; es wird nichts gespeichert).
    Die AutoSteer-Konfiguration wird zusätzlich auf dem Hardware-Reiter fotografiert.
+
+Im Terminal-Layout ist die linke Leiste im Fahrmodus ausgeblendet. Das Skript öffnet die Panels
+dann über die Kachel im Menü (Einrichtungs-Kacheln schalten in den Einrichtungsmodus) und kehrt
+danach in den Fahrmodus zurück. Mit `--ls aow.ui.layout=classic` läuft es im klassischen Layout.
 
 Die Namen der Ansichten (`01-start-no-field`, `13-day-driving-clean`, …) sind fest, damit
 `compare.js` Läufe vergleichen kann.
