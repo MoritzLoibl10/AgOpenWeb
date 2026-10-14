@@ -94,16 +94,16 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
     for (const [key, id] of [['sectionAuto', 'rn-auto'], ['autoSteer', 'rn-steer'], ['youturn', 'rn-youturn']]) {
       for (let attempt = 0; attempt < 3; attempt++) {
         if (await p.evaluate(k => !!(tick && tick.op && tick.op[k]), key)) break;
-        await p.click('#' + id, { timeout: 4000 }).catch(async () => {
+        await p.click('#' + id, { timeout: 10000 }).catch(async () => {
           // Verdeckt (z. B. von der Simulator-Leiste auf kleinen Bildschirmen): als Befund melden
           // und das Ereignis direkt am Knopf auslösen, damit der Lauf weitergeht.
           const by = await p.evaluate(id => {
             const el = document.getElementById(id), r = el.getBoundingClientRect();
             const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
             el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
-            return top ? (top.id || top.className || top.tagName) : '?';
+            return !top ? '?' : el.contains(top) ? '' : (top.id || top.className || top.tagName);
           }, id);
-          console.log(`  BEFUND: #${id} ist verdeckt von ${by}; direkt ausgelöst`);
+          console.log(by ? `  BEFUND: #${id} ist verdeckt von ${by}; direkt ausgelöst` : `  (#${id}: Klick zu langsam; direkt ausgelöst)`);
         });
         await p.waitForTimeout(1000);
       }

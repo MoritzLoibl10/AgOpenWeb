@@ -1507,13 +1507,13 @@
     .tui-osb-off { display: none !important; } /* on-screen row that would sit under the bottom stack */
     /* Low screens: the camera pad as one row (− ▲ mode ▼ +), so it stays clear of the readouts. */
     @media (max-height: 720px) {
-      :root[data-tui-layout="terminal"] #campad { grid-template-columns: repeat(5, var(--tui-cp)); grid-template-rows: var(--tui-cp); }
-      :root[data-tui-layout="terminal"] #campad :is(.cp-left, .cp-up, .cp-center, .cp-down, .cp-right) { grid-row: 1; }
-      :root[data-tui-layout="terminal"] #campad .cp-left { grid-column: 1; }
-      :root[data-tui-layout="terminal"] #campad .cp-up { grid-column: 2; }
-      :root[data-tui-layout="terminal"] #campad .cp-center { grid-column: 3; }
-      :root[data-tui-layout="terminal"] #campad .cp-down { grid-column: 4; }
-      :root[data-tui-layout="terminal"] #campad .cp-right { grid-column: 5; }
+      #campad { grid-template-columns: repeat(5, var(--tui-cp)); grid-template-rows: var(--tui-cp); }
+      #campad :is(.cp-left, .cp-up, .cp-center, .cp-down, .cp-right) { grid-row: 1; }
+      #campad .cp-left { grid-column: 1; }
+      #campad .cp-up { grid-column: 2; }
+      #campad .cp-center { grid-column: 3; }
+      #campad .cp-down { grid-column: 4; }
+      #campad .cp-right { grid-column: 5; }
     }
     /* Page without the map: boundary and U-turn distance move into the cross-track tile. */
     :root[data-tui-nomap] :is(#headland-hud, #uturn-indicator) { display: none !important; }
