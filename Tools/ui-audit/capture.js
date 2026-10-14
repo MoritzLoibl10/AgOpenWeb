@@ -105,7 +105,9 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
           }, id);
           console.log(by ? `  BEFUND: #${id} ist verdeckt von ${by}; direkt ausgelöst` : `  (#${id}: Klick zu langsam; direkt ausgelöst)`);
         });
-        await p.waitForTimeout(1000);
+        // Auf den neuen Zustand im Tick warten, bevor noch einmal geklickt wird (sonst schaltet
+        // ein zweiter Klick unter Last wieder aus).
+        await p.waitForFunction(k => !!(tick && tick.op && tick.op[k]), key, { timeout: 3000 }).catch(() => {});
       }
     }
     const op = await p.evaluate(() => tick.op);
