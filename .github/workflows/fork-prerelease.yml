@@ -8,6 +8,9 @@ name: Fork Test Pre-Release
 # Start: Actions → "Fork Test Pre-Release" → Run workflow (or the REST API), with
 #   tag   — e.g. 26.7.0-moritz.1 (no leading "v": v* tags would also start the upstream release)
 #   notes — release text (Markdown)
+#
+# Android signing is mandatory (repository secrets ANDROID_KEYSTORE_BASE64 and
+# ANDROID_KEYSTORE_PASSWORD, key alias "agopenweb"); without them the run fails.
 
 on:
   workflow_dispatch:
@@ -76,36 +79,64 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore Platforms/AgOpenWeb.Android/AgOpenWeb.Android.csproj
 
-      # Same secrets as upstream (ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD, alias
-      # agopenweb). Without them the APK is signed with the runner's throw-away debug key.
+      # Release signing is required: the same key every build, so a new test version installs
+      # over the old one without uninstalling. Secrets (Settings → Secrets and variables →
+      # Actions): ANDROID_KEYSTORE_BASE64 (the keystore file, Base64) and
+      # ANDROID_KEYSTORE_PASSWORD (store password = key password); key alias "agopenweb".
+      # No fallback to a throw-away debug key: without the secrets the build stops here.
       - name: Decode signing keystore
         id: keystore
         env:
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/agopenweb-release.keystore"
-            echo "path=$RUNNER_TEMP/agopenweb-release.keystore" >> "$GITHUB_OUTPUT"
-            echo "present=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::ANDROID_KEYSTORE_BASE64 secret not set — APK signed with the runner's ephemeral debug key (uninstall before installing the next build)."
+          missing=""
+          [ -n "$KEYSTORE_B64" ] || missing="$missing ANDROID_KEYSTORE_BASE64"
+          [ -n "$KS_PASS" ] || missing="$missing ANDROID_KEYSTORE_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing. Add them under Settings → Secrets and variables → Actions (see the comment above this step). Not signing with a throw-away key."
+            exit 1
           fi
+          KS="$RUNNER_TEMP/agopenweb-release.keystore"
+          if ! printf '%s' "$KEYSTORE_B64" | base64 -d > "$KS" 2>/dev/null || [ ! -s "$KS" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not valid Base64 of a keystore file."
+            exit 1
+          fi
+          echo "path=$KS" >> "$GITHUB_OUTPUT"
+
+      # Wrong password / wrong alias give a clear message here instead of the SDK's opaque
+      # "java exited with code 2". Passwords go via -storepass:env, never on a command line;
+      # the output shows only alias names and certificate fingerprints.
+      - name: Verify signing keystore
+        env:
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          KS="${{ steps.keystore.outputs.path }}"
+          if ! keytool -list -keystore "$KS" -storepass:env KS_PASS > ks.txt 2>&1; then
+            echo "::error::Cannot open the keystore: wrong ANDROID_KEYSTORE_PASSWORD, or ANDROID_KEYSTORE_BASE64 is not the keystore file."
+            exit 1
+          fi
+          if ! keytool -list -v -keystore "$KS" -storepass:env KS_PASS -alias agopenweb > alias.txt 2>&1; then
+            echo "::error::The keystore has no key with alias 'agopenweb'. Aliases found:"
+            grep -i "alias" ks.txt || true
+            exit 1
+          fi
+          grep -E "^(Alias name|Valid from)" alias.txt || true
+          FP=$(grep -m1 -E "SHA256:" alias.txt | sed 's/.*SHA256: *//; s/://g' | tr 'A-F' 'a-f')
+          echo "Release key SHA-256: $FP"
+          echo "KEY_SHA256=$FP" >> "$GITHUB_ENV"
 
       - name: Build Android APK
         env:
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
-          ARGS=(publish Platforms/AgOpenWeb.Android/AgOpenWeb.Android.csproj
-                -c Release -f net10.0-android -o publish/android)
-          if [ "${{ steps.keystore.outputs.present }}" = "true" ]; then
-            ARGS+=(-p:AndroidKeyStore=true
-                   "-p:AndroidSigningKeyStore=${{ steps.keystore.outputs.path }}"
-                   -p:AndroidSigningKeyAlias=agopenweb
-                   -p:AndroidSigningStorePass=env:KS_PASS
-                   -p:AndroidSigningKeyPass=env:KS_PASS)
-          fi
-          dotnet "${ARGS[@]}"
+          dotnet publish Platforms/AgOpenWeb.Android/AgOpenWeb.Android.csproj \
+            -c Release -f net10.0-android -o publish/android \
+            -p:AndroidKeyStore=true \
+            "-p:AndroidSigningKeyStore=${{ steps.keystore.outputs.path }}" \
+            -p:AndroidSigningKeyAlias=agopenweb \
+            -p:AndroidSigningStorePass=env:KS_PASS \
+            -p:AndroidSigningKeyPass=env:KS_PASS
 
       - name: Collect signed APK
         run: |
@@ -113,6 +144,19 @@ jobs:
           APK=$(find publish/android -type f -name "*-Signed.apk" | head -1)
           [ -n "$APK" ] || { echo "No signed APK found!"; exit 1; }
           cp "$APK" dist/agopenweb-android.apk
+
+      # The APK must carry the release key, not a debug key.
+      - name: Check APK signature
+        run: |
+          APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)
+          [ -n "$APKSIGNER" ] || { echo "::error::apksigner not found in \$ANDROID_HOME/build-tools."; exit 1; }
+          "$APKSIGNER" verify --print-certs dist/agopenweb-android.apk > certs.txt
+          APK_FP=$(grep -m1 "certificate SHA-256 digest:" certs.txt | sed 's/.*digest: *//' | tr 'A-F' 'a-f')
+          echo "APK signer SHA-256:  $APK_FP"
+          if [ -z "$APK_FP" ] || [ "$APK_FP" != "$KEY_SHA256" ]; then
+            echo "::error::The APK is not signed with the release key (expected $KEY_SHA256)."
+            exit 1
+          fi
 
       - name: Upload bundle artifact
         uses: actions/upload-artifact@v4
