@@ -56,8 +56,23 @@ for (const r of runs) {
   }
 }
 
+out.push('\n### Fahrwerte: kleinste Schrift und Überlappungen\n');
+out.push('Fahrwerte = Werte, die man beim Fahren abliest (Statusleiste, Querabweichung, HUDs, Teilbreiten, Schnellzugriff, Module); Überlappungen = feste Elemente über der Karte, die sich um mehr als 4 px schneiden.\n');
+head(['Lauf', 'kleinste Fahrwert-Schrift (Ansicht, Element)', 'Ansichten mit Überlappung', 'Überlappungen gesamt']);
+for (const r of runs) {
+  let min = null, at = '';
+  let ovViews = 0, ov = 0;
+  for (const [name, v] of Object.entries(r.data.views)) {
+    if (v.driveFonts && v.driveFonts.min != null && (min === null || v.driveFonts.min < min)) {
+      min = v.driveFonts.min; at = `${name}, ${v.driveFonts.minAt.sel} „${v.driveFonts.minAt.t}“`;
+    }
+    if (v.overlaps && v.overlaps.length) { ovViews++; ov += v.overlaps.length; }
+  }
+  out.push(`| ${r.label} | ${min === null ? '–' : min + ' px (' + at + ')'} | ${ovViews} | ${ov} |`);
+}
+
 out.push('\n### Je Ansicht: Elemente < 48 px / ≥ 64 px\n');
-const names = Object.keys(runs[0].data.views);
+const names = [...new Set(runs.flatMap(r => Object.keys(r.data.views)))].sort();
 head(['Ansicht', ...runs.map(r => r.label)]);
 for (const name of names) {
   const cells = runs.map(r => {

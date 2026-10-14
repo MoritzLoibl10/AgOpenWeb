@@ -419,6 +419,20 @@ Priorität: **P1** = sicherheits- oder fahrrelevant, zuerst umsetzen. **P2** = h
 
 Neue Texte laufen über `tr('…')` und `Tools/i18n-extract.py` (siehe `Docs/TRANSLATIONS.md`).
 
+**Stand der Umsetzung**
+
+- **Phase 1** (U1, U2, U4, U5, U11, U12 teilweise, Keya-Hinweis): Größenstufen Normal / Groß /
+  Handschuh, Sonnen-Theme, beschriftete Fahrknöpfe, 7"-Layout.
+- **Phase 2** (U3, U9, U10, dazu ein Terminal-Layout): Querabweichung oben mittig mit Zahl,
+  Pfeil, „L“/„R“ und Text (auch ohne Farbe eindeutig); Mindestgrößen für alle Fahrwerte je
+  Stufe; Fahrmodus (linke Leiste aus, Module auf wischbaren Arbeitsseiten, pro Gerät
+  gespeichert) und getrennter Einrichtungsmodus (gestreiftes Band, linke Leiste zurück);
+  Statusleiste mit Menü, GPS/RTK (Rahmenmuster je Fix-Qualität), Lenkstatus und Uhrzeit;
+  belegbare Schnellzugriffsleiste rechts (Lenkung immer unten); Menü als Kachelraster;
+  eigene Farbwelt (Petrol / Bernstein / Ziegelrot) und eigene Symbole. Das klassische Layout
+  bleibt unter *Screen & Alerts → Classic layout* wählbar.
+- Offen: U6–U8, U13 (nur nach Abstimmung), U14–U17.
+
 ### 4.4 Was nicht angefasst wird
 
 - Keine Änderung an `Shared/AgOpenWeb.Services/`, `Shared/AgOpenWeb.ViewModels/`,

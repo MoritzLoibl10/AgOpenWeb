@@ -21,6 +21,26 @@ async function openPage(browser, { url, viewport, localStorage = {}, waitForCont
   await ctx.addInitScript(entries => {
     try { for (const [k, v] of Object.entries(entries)) window.localStorage.setItem(k, v); } catch (_) { /* privat/blockiert */ }
   }, localStorage);
+  // Testhaken: window.__auditXte = Meter setzt die Querabweichung in jedem Tick, bis er wieder
+  // null ist. Der Simulator lenkt einen Versatz sonst innerhalb eines Bildes aus. Nur im
+  // Browser des Audits; der Host und der Client im Repo wissen davon nichts.
+  await ctx.addInitScript(() => {
+    window.__auditXte = null;
+    let rt;
+    Object.defineProperty(window, 'RemoteTransport', {
+      configurable: true,
+      get() { return rt; },
+      set(v) {
+        rt = v;
+        const create = v.create;
+        v.create = h => {
+          const onTick = h.onTick;
+          if (onTick) h.onTick = t => { if (window.__auditXte != null) t.crossTrackError = window.__auditXte; return onTick.call(h, t); };
+          return create.call(v, h);
+        };
+      },
+    });
+  });
   const page = await ctx.newPage();
   await page.goto(url);
   if (waitForControl) {
@@ -128,13 +148,13 @@ function contrast(page) {
 
 /**
  * Kontrast der Leitlinie auf der Karte (Canvas, daher aus dem Bildschirmfoto). Jede Spalte
- * zwischen x0 und x1 wird über 80 Zeilen um y gemittelt, damit die Bodentextur herausfällt.
+ * zwischen x0 und x1 wird über h Zeilen (Standard 80) um y gemittelt, damit die Bodentextur herausfällt.
  * Hintergrund = Median der Spaltenmittel, Leitlinie = die Spalte, die sich am stärksten davon
  * abhebt. Erwartet Heading-Up-Ansicht mit der Linie senkrecht nahe der Bildmitte.
  */
-async function guidelineContrast(page, { y, x0, x1 }) {
+async function guidelineContrast(page, { y, x0, x1, h = 80 }) {
   const png = await page.screenshot();
-  return page.evaluate(async ({ b64, y, x0, x1 }) => {
+  return page.evaluate(async ({ b64, y, x0, x1, h }) => {
     const img = new Image();
     img.src = 'data:image/png;base64,' + b64;
     await img.decode();
@@ -142,7 +162,7 @@ async function guidelineContrast(page, { y, x0, x1 }) {
     const g = c.getContext('2d');
     g.drawImage(img, 0, 0);
     const lin = x => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
-    const H = 80, W = x1 - x0;
+    const H = h, W = x1 - x0;
     const d = g.getImageData(x0, y - H / 2, W, H).data;
     const cols = [];
     for (let i = 0; i < W; i++) {
@@ -154,7 +174,82 @@ async function guidelineContrast(page, { y, x0, x1 }) {
     const line = cols.reduce((a, p) => (Math.abs(p.L - bgL) > Math.abs(a.L - bgL) ? p : a), cols[0]);
     const cr = (Math.max(line.L, bgL) + 0.05) / (Math.min(line.L, bgL) + 0.05);
     return { cr: Math.round(cr * 10) / 10, lineX: line.x };
-  }, { b64: png.toString('base64'), y, x0, x1 });
+  }, { b64: png.toString('base64'), y, x0, x1, h });
+}
+
+/**
+ * Schriftgröße der Werte, die man beim Fahren abliest (Statusleiste, Querabweichung,
+ * Lichtbalken-Text, HUDs, Teilbreiten, Beschriftung der Schnellzugriffe, Module).
+ * Ergebnis: kleinste Größe und alle Einträge (nur sichtbare Elemente mit Text).
+ */
+const DRIVE_READOUTS = ['#sb-speed', '#sb-unit', '#sb-fix', '#sb-age', '#sb-rot', '#sb-hdg', '#sb-hdglabel', '#clock',
+  '#tui-sb-clock', '#tui-sb-steer .st-v', '#tui-sb-steer .st-k', '#lb', '#lb *', '#headland-hud', '#uti-distval',
+  '#reverse-badge', '#sectionbar .sec-btn', '.tui-rn-lbl', '.tui-rn-st', '#bn-nudgeval', '#bn-skipnum',
+  '#tui-xte .x-val', '#tui-xte .x-unit', '#tui-xte .x-cap', '#tui-xte .x-let', '.tui-card .c-k', '.tui-card .c-v', '.tui-card .c-u',
+  '.tui-card .c-cap', '.tui-pager .pg-n'];
+function driveFonts(page) {
+  return page.evaluate(sels => {
+    const out = [];
+    const seen = new Set();
+    for (const sel of sels) {
+      for (const el of document.querySelectorAll(sel)) {
+        if (seen.has(el)) continue;
+        seen.add(el);
+        const own = [...el.childNodes].some(n => n.nodeType === 3 && n.textContent.trim());
+        if (!own) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 1 || r.height < 1 || r.bottom < 0 || r.top > innerHeight) continue;
+        const cs = getComputedStyle(el);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity === 0) continue;
+        let hidden = false;
+        for (let e = el; e; e = e.parentElement) { const c = getComputedStyle(e); if (c.display === 'none' || c.visibility === 'hidden') { hidden = true; break; } }
+        if (hidden) continue;
+        out.push({ sel, t: el.textContent.trim().slice(0, 20), fs: Math.round(parseFloat(cs.fontSize) * 10) / 10 });
+      }
+    }
+    out.sort((a, b) => a.fs - b.fs);
+    return { min: out.length ? out[0].fs : null, minAt: out.length ? out[0] : null, items: out };
+  }, DRIVE_READOUTS);
+}
+
+/**
+ * Überlappungen zwischen den festen Elementen über der Karte (Leisten, Anzeigen, Module).
+ * Zwei Kästen gelten als überlappend, wenn sie sich in beiden Richtungen um mehr als 4 px
+ * schneiden. Elemente, die ineinander liegen (z. B. Knopf in Leiste), zählen nicht.
+ */
+const LAYOUT_BOXES = {
+  'Statusleiste': '#statusbar', 'Querabweichung': '#tui-xte', 'Modulspalte': '#tui-col > *', 'Dashboard': '#tui-dash',
+  'Linke Leiste': '#leftnav', 'Rechte Leiste': '#rightnav', 'Simulator-Leiste': '#simbar', 'SIM-Knopf': '#sim-launch',
+  'Teilbreiten': '#sectionbar .sec-row', 'Untere Leiste': '#bottomnav .bn-bar', 'Rollwinkel': '#rollgauge',
+  'Kamera-Pad': '#campad', 'U-Turn-Knöpfe': '#osb-uturn', 'Versatz-Knöpfe': '#osb-lateral', 'U-Turn-Anzeige': '#uturn-indicator',
+  'Vorgewende-Abstand': '#headland-hud', 'Lichtbalken-Text': '#lb > *', 'Uhr': '#clock', 'Rückwärts': '#reverse-badge',
+};
+function overlaps(page) {
+  return page.evaluate(boxes => {
+    const vis = el => {
+      for (let e = el; e; e = e.parentElement) {
+        const c = getComputedStyle(e);
+        if (c.display === 'none' || c.visibility === 'hidden' || +c.opacity === 0) return false;
+        if (e.hidden) return false;
+      }
+      const r = el.getBoundingClientRect();
+      return r.width > 2 && r.height > 2 ? r : false;
+    };
+    const items = [];
+    for (const [name, sel] of Object.entries(boxes)) {
+      let i = 0;
+      for (const el of document.querySelectorAll(sel)) { const r = vis(el); if (r) items.push({ name: name + (i++ ? ' ' + i : ''), el, r }); }
+    }
+    const out = [];
+    for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+      const a = items[i], b = items[j];
+      if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
+      const w = Math.min(a.r.right, b.r.right) - Math.max(a.r.left, b.r.left);
+      const h = Math.min(a.r.bottom, b.r.bottom) - Math.max(a.r.top, b.r.top);
+      if (w > 4 && h > 4) out.push(a.name + ' × ' + b.name + ` (${Math.round(w)}×${Math.round(h)} px)`);
+    }
+    return out;
+  }, LAYOUT_BOXES);
 }
 
 /** Kennzahlen einer Ansicht. */
@@ -180,4 +275,4 @@ function contrastByRegion(list) {
   return out;
 }
 
-module.exports = { launch, openPage, measure, contrast, guidelineContrast, summarize, contrastByRegion };
+module.exports = { launch, openPage, measure, contrast, guidelineContrast, summarize, contrastByRegion, driveFonts, overlaps };
