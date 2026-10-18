@@ -169,7 +169,15 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
   await openNav(p, 'ln-fieldops'); await p.waitForTimeout(300); await p.click('#fo-fields'); await record(p, '09-fields-dialog'); await close();
   await openNav(p, 'ln-autosteer'); await p.waitForTimeout(300); await p.click('#as-expand'); await record(p, '10-autosteer-expanded');
   await p.click('[data-tab="as-hw"]'); await record(p, '10b-autosteer-hardware'); await close(); await toDrive(p);
-  await openNav(p, 'ln-vehicle'); await p.waitForTimeout(300); await p.click('#vth-vehconfig'); await record(p, '11-vehicle-config'); await close(); await toDrive(p);
+  // Phase 2c: "Vehicle & Tool" opens the profile cards (old lists: "Classic view"). The vehicle
+  // dialog is then opened directly, as the old list's "Configure Vehicle…" did (sim is moving,
+  // so the cards are locked).
+  await openNav(p, 'ln-vehicle'); await p.waitForTimeout(400);
+  if (await p.evaluate(() => !!document.querySelector('#tui-prof.open'))) {
+    await record(p, '11b-vehicle-profiles'); await close();
+    await p.evaluate(() => lnOpen('vehiclecfg', 'ln-vehicle', () => populateVehicleCfg(true)));
+  } else await p.click('#vth-vehconfig');
+  await record(p, '11-vehicle-config'); await close(); await toDrive(p);
 
   // --- Fahrbild, Heading-Up, ohne Simulator-Leiste -------------------------------------------
   if (await simBarOpen()) await p.click('#sim-close');

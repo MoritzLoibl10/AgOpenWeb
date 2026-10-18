@@ -104,6 +104,12 @@ Uhrzeit 24 h (13:15), Fläche in ha. IP-Adressen und Versionen behalten ihre Pun
 | Articulated | Knicklenker | |
 | Harvester | Mähdrescher | |
 | Tool | Gerät | |
+| Profile (vehicle / tool) | Profil (Fahrzeug / Gerät) | Überschrift „Fahrzeug“, nicht „Traktor“ (auch Mähdrescher, Knicklenker) |
+| Attach (Front fixed / Rear fixed / TBT / Trailing) | Anbau (Front starr / Heck starr / TBT / Gezogen) | |
+| Antenna pivot | Antenne → Hinterachse | im Assistenten; im Einrichtungsdialog „Antenne–Drehpunkt“ |
+| Antenna offset | Antenne seitlich | im Assistenten: Betrag + Links/Mitte/Rechts |
+| Duplicate | Duplizieren | Kopie des aktiven Profils |
+| Guidance computer | Lenkrechner | der Rechner mit dem Host (Tablet, PC) |
 | Working width | Arbeitsbreite | |
 | Section(s) | Teilbreite(n) | Kurzform „TB“ nur wo nötig |
 | Section control | Teilbreitenschaltung | |
@@ -114,7 +120,8 @@ Uhrzeit 24 h (13:15), Fläche in ha. IP-Adressen und Versionen behalten ihre Pun
 
 | Englisch | Deutsch | Anmerkung |
 |---|---|---|
-| Fix | Fix | „RTK Fixed“ kommt vom Host und bleibt englisch |
+| Fix | Fix | Host-Texte werden bei der Anzeige übersetzt: No Fix → Kein Fix, GPS Fix → GPS-Fix, DGPS Fix → DGPS-Fix, RTK Fixed → RTK Fix, RTK Float bleibt |
+| NTRIP status | NTRIP-Status | Connected to … → Verbunden mit …, Connecting to … → Verbinde mit …, Connection failed: … → Verbindung fehlgeschlagen: …, Rejected: … → Abgelehnt: …, … — reconnecting… → … – neuer Versuch…; Adressen und Caster-Antworten bleiben wörtlich, unbekannte Texte englisch |
 | Correction age | Korrekturalter | |
 | Mount point | Mountpoint | |
 | Caster | Caster | |

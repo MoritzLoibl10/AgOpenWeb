@@ -82,3 +82,26 @@ Deutsch als Standard: Der Client schickt einmal je Gerät den vorhandenen Befehl
 `app.setLanguage|de`, wenn der Host noch Englisch spricht (`aow.ui.langChosen` im localStorage).
 Meldungen, die der Host als fertigen Text schickt (z. B. „RTK Fixed“, NTRIP-Status), bleiben
 englisch.
+
+## 3. Phase 2c: Arbeitsbreite ohne Ersatzwert (Oktober 2026)
+
+Keine Host-Änderung. Kleine Änderungen im upstream-Teil von `app.js` und `index.html`
+(außerhalb des tablet-ui-Blocks), alle mit `fork:` kommentiert:
+
+| Datei / Stelle | Änderung | Rebase-Hinweis |
+|---|---|---|
+| `app.js` `sectionsWidthM()` | **neu**, direkt vor `toolWidthM()`: Breite aus den Teilbreiten der Szene, `0` wenn es keine gibt. `toolWidthM()` selbst ist unverändert (fällt weiter auf 6 m zurück) | neue Funktion, keine Konflikte |
+| `app.js` `fbDefaultOffset()` | nutzt `sectionsWidthM()`; ohne Teilbreiten `0` statt 12 m | eine Zeile |
+| `app.js` `fbApplyTw()` | „N Arbeitsbreiten“ ohne Teilbreiten: Feld bleibt leer, Hinweis „Arbeitsbreite fehlt“ (`#fb-hl-twmiss`) | Funktion ersetzt (vorher eine Zeile) |
+| `app.js` Vorgewende-Knöpfe (`#fb-addhl .fb-addbtn`) | ohne Abstand und ohne Arbeitsbreite wird nichts gesendet, der Hinweis erscheint; mit Abstand unverändert derselbe Befehl | eine Zeile |
+| `app.js` `#fb-hl-newoff` input | blendet den Hinweis aus | eine Zeile |
+| `app.js` Statuszeile Leistung (`sbPage === 1`) | ohne Teilbreiten „—“ statt einer Leistung aus 6 m | zwei Zeilen |
+| `index.html` Schlag-Editor „Vorgewende hinzufügen“ | `<span id="fb-hl-twmiss">Working width missing</span>` | eine Zeile |
+
+Nicht geändert: Hilfslinien und Kartenraster (`drawExtraGuidelinesSk`, Raster) rechnen weiter
+mit `toolWidthM()`. Upstream-Issue dazu: siehe Text im PR von Phase 2c.
+
+Die Profil-Oberfläche selbst (Karten, Assistent) liegt im tablet-ui-Block (`TabletProfiles`,
+`TabletHostText` am Ende von `app.js`, CSS „Phase 2c“) und hängt sich über `lnOpen` /
+`lnCloseAll` ein: `lnOpen('vehtoolhub', …)` öffnet die Karten statt der zwei Listen, die
+alte Auswahl bleibt über „Klassische Ansicht“ erreichbar.

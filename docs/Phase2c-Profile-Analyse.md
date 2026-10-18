@@ -1,7 +1,7 @@
 # Phase 2c: Fahrzeug- und Geräteprofile – Analyse und Konzept
 
-Stand: Analyse, noch nichts gebaut. Ziel: Profile auch für Landwirte ohne Technikwissen schön
-und verständlich machen.
+Stand: umgesetzt (Abschnitt 5: Entscheidungen und Umsetzung). Ziel: Profile auch für Landwirte
+ohne Technikwissen schön und verständlich machen.
 
 Regeln: nur wwwroot; nur bestehende Host-Befehle und Profilfelder; keine geänderte
 Speicherung; kein Wert anders umgerechnet, gerundet oder vorbelegt als bisher; Einheiten
@@ -153,11 +153,59 @@ Werte und Namen in den Mockups sind Beispiele; Symbole sind eigene Strichzeichnu
 5. **„Traktor“ oder „Fahrzeug“** als Überschrift? Der Host kennt auch Mähdrescher und
    Knicklenker; Vorschlag: „Fahrzeug“ in Texten, Symbol je Fahrzeugart.
 
+## 5. Entscheidungen und Umsetzung
+
+Antworten auf die offenen Fragen:
+
+1. Gerätesymbol: aus dem Namen geraten; eine Auswahl im Assistenten wird nur auf diesem Tablet
+   gemerkt (`aow.ui.toolIcon.<Name>`).
+2. Warngrenzen: Radstand 1–6 m, Antennenhöhe 1–5 m, Antenne → Hinterachse über 4 m, Antenne
+   seitlich über 0,5 m, max. Lenkwinkel 20–60° (nur angezeigt), Arbeitsbreite 1–60 m. Gelb,
+   gespeichert wird der eingegebene Wert.
+3. Sperre: Wechseln, Bearbeiten, Anlegen, Duplizieren, Umbenennen, Löschen und der Assistent
+   (Speichern) nur im Stand (unter 0,5 km/h) und bei Lenkung AUS, und nur mit Verbindung.
+4. Breite nicht aktiver Geräte: weggelassen.
+5. Überschrift „Fahrzeug“.
+
+Umsetzung (nur `wwwroot`, Block `TabletProfiles` am Ende von `app.js`):
+
+- **Der Assistent sendet nichts, solange er offen ist.** Alle Eingaben bleiben im Client.
+  „Abbrechen“ und Schließen senden nichts; das aktive Profil bleibt exakt, wie es war.
+- **Speichern** schickt alle Befehle in einem Zug (ein JavaScript-Durchlauf, der Host arbeitet
+  sie der Reihe nach ab):
+  - neues Profil: `profile.new|<Art>\t<Name>` (Kopie des aktiven), `profile.configureVehicle|<Name>`
+    bzw. `profile.configureTool|<Name>` (macht die Kopie aktiv), dann `config.set` für jeden
+    geänderten Wert, zuletzt `profile.save`. Das bisherige Profil wird nicht verändert.
+  - aktives Profil bearbeiten: `config.set` für jeden geänderten Wert, dann `profile.save`.
+  - Nur geänderte Werte werden gesendet; die Felder nutzen dieselben Umrechnungen wie die
+    Einrichtungsdialoge (`writeUnitInput` / `readUnitInput`, gleiche Schrittweite).
+  - Neue Teilbreiten bekommen wie im Host die Standardbreite und werden nur gesendet, wenn sie
+    geändert wurden.
+- **Bestätigung:** „Gespeichert“ erst, wenn Config- und Profil-Frame des Hosts alle Werte und den
+  Profilnamen zeigen und die Verbindung danach noch 1 s steht.
+- **Verbindungsabriss beim Speichern** (getestet: Socket nach dem ersten bzw. zweiten Befehl
+  geschlossen): Meldung „Verbindung beim Speichern abgerissen, nicht sicher, dass alles
+  gespeichert wurde“. Nach der Wiederverbindung zeigt der Assistent, ob die Werte da sind, und
+  bietet „Erneut senden und speichern“ (dieselben absoluten Werte; ein schon angelegtes neues
+  Profil wird nicht noch einmal angelegt) und beim Bearbeiten „Alte Werte wiederherstellen“
+  (die Werte von vorher, genau wie der Host sie geschickt hatte, dann `profile.save`). Beim
+  neuen Profil bleibt das bisherige Profil in jedem Fall unverändert.
+  Grenze: Ein Teilzustand liegt bis dahin nur im Speicher des Hosts. Lädt man in diesem Zustand
+  ein anderes Profil, speichert der Host das ausgehende Paar vorher (so arbeitet `profile.load`).
+- Der max. Lenkwinkel wird nur angezeigt (eingestellt wird er unter Lenkung).
+- Ein Mähdrescher nimmt nur „Front starr“ (Host, #111); der Assistent zeigt das an.
+- Bearbeiten und Duplizieren gehen beim aktiven Profil (der Host kennt nur dessen Werte);
+  Löschen nicht beim aktiven.
+- „Alle Einstellungen“ öffnet die bisherigen Dialoge, „Klassische Ansicht“ die alte Auswahl.
+
 ## Anhang: `toolWidthM()` mit 6-m-Ersatzwert im Client
 
 `toolWidthM()` (app.js) nimmt die Breite aus den Teilbreiten der Szene (linke bis rechte Kante)
 und fällt auf **6 m** zurück, wenn die Szene keine Teilbreiten hat. Alle Aufrufer liegen im
-Upstream-Code, außerhalb des tablet-ui-Blocks. Nur berichtet, nicht geändert.
+Upstream-Code, außerhalb des tablet-ui-Blocks. In Phase 2c geändert (klein, `fork:`-Kommentar,
+siehe [Host-Aenderungen.md](Host-Aenderungen.md) Abschnitt 3): Schlag-Editor und Leistung
+nutzen `sectionsWidthM()` ohne Ersatzwert; ohne Teilbreiten bleibt das Abstandsfeld leer
+(„Arbeitsbreite fehlt“) und die Leistung zeigt „—“. Hilfslinien und Raster unverändert.
 
 | Stelle | Wofür | Wirkung des Ersatzwerts |
 |---|---|---|

@@ -440,6 +440,16 @@ Neue Texte laufen über `tr('…')` und `Tools/i18n-extract.py` (siehe `Docs/TRA
   der Karte mit Rahmen und Namen (≥ 64 px); Teilbreiten direkt auf der unteren Leiste.
   Deutsche Oberfläche (`de.json` vollständig, Standardsprache, Sprachkachel im Menü unter
   Einrichtung), Dezimalkomma, km/h, ha/h. Begriffe: [Glossar-DE.md](Glossar-DE.md).
+- **Phase 2c** (Fahrzeug- und Geräteprofile, [Analyse](Phase2c-Profile-Analyse.md)): Auswahl als
+  Karten mit Symbol und den wichtigsten Werten (beim nicht aktiven Gerät keine Breite, siehe
+  Analyse Befund 9); aktives Fahrzeug und Gerät oben im Menü; Assistent Art → Name → Maße →
+  Antenne bzw. Anbau → Name → Teilbreiten → Anhängung, dann Prüfen und Speichern, mit Skizze je
+  Maß, Einheit an jedem Feld, Erweitertes eingeklappt, gelben Warnungen (nie Korrektur).
+  Der Assistent sendet erst beim Speichern, alles in einem Zug, und prüft danach, ob der Host
+  alle Werte zeigt; reißt die Verbindung ab, sagt er das und bietet „Erneut senden“ bzw.
+  „Alte Werte wiederherstellen“. Ändern nur im Stand und bei Lenkung AUS. Bekannte Host-Texte
+  (Fix, NTRIP-Status) auf Deutsch. Arbeitsbreite ohne 6-m-Ersatzwert im Schlag-Editor und in
+  der Leistung.
 - Offen: U6–U8, U13 (nur nach Abstimmung), U14–U17.
 
 ### 4.4 Was nicht angefasst wird
