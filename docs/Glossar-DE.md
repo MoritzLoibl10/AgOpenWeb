@@ -9,17 +9,18 @@ nicht wörtlich, und kurz genug für die Knöpfe.
 Einheiten und Zahlen auf Deutsch: Dezimalkomma (8,0 km/h), km/h statt kph, ha/h statt ha/hr,
 Uhrzeit 24 h (13:15), Fläche in ha. IP-Adressen und Versionen behalten ihre Punkte.
 
-## Feld und Arbeit
+## Schlag und Arbeit
 
 | Englisch | Deutsch | Anmerkung |
 |---|---|---|
-| Field | Feld | ⚠ „Schlag“ ist der Fachbegriff; „Feld“ ist kürzer und eindeutig |
+| Field | Schlag | wie in MFA/AMA; Mehrzahl „Schläge“. „Im Feld“ und „Feldwerkzeuge“ bleiben (gemeint ist der Ort, draußen) |
 | Job | Auftrag | ⚠ Alternative: „Arbeitsgang“ |
-| Boundary | Feldgrenze | |
-| Inner boundary | Innere Grenze | Hindernis im Feld |
+| Boundary | Schlaggrenze | |
+| Boundary edge | Schlagkante | ⚠ Alternative „Schlagrand“ |
+| Inner boundary | Innere Grenze | Hindernis im Schlag |
 | Headland | Vorgewende | |
 | Headland line | Vorgewendelinie | |
-| HL sections (Section control in headland) | TB Vorgew. (Teilbreiten im Vorgewende) | ⚠ Kurzform nur auf dem Knopf; Alternative „TB im VGW“ |
+| HL sections (Section control in headland) | TB im Vorgew. (Teilbreiten im Vorgewende) | Kurzform nur auf dem Knopf; ausgeschrieben passt es nicht in die untere Leiste |
 | Coverage / applied area | Bearbeitete Fläche | |
 | Coverage colour | Flächenfarbe | |
 | Tram lines | Fahrgassen | |
@@ -47,7 +48,7 @@ Uhrzeit 24 h (13:15), Fläche in ha. IP-Adressen und Versionen behalten ihre Pun
 | Light bar | Lichtbalken | |
 | Steer bar | Lenkbalken | |
 | Track left / right (snap) | Spur links / rechts | um eine Arbeitsbreite versetzen |
-| Line to me (snap to pivot) | Spur hierher | ⚠ Spur auf die aktuelle Position legen; Alternative „Spur zum Fzg.“ |
+| Line to me (snap to pivot) | Spur hier setzen | Spur auf die aktuelle Position legen |
 | Nudge | Verschieben | Linie fein verschieben |
 | Extra guides | Hilfslinien | |
 | Auto track | Spur automatisch | Knopf „AT“ bleibt |

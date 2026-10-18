@@ -7186,5 +7186,18 @@ const TabletPolish = (() => {
     b.appendChild(l);
   }
 
+  // With its label the U-turn readout can be too wide for the gap between the cross-track
+  // readout and the quick bar (7" screens): then it moves under the readout, right-aligned.
+  function placeUTurn() {
+    const u = UTI.root, rn = $('rightnav');
+    if (!u || u.hidden || !rn) { root.removeAttribute('data-tui-uti-low'); return; }
+    const low = root.hasAttribute('data-tui-uti-low');
+    if (low) root.removeAttribute('data-tui-uti-low'); // measure in the normal place
+    const r = u.getBoundingClientRect(), q = rn.getBoundingClientRect();
+    const hit = q.width > 0 && r.right > q.left - 6 && r.left < q.right && r.top < q.bottom && r.bottom > q.top;
+    if (hit) { root.setAttribute('data-tui-uti-low', ''); root.style.setProperty('--tui-uti-r', (innerWidth - q.left + 8) + 'px'); }
+  }
+  setInterval(placeUTurn, 300);
+
   return { showCam };
 })();

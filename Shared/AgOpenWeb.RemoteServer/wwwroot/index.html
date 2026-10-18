@@ -1676,9 +1676,12 @@
     :root[data-tui-layout="terminal"] #bottomnav .bn-bar > .bn-btn {
       width: var(--tui-bnw, var(--tui-bn)); height: max(var(--tui-bn), 52px); flex-direction: column; gap: 2px; padding: 4px 3px; }
     :root[data-tui-layout="terminal"] #bottomnav .bn-bar > .bn-btn > :not(.tui-bn-lbl) {
-      flex: 1 1 0; min-height: 0; max-height: calc(100% - var(--tui-bn-fs) * 1.2); }
-    :root[data-tui-layout="terminal"] .tui-bn-lbl { display: block; flex: none; max-width: 100%; overflow: hidden;
-      text-overflow: ellipsis; white-space: nowrap; font: 700 var(--tui-bn-fs)/1.15 system-ui, sans-serif; color: var(--text); }
+      flex: 1 1 0; min-height: 0; }
+    /* Up to two lines (e.g. "Spur hier setzen"); the icon above takes what is left. */
+    :root[data-tui-layout="terminal"] .tui-bn-lbl { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+      flex: none; max-width: 100%; overflow: hidden; white-space: normal; text-align: center; overflow-wrap: anywhere;
+      font: 700 var(--tui-bn-fs)/1.2 system-ui, sans-serif; color: var(--text); }
+    :root[data-tui-xte][data-tui-uti-low] #uturn-indicator { top: var(--tui-xte-b); left: auto; right: var(--tui-uti-r, 16px); }
     :root[data-tui-layout="terminal"] #bottomnav .bn-btn.active .tui-bn-lbl { color: #fff; }
     /* More field tools in the menu: icon, name and state of the original button */
     .tui-tile.more { position: relative; }
