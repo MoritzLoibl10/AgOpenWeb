@@ -75,6 +75,7 @@ tablet-ui-Blocks betrifft:
 |---|---|---|
 | `wwwroot/i18n.js` | `lookup` sucht auch den normalisierten Schlüssel (ein Schlüssel mit doppelten Leerzeichen wie „Done {area}  Left …“ wurde in keiner Sprache übersetzt) | eine Zeile; Kandidat für einen upstream-PR |
 | `wwwroot/i18n/de.json` | vollständig übersetzt (Fork-Begriffe, siehe `docs/Glossar-DE.md`) | upstream füllt `de.json` über Weblate: bei Konflikten die Fork-Fassung behalten und neue Schlüssel nachtragen; `Tools/i18n-extract.py --check` meldet Lücken |
+| `.github/workflows/build-and-release.yml` | Schritt „Check language files are untouched“ lässt neben `en.json` auch `de.json` zu (upstream: Sprachdateien nur über Weblate); die anderen Sprachen bleiben gesperrt | ein Ausdruck in `grep -v`; bei Konflikt die Fork-Zeile behalten |
 | `Tools/i18n-extract.py` | `--check` schlägt fehl, wenn `de.json` einen englischen Schlüssel nicht abdeckt (`REQUIRED = ("de",)`); veraltete Schlüssel werden nur gemeldet | kleiner Block vor `main()` |
 
 Deutsch als Standard: Der Client schickt einmal je Gerät den vorhandenen Befehl
