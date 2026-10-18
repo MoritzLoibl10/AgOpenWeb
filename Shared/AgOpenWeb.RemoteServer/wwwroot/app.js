@@ -6581,8 +6581,10 @@ const TabletTerminal = (() => {
     const mps = lastTick ? lastTick.speed : 0;
     const spd = tuiNum(toDisplayUnit(Math.abs(mps) * 3.6, 'kmh'), 1), su = unitLabel('kmh');
     setCard('speed', spd + su, c => { c.querySelector('.c-n').textContent = spd; c.querySelector('.c-u').textContent = su; });
-    const wm = scene && scene.hasField ? toolWidthM() : 0;
-    const wv = wm > 0 ? tuiNum(toDisplayUnit(wm, 'm'), wm < 100 ? 1 : 0) : '—', wu = wm > 0 ? unitLabel('m') : '';
+    // The configured total width, as Tool Configuration shows it ("Total width", 2 decimals).
+    // Not toolWidthM(): that falls back to a made-up 6 m when the scene has no sections.
+    const wm = config && config.tool ? +config.tool.totalWidth || 0 : 0;
+    const wv = wm > 0 ? tuiNum(toDisplayUnit(wm, 'm'), 2) : '—', wu = wm > 0 ? unitLabel('m') : '';
     setCard('width', wv + wu, c => { c.querySelector('.c-n').textContent = wv; c.querySelector('.c-u').textContent = wu; });
     const secs = tick && scene && scene.hasField ? tick.sections : null;
     const sk = secs ? secs.join('') : '-';
@@ -7082,12 +7084,16 @@ const TabletPolish = (() => {
   unitLabel = (orig => function (u) { const l = orig(u); return tuiIsDe() && l === 'kph' ? 'km/h' : l; })(unitLabel);
   fmtRate = (orig => function (h) { const r = orig(h); return tuiIsDe() ? r.replace(/\/hr$/, '/h') : r; })(fmtRate);
   // Readouts the upstream code writes with toFixed(): rewritten in place (decimal comma).
+  // The rotating status line also carries field / job / track names (user data): there only
+  // the degrees of the AB heading are rewritten; area and rate already come from fmtUnit.
   const DEC_IDS = ['sb-speed', 'sb-unit', 'sb-hdg', 'sb-age', 'sb-rot', 'lb', 'roll-deg', 'sim-speedval', 'sim-steerval', 'bn-nudgeval'];
   function fixText(node) {
     if (!tuiIsDe()) return;
     const v = node.nodeValue;
     if (!v || !/\d\.\d|kph|\/hr/.test(v)) return;
-    let out = tuiDec(v).replace(/\bkph\b/g, 'km/h').replace(/ha\/hr\b/g, 'ha/h');
+    const out = node.parentElement && node.parentElement.closest('#sb-rot')
+      ? v.replace(/(\d)\.(\d+°)/g, '$1,$2')
+      : tuiDec(v).replace(/\bkph\b/g, 'km/h').replace(/ha\/hr\b/g, 'ha/h');
     if (out !== v) node.nodeValue = out;
   }
   function fixAll(elm) {
@@ -7105,9 +7111,10 @@ const TabletPolish = (() => {
   // --- German as the default language --------------------------------------------------------
   // Once per device: if the host still speaks English and German is offered, switch to German
   // with the existing language command. Picking a language in the language panel ends that.
+  // Only the device holding control does it, so an observer tablet never flips the host.
   const LANG_KEY = 'aow.ui.langChosen';
   setInterval(() => {
-    if (!appInfo || lsGet(LANG_KEY, '')) return;
+    if (!appInfo || !iHoldControl || lsGet(LANG_KEY, '')) return;
     const de = (appInfo.languages || []).some(l => l.code === 'de');
     if (de && (appInfo.currentLanguage || 'en') === 'en') transport.send('app.setLanguage|de');
     lsSet(LANG_KEY, 'auto');
