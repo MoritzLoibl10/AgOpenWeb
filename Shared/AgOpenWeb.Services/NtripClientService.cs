@@ -108,6 +108,23 @@ public class NtripClientService : INtripClientService, IDisposable
     private readonly IGpsService _gpsService;
     private readonly ILogger<NtripClientService> _logger;
 
+    // ── GGA to the caster ─────────────────────────────────────────────────
+    // A network RTK (VRS) caster such as APOS computes the corrections for the position in
+    // the client's GGA and closes the connection without one it can use. The GGA is built
+    // from the receiver's parsed position whenever it has any fix (quality > 0): not only
+    // when the fix passes the guidance quality gate (GpsData.IsValid, by default RTK fixed),
+    // which a receiver can't reach before the corrections arrive. With no fix yet, the last
+    // position with a fix is used; with none at all, no GGA is sent (never a made-up one).
+    private readonly record struct GgaFix(double Latitude, double Longitude, double Altitude, int FixQuality, int Satellites);
+    private GgaFix? _lastGgaFix;
+    private int _ggaSentThisSession;
+    private bool _ggaMissingLogged;
+    // What the caster sent: its reply header, and the first bytes after it while no RTCM
+    // has arrived (some casters write a text reason before closing). Shown on a failure.
+    private string _replyPreview = "";
+    private readonly List<byte> _earlyBody = new();
+    private const int EarlyBodyBytes = 256;
+
     /// <summary>The caster accepted the request (200); cleared on any disconnect.</summary>
     public bool IsConnected { get; private set; }
     /// <summary>A connection was requested and not disconnected: connected, connecting,
@@ -181,6 +198,10 @@ public class NtripClientService : INtripClientService, IDisposable
                 _chunked = null;
                 _unframed = false;
                 _healthLineCounts = new();
+                _ggaSentThisSession = 0;
+                _ggaMissingLogged = false;
+                _replyPreview = "";
+                _earlyBody.Clear();
                 TotalBytesReceived = 0;
                 _sessionOpen = true;
                 _cancellationTokenSource = new CancellationTokenSource();
@@ -189,19 +210,20 @@ public class NtripClientService : INtripClientService, IDisposable
 
             await SendNtripRequestAsync();
 
+            // NTRIP 1 lets the client send its GGA right after the request, and some VRS
+            // casters only answer once they have it.
+            if (config.GgaIntervalSeconds > 0 && NtripRequest.NormalizeVersion(config.NtripVersion) == 1
+                && TryBuildGga(out string firstGga))
+                await SendGgaCoreAsync(sock, firstGga);
+
             // The loop gets its own socket, so a stale loop can never read a newer session's.
             _ = Task.Run(() => ReceiveLoop(sock, gen, token));
             _ = Task.Run(() => SendLoop(token));
 
-            // GGA only goes out once the caster has accepted (the callback checks IsConnected).
+            // The GGA timer starts when the caster accepts (StartGgaTimer): the first GGA
+            // goes out right then, the next ones every GgaIntervalSeconds.
             if (config.GgaIntervalSeconds > 0)
-            {
-                _ggaTimer = new Timer(
-                    GgaTimerCallback,
-                    null,
-                    TimeSpan.FromSeconds(5), // First GGA after 5 seconds
-                    TimeSpan.FromSeconds(config.GgaIntervalSeconds));
-            }
+                _ggaTimer = new Timer(GgaTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
 
             // Stall watchdog — drives the periodic [NTRIP] health log line and reconnects
             // if nothing has arrived for WATCHDOG_RECONNECT_SECONDS, including a caster
@@ -291,26 +313,42 @@ public class NtripClientService : INtripClientService, IDisposable
     {
         if (_tcpSocket == null || _config == null) return;
 
-        // Build NTRIP request (HTTP GET with Basic Auth)
-        // Use NTRIP 1.0 compatible format (simpler, more widely supported)
-        var credentials = Convert.ToBase64String(
-            Encoding.ASCII.GetBytes($"{_config.Username}:{_config.Password}"));
+        int version = NtripRequest.NormalizeVersion(_config.NtripVersion);
+        string request = NtripRequest.Build(version, _config.CasterAddress, _config.CasterPort,
+            _config.MountPoint, _config.Username, _config.Password);
+        _logger.LogInformation("[NTRIP] requesting {Host}:{Port}/{Mount} with NTRIP {Version}",
+            _config.CasterAddress, _config.CasterPort, _config.MountPoint, version == 2 ? "2.0" : "1.0");
+        await _tcpSocket.SendAsync(Encoding.ASCII.GetBytes(request), SocketFlags.None);
+    }
 
-        // Build request string manually with explicit \r\n to ensure correct formatting.
-        // NTRIP protocol is invariant — interpolations must not pick up locale formatting.
-        var inv = CultureInfo.InvariantCulture;
-        var request = new StringBuilder();
-        request.Append(inv, $"GET /{_config.MountPoint} HTTP/1.1\r\n");
-        request.Append(inv, $"Host: {_config.CasterAddress}\r\n");
-        request.Append("User-Agent: NTRIP AgOpenWeb/1.0\r\n");
-        request.Append(inv, $"Authorization: Basic {credentials}\r\n");
-        request.Append("Accept: */*\r\n");
-        request.Append("Connection: keep-alive\r\n");
-        request.Append("\r\n");
+    /// <summary>Send the first GGA now and the next ones every GgaIntervalSeconds; only for
+    /// the session <paramref name="gen"/> (a torn-down session's timer is gone).</summary>
+    private void StartGgaTimer(int gen)
+    {
+        lock (_sessionLock)
+        {
+            if (gen != _generation || _ggaTimer == null || _config == null) return;
+            _ggaTimer.Change(TimeSpan.Zero, TimeSpan.FromSeconds(_config.GgaIntervalSeconds));
+        }
+    }
 
-        string requestStr = request.ToString();
-        byte[] requestBytes = Encoding.ASCII.GetBytes(requestStr);
-        await _tcpSocket.SendAsync(requestBytes, SocketFlags.None);
+    /// <summary>"Caster replied: «…»" plus what it sent after its reply, for a failure message.</summary>
+    private string DescribeCasterReply()
+    {
+        string reply = string.IsNullOrEmpty(_replyPreview) ? "nothing" : $"\"{_replyPreview}\"";
+        string text = $"Caster replied: {reply}";
+        if (_earlyBody.Count > 0)
+            text += $"; then: \"{NtripResponse.Preview(_earlyBody.ToArray())}\"";
+        return text;
+    }
+
+    /// <summary>Whether a GGA went out in this session, for a failure message.</summary>
+    private string DescribeGgaState()
+    {
+        var c = _config;
+        if (c == null || c.GgaIntervalSeconds <= 0) return "GGA position sending is off";
+        if (_ggaSentThisSession > 0) return $"GGA position sent {_ggaSentThisSession}x";
+        return "no GGA position sent (no GPS fix yet; a network RTK/VRS caster needs one)";
     }
 
     private async Task ReceiveLoop(Socket socket, int gen, CancellationToken cancellationToken)
@@ -397,6 +435,7 @@ public class NtripClientService : INtripClientService, IDisposable
                             // Parse header as ASCII string
                             string response = Encoding.ASCII.GetString(_headerBuffer.ToArray(), 0, headerEnd);
                             var (reply, reason) = NtripResponse.Classify(response);
+                            _replyPreview = NtripResponse.Preview(_headerBuffer.ToArray().AsSpan(0, headerEnd));
 
                             if (reply == NtripReply.Accepted)
                             {
@@ -413,6 +452,7 @@ public class NtripClientService : INtripClientService, IDisposable
                                 var c = _config;
                                 RaiseStatus(true, c == null ? "Connected"
                                     : $"Connected to {c.CasterAddress}:{c.CasterPort}/{c.MountPoint}");
+                                StartGgaTimer(gen);
 
                                 // Forward any RTCM data after header
                                 if (dataStart < _headerBuffer.Count)
@@ -420,6 +460,7 @@ public class NtripClientService : INtripClientService, IDisposable
                                     int rtcmBytes = _headerBuffer.Count - dataStart;
                                     byte[] rtcmData = new byte[rtcmBytes];
                                     _headerBuffer.CopyTo(dataStart, rtcmData, 0, rtcmBytes);
+                                    KeepEarlyBody(rtcmData);
                                     ForwardRtcmData(rtcmData);
                                 }
 
@@ -428,9 +469,14 @@ public class NtripClientService : INtripClientService, IDisposable
                             }
                             else
                             {
-                                _logger.LogWarning("NTRIP caster rejected the request: {Response}", response);
-                                if (reply == NtripReply.RejectedRetry) TriggerReconnect(reason);
-                                else Teardown("Rejected: " + reason, gen); // wrong mount/login won't fix itself
+                                // The caster's own words: the reason a caster gives is often
+                                // more precise than the status code.
+                                string said = reason.Contains(_replyPreview, StringComparison.Ordinal)
+                                    ? reason : $"{reason}. {DescribeCasterReply()}";
+                                _logger.LogWarning("NTRIP caster rejected the request: {Response}",
+                                    NtripResponse.Preview(_headerBuffer.ToArray(), maxLines: 12, maxChars: 1000));
+                                if (reply == NtripReply.RejectedRetry) TriggerReconnect(said);
+                                else Teardown("Rejected: " + said, gen); // wrong mount/login won't fix itself
                                 return;
                             }
                         }
@@ -441,6 +487,7 @@ public class NtripClientService : INtripClientService, IDisposable
                         // All subsequent data is RTCM3 corrections - forward as raw bytes
                         byte[] rtcmData = new byte[bytesReceived];
                         Array.Copy(_receiveBuffer, rtcmData, bytesReceived);
+                        KeepEarlyBody(rtcmData);
                         ForwardRtcmData(rtcmData);
                     }
                 }
@@ -452,11 +499,15 @@ public class NtripClientService : INtripClientService, IDisposable
                     // reply 200 and then close for a bad mount point or account.
                     string reason;
                     if (!headerReceived)
+                    {
+                        _replyPreview = NtripResponse.Preview(_headerBuffer.ToArray());
                         reason = _headerBuffer.Count > 0
-                            ? NtripResponse.Classify(Encoding.ASCII.GetString(_headerBuffer.ToArray())).Reason
-                            : "Caster closed the connection without answering";
+                            ? $"{NtripResponse.Classify(Encoding.ASCII.GetString(_headerBuffer.ToArray())).Reason}. {DescribeCasterReply()}"
+                            : $"Caster closed the connection without answering; {DescribeGgaState()}";
+                    }
                     else if (!_rtcmSeen)
-                        reason = "Caster closed the connection before sending corrections (mount point or account rejected?)";
+                        reason = "Caster closed the connection before sending corrections (mount point or account rejected?). "
+                            + $"{DescribeCasterReply()}; {DescribeGgaState()}";
                     else
                         reason = "caster sent FIN";
                     _logger.LogInformation("Connection closed by caster: {Reason}", reason);
@@ -477,6 +528,15 @@ public class NtripClientService : INtripClientService, IDisposable
                 break;
             }
         }
+    }
+
+    /// <summary>Keep the first bytes after the reply until RTCM shows up, to show them if the
+    /// caster closes before sending corrections.</summary>
+    private void KeepEarlyBody(byte[] data)
+    {
+        if (_rtcmSeen || _earlyBody.Count >= EarlyBodyBytes) return;
+        if (Array.IndexOf(data, (byte)0xD3) >= 0) { _earlyBody.Clear(); return; }
+        for (int i = 0; i < data.Length && _earlyBody.Count < EarlyBodyBytes; i++) _earlyBody.Add(data[i]);
     }
 
     /// <summary>The /24 to forward RTCM to: the provider's live subnet, else the configured one.</summary>
@@ -690,53 +750,87 @@ public class NtripClientService : INtripClientService, IDisposable
 
     private void GgaTimerCallback(object? state)
     {
-        if (!IsConnected || _config == null) return;
+        var socket = _tcpSocket;
+        if (!IsConnected || _config == null || socket == null) return;
 
         try
         {
-            string ggaSentence;
-
-            if (_config.UseManualPosition)
-            {
-                // Use manual position
-                ggaSentence = GenerateGgaSentence(
-                    _config.ManualLatitude,
-                    _config.ManualLongitude,
-                    0, // altitude
-                    4, // fix quality (RTK fixed)
-                    12); // satellites
-            }
-            else
-            {
-                // Use GPS position from GpsService
-                var gpsData = _gpsService.CurrentData;
-                if (gpsData != null && gpsData.IsValid)
-                {
-                    ggaSentence = GenerateGgaSentence(
-                        gpsData.CurrentPosition.Latitude,
-                        gpsData.CurrentPosition.Longitude,
-                        gpsData.CurrentPosition.Altitude,
-                        gpsData.FixQuality,
-                        gpsData.SatellitesInUse);
-                }
-                else
-                {
-                    // No GPS data available yet - send default position (center of US)
-                    // This allows caster to start sending corrections
-                    ggaSentence = GenerateGgaSentence(
-                        39.8283, // Latitude (Kansas, US)
-                        -98.5795, // Longitude
-                        0, // altitude
-                        1, // fix quality (GPS fix)
-                        8); // satellites
-                }
-            }
-
-            _ = SendGgaSentenceAsync(ggaSentence);
+            if (TryBuildGga(out string gga))
+                _ = SendGgaCoreAsync(socket, gga);
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"NTRIP: GGA timer error: {ex.Message}");
+            _logger.LogDebug(ex, "[NTRIP] GGA timer error");
+        }
+    }
+
+    /// <summary>
+    /// The GGA for the caster: the manual position when configured, else the receiver's
+    /// position whenever it has a fix of any quality, else the last position that had one.
+    /// False (and a one-time log line) when there is no position at all.
+    /// </summary>
+    internal bool TryBuildGga(out string gga)
+    {
+        gga = "";
+        var config = _config;
+        if (config == null) return false;
+
+        GgaFix? fix;
+        if (config.UseManualPosition)
+            fix = new GgaFix(config.ManualLatitude, config.ManualLongitude, 0, 1, 12);
+        else
+        {
+            fix = UsableGgaFix(_gpsService.CurrentData);
+            if (fix != null) _lastGgaFix = fix;
+            else fix = _lastGgaFix;
+        }
+
+        if (fix is not { } f)
+        {
+            if (!_ggaMissingLogged)
+            {
+                _ggaMissingLogged = true;
+                _logger.LogWarning("[NTRIP] no GPS fix yet, so no GGA position for the caster; a network RTK (VRS) caster needs one and may close the connection");
+            }
+            return false;
+        }
+
+        gga = GenerateGgaSentence(f.Latitude, f.Longitude, f.Altitude, f.FixQuality, f.Satellites);
+        return true;
+    }
+
+    /// <summary>A receiver position good enough to tell a caster where we are: any fix
+    /// (quality 1–8), plausible coordinates. Deliberately not <see cref="GpsData.IsValid"/>,
+    /// the guidance quality gate (minimum fix quality, HDOP, differential age).</summary>
+    private static GgaFix? UsableGgaFix(GpsData? d)
+    {
+        if (d == null) return null;
+        if (d.FixQuality < 1 || d.FixQuality > 8) return null;
+        double lat = d.CurrentPosition.Latitude, lon = d.CurrentPosition.Longitude;
+        if (double.IsNaN(lat) || double.IsNaN(lon) || Math.Abs(lat) > 90 || Math.Abs(lon) > 180) return null;
+        if (lat == 0 && lon == 0) return null;
+        double alt = double.IsFinite(d.CurrentPosition.Altitude) ? d.CurrentPosition.Altitude : 0;
+        return new GgaFix(lat, lon, alt, d.FixQuality, Math.Clamp(d.SatellitesInUse, 0, 99));
+    }
+
+    private async Task SendGgaCoreAsync(Socket socket, string gga)
+    {
+        try
+        {
+            await socket.SendAsync(Encoding.ASCII.GetBytes(gga + "\r\n"), SocketFlags.None);
+            if (Interlocked.Increment(ref _ggaSentThisSession) == 1)
+                _logger.LogInformation("[NTRIP] first GGA sent to the caster: {Gga}", gga);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Session torn down mid-send.
+        }
+        catch (Exception ex)
+        {
+            // Send failures usually mean the TCP path is broken even if the
+            // receive loop hasn't noticed yet. Kick the reconnect loop. (#334)
+            _logger.LogError(ex, "Failed to send GGA");
+            TriggerReconnect($"GGA send failed: {ex.Message}");
         }
     }
 
@@ -878,19 +972,7 @@ public class NtripClientService : INtripClientService, IDisposable
     {
         var socket = _tcpSocket;
         if (!IsConnected || socket == null) return;
-
-        try
-        {
-            byte[] ggaBytes = Encoding.ASCII.GetBytes(ggaSentence + "\r\n");
-            await socket.SendAsync(ggaBytes, SocketFlags.None);
-        }
-        catch (Exception ex)
-        {
-            // Send failures usually mean the TCP path is broken even if the
-            // receive loop hasn't noticed yet. Kick the reconnect loop. (#334)
-            _logger.LogError(ex, "Failed to send GGA");
-            TriggerReconnect($"GGA send failed: {ex.Message}");
-        }
+        await SendGgaCoreAsync(socket, ggaSentence);
     }
 
     private string GenerateGgaSentence(double lat, double lon, double alt, int fixQuality, int sats)
@@ -899,15 +981,11 @@ public class NtripClientService : INtripClientService, IDisposable
         // latitude field and VRS casters got a broken position.
         var inv = CultureInfo.InvariantCulture;
         // Convert decimal degrees to NMEA format (DDMM.MMMM)
-        double latDeg = Math.Abs(lat);
-        int latDegrees = (int)latDeg;
-        double latMinutes = (latDeg - latDegrees) * 60.0;
+        var (latDegrees, latMinutes) = ToDegreesMinutes(lat);
         string latStr = string.Create(inv, $"{latDegrees:00}{latMinutes:00.0000}");
         string latDir = lat >= 0 ? "N" : "S";
 
-        double lonDeg = Math.Abs(lon);
-        int lonDegrees = (int)lonDeg;
-        double lonMinutes = (lonDeg - lonDegrees) * 60.0;
+        var (lonDegrees, lonMinutes) = ToDegreesMinutes(lon);
         string lonStr = string.Create(inv, $"{lonDegrees:000}{lonMinutes:00.0000}");
         string lonDir = lon >= 0 ? "E" : "W";
 
@@ -926,6 +1004,17 @@ public class NtripClientService : INtripClientService, IDisposable
         }
 
         return $"${gga}*{checksum:X2}";
+    }
+
+    /// <summary>Whole degrees and minutes rounded to the 4 decimals NMEA carries, so 47.9999999°
+    /// becomes 48° 00.0000' and not 47° 60.0000'.</summary>
+    private static (int Degrees, double Minutes) ToDegreesMinutes(double value)
+    {
+        double abs = Math.Abs(value);
+        int degrees = (int)abs;
+        double minutes = Math.Round((abs - degrees) * 60.0, 4, MidpointRounding.AwayFromZero);
+        if (minutes >= 60.0) { degrees++; minutes = 0; }
+        return (degrees, minutes);
     }
 
     public void Dispose()

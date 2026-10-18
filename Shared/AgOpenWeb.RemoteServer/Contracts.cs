@@ -505,7 +505,7 @@ public record NtripProfilesDto(
 public record NtripProfileDto(
     string Id, string Name, string CasterHost, int CasterPort, string MountPoint,
     string Username, string Password, bool AutoConnectOnFieldLoad, bool IsDefault,
-    IReadOnlyList<string> AssociatedFields);
+    IReadOnlyList<string> AssociatedFields, int NtripVersion = 1);
 
 /// <summary>Field Operations read-frame (Phase 9 Field Ops) — the field/job lifecycle
 /// lists for the Fields-and-Jobs dialog. Fields = every field on disk (distance enriched

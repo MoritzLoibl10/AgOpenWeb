@@ -428,7 +428,7 @@ public static partial class RemoteServerWiring
             case "ntrip.setDefault": // arg = id
                 _ = svc.SetDefaultProfileAsync(arg);
                 return;
-            case "ntrip.test": // arg = host \t port \t mount \t user \t pass
+            case "ntrip.test": // arg = host \t port \t mount \t user \t pass [\t ntripVersion]
             {
                 var t = arg.Split('\t');
                 if (t.Length < 3) return;
@@ -436,10 +436,11 @@ public static partial class RemoteServerWiring
                 if (tport == 0) tport = 2101;
                 state.Connections.NtripTestStatus = "Testing connection...";
                 _ = TestNtripAndReportAsync(dispatcher, state, t[0], tport, t[2],
-                    t.ElementAtOrDefault(3) ?? "", t.ElementAtOrDefault(4) ?? "");
+                    t.ElementAtOrDefault(3) ?? "", t.ElementAtOrDefault(4) ?? "",
+                    t.ElementAtOrDefault(5) == "2" ? 2 : 1);
                 return;
             }
-            case "ntrip.save": // id \t name \t host \t port \t mount \t user \t pass \t auto \t default \t assoc(csv)
+            case "ntrip.save": // id \t name \t host \t port \t mount \t user \t pass \t auto \t default \t assoc(csv) [\t ntripVersion]
             {
                 var f = arg.Split('\t');
                 if (f.Length < 9) return;
@@ -460,6 +461,9 @@ public static partial class RemoteServerWiring
                     Username = f[5], Password = f[6],
                     AutoConnectOnFieldLoad = f[7] == "1", IsDefault = f[8] == "1",
                     AssociatedFields = assoc,
+                    // Optional, so an older client's save keeps the stored version.
+                    NtripVersion = f.ElementAtOrDefault(10) is { Length: > 0 } v
+                        ? (v == "2" ? 2 : 1) : existing?.NtripVersion ?? 1,
                 };
                 if (existing != null) { profile.Id = existing.Id; profile.FilePath = existing.FilePath; }
                 // Copy the old caster settings before saving (the save may update the stored
@@ -468,6 +472,7 @@ public static partial class RemoteServerWiring
                 {
                     Name = existing.Name, CasterHost = existing.CasterHost, CasterPort = existing.CasterPort,
                     MountPoint = existing.MountPoint, Username = existing.Username, Password = existing.Password,
+                    NtripVersion = existing.NtripVersion,
                 };
                 _ = svc.SaveProfileAsync(profile);
                 // Editing the profile we're connected with: reconnect with the new settings
@@ -615,9 +620,9 @@ public static partial class RemoteServerWiring
 
     private static async Task TestNtripAndReportAsync(
         IUiDispatcher dispatcher, AgOpenWeb.Models.State.ApplicationState state,
-        string host, int port, string mount, string user, string pass)
+        string host, int port, string mount, string user, string pass, int ntripVersion)
     {
-        var result = await AgOpenWeb.Services.NtripConnectionTester.TestAsync(host, port, mount, user, pass);
+        var result = await AgOpenWeb.Services.NtripConnectionTester.TestAsync(host, port, mount, user, pass, ntripVersion);
         // Marshal the status write through the registered dispatcher (Avalonia UI
         // thread when windowed, the host loop when headless) — not a hardcoded
         // Dispatcher.UIThread, which does not exist in the headless host.
