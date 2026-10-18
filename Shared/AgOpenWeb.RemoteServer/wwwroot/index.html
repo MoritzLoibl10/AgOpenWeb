@@ -1239,13 +1239,13 @@
     /* Fix/age and the rotating line side by side, so the fix button can use the full height. */
     :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) .sb-left { flex-direction: row; align-items: center; gap: 10px;
       min-width: 0; flex: 0 1 auto; max-width: 46vw; }
-    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) .sb-rot { min-width: 0; flex: 1 1 auto; font-size: 16px; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) .sb-rot { min-width: 0; flex: 1 1 auto; font-size: var(--tui-fs-lbl); }
     :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #sb-speed,
     :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #sb-hdg { font-size: 30px; }
     :root[data-tui-scale="glove"] #sb-speed, :root[data-tui-scale="glove"] #sb-hdg { font-size: 34px; }
     :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #sb-unit,
-    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #sb-hdglabel { font-size: 12px; }
-    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #sb-roletext { font-size: 16px; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #sb-hdglabel { font-size: var(--tui-fs-lbl); }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #sb-roletext { font-size: var(--tui-fs-lbl); }
 
     /* --- Everything below the status bar moves down by --tui-dy -------------------- */
     #leftnav, #rightnav, .ln-panel { top: calc(56px + var(--tui-dy) + var(--sat)); }
@@ -1343,6 +1343,318 @@
     :root[data-theme="day"][data-tui-sun] #lb * { color: #000 !important; } /* arrow colour is set inline */
     :root[data-theme="day"][data-tui-sun] #roll-deg { fill: #000; }
     :root[data-theme="day"][data-tui-sun] #rollgauge { filter: drop-shadow(0 0 2px #fff); }
+
+    /* ===== Phase 2: terminal layout =============================================
+       html[data-tui-layout="terminal"] (default; "Classic" in Screen & Alerts turns it off):
+       status bar with menu / GPS-RTK / steering / clock, work pages built from modules
+       (left column, or a full dashboard when the page has no map), an assignable quick bar
+       (the right nav), the menu as a tile grid, and a separate setup mode
+       (html[data-tui-mode="setup"]) that brings back the left nav.
+       The cross-track readout (#tui-xte) and the minimum value sizes apply in both layouts. */
+    :root {
+      --tui-fs-val: 18px;      /* values read while driving (status bar, HUDs, modules) */
+      --tui-fs-lbl: 13px;      /* their labels and units */
+      --tui-xte-fs: 40px; --tui-xte-h: 62px;
+      --tui-card-fs: 30px;     /* module values in the left column */
+      --tui-mc-w: 176px;       /* left module column */
+      --tui-pg: 48px;          /* page switcher buttons */
+      --tui-tile-w: 150px; --tui-tile-h: 104px;
+      --tui-q-n: 5;            /* quick bar slots (app.js) */
+      /* Own colour world: petrol accent, amber attention, brick stop; neutral cards. */
+      --tui-acc: #22b5ad; --tui-acc-ink: #04201f; --tui-acc-soft: rgba(34,181,173,0.18);
+      --tui-warn: #f0b429; --tui-warn-ink: #1e1500; --tui-stop: #e5484d; --tui-stop-ink: #fff;
+      --tui-card: rgba(18,24,28,0.92); --tui-card-2: rgba(34,44,50,0.95); --tui-card-line: rgba(255,255,255,0.16);
+      --tui-ink: #eef4f4; --tui-ink-2: #b7c7c9; --tui-scrim: rgba(6,10,12,0.55);
+      --tui-left: #ff8a4c; --tui-right: #4be37a; /* steer left / right (as the light bar) */
+    }
+    :root[data-tui-scale="large"] {
+      --tui-fs-val: 22px; --tui-fs-lbl: 15px; --tui-xte-fs: 50px; --tui-xte-h: 76px; --tui-card-fs: 36px;
+      --tui-mc-w: 204px; --tui-pg: 52px; --tui-tile-w: 168px; --tui-tile-h: 112px;
+    }
+    :root[data-tui-scale="glove"] {
+      --tui-fs-val: 26px; --tui-fs-lbl: 17px; --tui-xte-fs: 58px; --tui-xte-h: 88px; --tui-card-fs: 42px;
+      --tui-mc-w: 226px; --tui-pg: 64px; --tui-tile-w: 184px; --tui-tile-h: 120px;
+    }
+    :root[data-theme="day"] {
+      --tui-acc: #0b6d69; --tui-acc-ink: #fff; --tui-acc-soft: rgba(11,109,105,0.14);
+      --tui-warn: #f0b429; --tui-warn-ink: #1e1500; --tui-stop: #b3261e; --tui-stop-ink: #fff;
+      --tui-card: rgba(255,255,255,0.95); --tui-card-2: rgba(236,242,242,0.97); --tui-card-line: rgba(0,0,0,0.18);
+      --tui-ink: #0d1517; --tui-ink-2: #3b4a4d; --tui-scrim: rgba(20,30,32,0.35);
+      --tui-left: #b64a00; --tui-right: #0f7a35;
+    }
+    :root[data-theme="day"][data-tui-sun] {
+      --tui-acc: #003f3d; --tui-acc-ink: #fff; --tui-acc-soft: rgba(0,63,61,0.14);
+      --tui-warn: #ffc400; --tui-warn-ink: #000; --tui-stop: #8b0000; --tui-stop-ink: #fff;
+      --tui-card: #fff; --tui-card-2: #fff; --tui-card-line: #000;
+      --tui-ink: #000; --tui-ink-2: #1a1a1a; --tui-left: #000; --tui-right: #000;
+    }
+
+    /* --- U10: minimum sizes for values read while driving (both layouts) ---------- */
+    #sb-fix { font-size: var(--tui-fs-val); font-weight: 700; }
+    #sb-age, #sb-rot.sb-rot, #sb-unit, #sb-hdglabel, #sb-roletext { font-size: var(--tui-fs-lbl); }
+    :root[data-tui-layout="terminal"] .sb-left { min-width: 0; }
+    #lb { font-size: var(--tui-fs-val); font-weight: 700; }
+    #headland-hud { font-size: max(19px, calc(var(--tui-fs-val) + 2px)); }
+    #uti-distval { font-size: var(--tui-fs-val); }
+    #clock { font-size: var(--tui-fs-val); }
+    #bn-nudgeval, #bn-skipnum { font-size: var(--tui-fs-val); font-weight: 800; }
+    .tui-rn-lbl { --tui-rn-fs: var(--tui-fs-lbl); }
+    .tui-rn-st { font-size: var(--tui-fs-lbl); }
+    #sectionbar .sec-btn { font-size: max(var(--tui-sec-fs), 15px); font-weight: 800; }
+    #reverse-badge { font-size: var(--tui-fs-val); }
+
+    /* --- U3: cross-track readout, top centre ------------------------------------- */
+    #tui-xte { position: fixed; left: 50%; transform: translateX(-50%); top: calc(var(--sat) + var(--tui-sb-h) + 6px);
+      height: var(--tui-xte-h); display: none; align-items: stretch; z-index: 12; pointer-events: none;
+      background: var(--tui-card); color: var(--tui-ink); border: 2px solid var(--tui-card-line); border-radius: 12px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.35); font-family: system-ui, sans-serif; box-sizing: border-box; }
+    #tui-xte.show { display: flex; }
+    #tui-xte .x-side { width: calc(var(--tui-xte-h) * 1.25); display: flex; align-items: center; justify-content: center;
+      gap: 4px; visibility: hidden; }
+    #tui-xte .x-side.on { visibility: visible; }
+    #tui-xte .x-side svg { height: calc(var(--tui-xte-h) * 0.62); width: auto; fill: currentColor; }
+    #tui-xte .x-l { color: var(--tui-left); }
+    #tui-xte .x-r { color: var(--tui-right); }
+    #tui-xte .x-let { font: 900 calc(var(--tui-xte-fs) * 0.62)/1 system-ui, sans-serif; min-width: 1.15em; text-align: center;
+      padding: 0.08em 0.1em; border-radius: 6px; background: currentColor; }
+    #tui-xte .x-let span { color: var(--tui-card); }
+    #tui-xte .x-mid { min-width: calc(var(--tui-xte-fs) * 3.1); display: flex; flex-direction: column; align-items: center;
+      justify-content: center; line-height: 1; padding: 0 4px; }
+    #tui-xte .x-val { font: 800 var(--tui-xte-fs)/0.95 system-ui, sans-serif; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+    #tui-xte .x-unit { font-size: calc(var(--tui-xte-fs) * 0.42); font-weight: 700; margin-left: 0.15em; }
+    #tui-xte .x-cap { font: 700 var(--tui-fs-lbl)/1.1 system-ui, sans-serif; color: var(--tui-ink-2); margin-top: 2px; white-space: nowrap; }
+    #tui-xte.online .x-val { color: var(--tui-ink); }
+    #tui-xte.online { border-color: var(--tui-acc); box-shadow: 0 0 0 2px var(--tui-acc) inset, 0 4px 14px rgba(0,0,0,0.35); }
+    :root[data-theme="day"][data-tui-sun] #tui-xte { border-width: 3px; box-shadow: none; }
+    :root[data-theme="day"][data-tui-sun] #tui-xte.online { box-shadow: 0 0 0 3px #000 inset; }
+    /* Under the readout: the canvas light bar (moved by app.js), the text readout and the HUDs. */
+    #lb { top: var(--tui-y-lb, calc(74px + var(--tui-dy) + var(--sat))); }
+    #headland-hud, #reverse-badge { top: var(--tui-y-hud, calc(120px + var(--tui-dy) + var(--sat))); }
+
+    :root[data-tui-xte] #lb { display: none !important; }
+    #onscreenbtns, #uturn-indicator { top: max(calc(96px + var(--tui-dy) + var(--sat)), var(--tui-xte-b, 0px)); }
+    /* With the cross-track readout shown, the U-turn indicator sits to its right, on the same line. */
+    :root[data-tui-xte] #uturn-indicator { top: var(--tui-xte-t); left: var(--tui-xte-r); right: auto; }
+    #tui-col { pointer-events: none; }
+    #tui-col > * { pointer-events: auto; }
+    :root[data-tui-nomap] #gpslost { z-index: 13; }
+
+    /* Quick bar: the icon takes what the name and state leave (they grew with U10). */
+    #rightnav .rn-btn .rn-ic { flex: 1 1 0; min-height: 0; width: 100%; height: auto; max-width: var(--tui-rn-ic); }
+    #sb-fix, #sb-age { white-space: nowrap; }
+    /* Role word in text colour; the dot beside it keeps the role colour (green text on the day bar was 1.2:1). */
+    :root[data-tui-layout="terminal"] #sb-roletext { color: var(--text-2) !important; }
+    :root[data-tui-layout="terminal"][data-theme="day"] .sb-rot { color: #0b4f8a; } /* upstream light blue: 2.9:1 on the day bar */
+    /* The speed module on the page replaces the status bar speed in drive mode. */
+    :root[data-tui-layout="terminal"][data-tui-mode="drive"][data-tui-speed] .sb-speed-wrap { display: none; }
+
+    /* Bottom stack in the band between the side bars (app.js sets the band). */
+    :root[data-tui-band] { --tui-bn: min(var(--tui-nav), calc((var(--tui-stack-w) - 16px) / var(--tui-bn-n) - 6px)); }
+    :root[data-tui-band] #bottomstack { left: calc(var(--tui-stack-l) + var(--tui-stack-w) / 2); max-width: var(--tui-stack-w); }
+    :root[data-tui-band] #sectionbar .sec-row { max-width: calc(var(--tui-stack-w) - 16px); }
+    :root[data-tui-band] #simbar { max-width: var(--tui-stack-w); overflow-x: auto; scrollbar-width: thin; } /* bench tool: scrolls when narrow */
+    :root[data-tui-band] #simbar > * { flex: none; }
+    /* Setup mode: the field tools of the bottom nav give way to the left nav and the panels. */
+    :root[data-tui-layout="terminal"][data-tui-mode="setup"] #bottomnav { display: none !important; }
+
+    /* --- Status bar additions (terminal layout) --------------------------------- */
+    #tui-menu-btn, #tui-sb-steer, #tui-sb-clock, #tui-sb-mode { display: none; }
+    :root[data-tui-layout="terminal"] #tui-menu-btn { display: inline-flex; }
+    :root[data-tui-layout="terminal"] :is(#tui-sb-steer, #tui-sb-clock) { display: flex; }
+    :root[data-tui-layout="terminal"] #clock { display: none; }
+    :root[data-tui-layout="terminal"] :is(.sb-hdg-wrap, #sb-pause) { display: none; }
+    #statusbar #tui-menu-btn { height: calc(var(--tui-sb-h) - 8px); min-width: calc(var(--tui-sb-h) - 8px); padding: 0 12px 0 8px;
+      border-radius: 8px; background: var(--tui-acc); color: var(--tui-acc-ink); font: 800 var(--tui-fs-lbl) system-ui, sans-serif;
+      gap: 8px; margin-left: -4px; }
+    #statusbar #tui-menu-btn:hover { background: var(--tui-acc); filter: brightness(1.08); }
+    #tui-menu-btn svg { width: calc(var(--tui-sb-h) * 0.48); height: calc(var(--tui-sb-h) * 0.48); flex: none; }
+    :root[data-tui-mode="setup"] #statusbar #tui-menu-btn { background: var(--tui-warn); color: var(--tui-warn-ink); }
+    :root[data-tui-mode="setup"] #tui-sb-mode { display: flex; }
+    #tui-sb-mode { align-items: center; align-self: stretch; padding: 0 12px; font: 900 var(--tui-fs-lbl) system-ui, sans-serif;
+      letter-spacing: 0.08em; text-transform: uppercase; color: var(--tui-warn-ink); white-space: nowrap;
+      background: repeating-linear-gradient(-45deg, var(--tui-warn) 0 12px, rgba(240,180,41,0.55) 12px 24px); }
+    #tui-sb-steer { align-items: center; gap: 8px; padding: 0 10px; height: calc(var(--tui-sb-h) - 8px); box-sizing: border-box;
+      border-radius: 8px; border: 2px dashed var(--tui-card-line); white-space: nowrap; }
+    #tui-sb-steer svg { width: calc(var(--tui-sb-h) * 0.5); height: calc(var(--tui-sb-h) * 0.5); flex: none; }
+    #tui-sb-steer .st-t { display: flex; flex-direction: column; line-height: 1.05; }
+    #tui-sb-steer .st-k { font: 700 var(--tui-fs-lbl) system-ui, sans-serif; opacity: 0.85; }
+    #tui-sb-steer .st-v { font: 900 var(--tui-fs-val) system-ui, sans-serif; letter-spacing: 0.02em; text-transform: uppercase; }
+    #tui-sb-steer[data-st="on"] { background: var(--tui-acc); color: var(--tui-acc-ink); border: 2px solid var(--tui-acc); }
+    #tui-sb-steer[data-st="off"] { border-style: solid; }
+    #tui-sb-steer[data-st="fault"] { background: var(--tui-stop); color: var(--tui-stop-ink); border: 2px solid var(--tui-stop);
+      animation: tui-blink 1s steps(1, end) infinite; }
+    @keyframes tui-blink { 50% { filter: brightness(0.75); } }
+    #tui-sb-clock { font: 800 var(--tui-fs-val) ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums;
+      white-space: nowrap; align-items: center; }
+    /* GPS/RTK: the fix quality also as a border pattern (solid = RTK fix, dashed = float,
+       dotted = DGPS/GPS, none = no fix), so it reads without colour. */
+    :root[data-tui-layout="terminal"] #statusbar #sb-fixbtn { border: 2px solid transparent; border-radius: 8px; padding: 2px 10px;
+      min-height: calc(var(--tui-sb-h) - 8px); }
+    :root[data-tui-layout="terminal"] #statusbar #sb-fixbtn[data-q="4"] { border-color: var(--text-2); }
+    :root[data-tui-layout="terminal"] #statusbar #sb-fixbtn[data-q="5"] { border-color: var(--text-2); border-style: dashed; }
+    :root[data-tui-layout="terminal"] #statusbar #sb-fixbtn:is([data-q="1"], [data-q="2"]) { border-color: var(--text-2); border-style: dotted; }
+    :root[data-tui-layout="terminal"] #statusbar #sb-fixbtn .dot { width: 16px; height: 16px; }
+    /* Narrow screens: the rotating field line, the role word and the age give way. */
+    @media (max-width: 1199px) {
+      :root[data-tui-layout="terminal"] :is(#sb-rot, #sb-roletext, #sb-age) { display: none; }
+      :root[data-tui-layout="terminal"]:not([data-tui-scale="normal"]) #sb-modbtn { font-size: var(--tui-fs-lbl); }
+    }
+    @media (max-width: 899px) { :root[data-tui-layout="terminal"] #tui-sb-steer .st-k { display: none; } }
+
+    /* --- Drive mode / setup mode ------------------------------------------------- */
+    :root[data-tui-layout="terminal"][data-tui-mode="drive"] #leftnav { display: none; }
+    :root[data-tui-layout="terminal"][data-tui-mode="drive"] .ln-panel { left: calc(12px + var(--sal)); max-width: calc(100vw - 24px); }
+    :root[data-tui-layout="terminal"][data-tui-mode="drive"] #onscreenbtns { left: calc(var(--tui-col-w, 0px) + 28px + var(--sal)); }
+    :root[data-tui-layout="terminal"] .osb-row { gap: 16px; }
+    #lowerright.tui-nogauge #rollgauge { display: none; } /* would cover the cross-track readout (small screens) */
+    .tui-osb-off { display: none !important; } /* on-screen row that would sit under the bottom stack */
+    /* Low screens: the camera pad as one row (− ▲ mode ▼ +), so it stays clear of the readouts. */
+    @media (max-height: 720px) {
+      #campad { grid-template-columns: repeat(5, var(--tui-cp)); grid-template-rows: var(--tui-cp); }
+      #campad :is(.cp-left, .cp-up, .cp-center, .cp-down, .cp-right) { grid-row: 1; }
+      #campad .cp-left { grid-column: 1; }
+      #campad .cp-up { grid-column: 2; }
+      #campad .cp-center { grid-column: 3; }
+      #campad .cp-down { grid-column: 4; }
+      #campad .cp-right { grid-column: 5; }
+    }
+    /* Page without the map: boundary and U-turn distance move into the cross-track tile. */
+    :root[data-tui-nomap] :is(#headland-hud, #uturn-indicator) { display: none !important; }
+    #tui-dash .d-xte .c-extra { text-align: center; font: 800 var(--tui-fs-val) system-ui, sans-serif; margin-top: 2px; }
+    #tui-dash .d-xte .c-extra:empty { display: none; }
+    :root[data-tui-layout="terminal"][data-tui-nomap] :is(#lowerright, #onscreenbtns, #lb, #ab-dot-labels) { display: none !important; }
+
+    /* --- Work pages: module column (map pages) ----------------------------------- */
+    #tui-col, #tui-dash { display: none; }
+    :root[data-tui-layout="terminal"][data-tui-mode="drive"]:not([data-tui-nomap]) #tui-col { display: flex; }
+    :root[data-tui-layout="terminal"][data-tui-mode="drive"][data-tui-nomap] #tui-dash { display: grid; }
+    #tui-col { position: fixed; left: calc(8px + var(--sal)); top: calc(var(--sat) + var(--tui-sb-h) + 8px);
+      bottom: var(--tui-col-bottom, 16px); width: var(--tui-mc-w); flex-direction: column; gap: 8px; z-index: 11;
+      touch-action: none; overflow: hidden; }
+    .tui-pager { display: flex; align-items: center; gap: 6px; flex: none; background: var(--tui-card); border: 1px solid var(--tui-card-line);
+      border-radius: 12px; padding: 4px; box-shadow: 0 4px 14px rgba(0,0,0,0.3); }
+    .tui-pager button { width: var(--tui-pg); height: var(--tui-pg); flex: none; border: 0; border-radius: 9px; cursor: pointer;
+      background: var(--tui-acc-soft); color: var(--tui-ink); display: flex; align-items: center; justify-content: center; padding: 0; }
+    .tui-pager button svg { width: 55%; height: 55%; fill: currentColor; }
+    .tui-pager button:disabled { opacity: 0.35; }
+    .tui-pager .pg-t { flex: 1; min-width: 0; text-align: center; color: var(--tui-ink); line-height: 1.1; }
+    .tui-pager .pg-n { font: 800 var(--tui-fs-lbl) system-ui, sans-serif; white-space: nowrap; }
+    .tui-pager .pg-dots { display: flex; justify-content: center; gap: 5px; margin-top: 3px; }
+    .tui-pager .pg-dots i { width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--tui-ink); box-sizing: border-box; }
+    .tui-pager .pg-dots i.on { background: var(--tui-ink); }
+    .tui-card { background: var(--tui-card); color: var(--tui-ink); border: 1px solid var(--tui-card-line); border-radius: 12px;
+      padding: 6px 10px 8px; box-shadow: 0 4px 14px rgba(0,0,0,0.3); flex: none; min-height: 0; box-sizing: border-box; }
+    :root[data-theme="day"][data-tui-sun] :is(.tui-card, .tui-pager) { border: 2px solid #000; box-shadow: none; }
+    .tui-card .c-k { display: flex; align-items: center; gap: 6px; font: 700 var(--tui-fs-lbl)/1.2 system-ui, sans-serif; color: var(--tui-ink-2); }
+    .tui-card .c-k svg { width: 1.3em; height: 1.3em; flex: none; }
+    .tui-card .c-v { font: 800 var(--tui-card-fs)/1.05 system-ui, sans-serif; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .tui-card .c-u { font-size: 0.45em; font-weight: 700; margin-left: 0.2em; color: var(--tui-ink-2); }
+    .tui-card[data-st="on"] { background: var(--tui-acc); color: var(--tui-acc-ink); border-color: var(--tui-acc); }
+    .tui-card[data-st="on"] .c-k { color: inherit; }
+    .tui-card[data-st="fault"] { background: var(--tui-stop); color: var(--tui-stop-ink); border-color: var(--tui-stop); }
+    .tui-card[data-st="fault"] .c-k { color: inherit; }
+    .tui-card:is([data-st="on"], [data-st="fault"]) :is(.c-u, .c-cap, .c-k) { color: inherit; }
+    .tui-card[data-st="none"] .c-v { opacity: 0.7; }
+    .tui-card .c-v.c-word { font-size: calc(var(--tui-card-fs) * 0.68); text-transform: uppercase; letter-spacing: 0.02em; }
+    /* Section strip: filled = on, outline = off, hatched = manual, half = switching. */
+    .tui-secs { display: flex; gap: 3px; margin-top: 6px; height: calc(var(--tui-fs-val) * 0.9); }
+    .tui-secs i { flex: 1; min-width: 3px; border: 2px solid currentColor; border-radius: 3px; box-sizing: border-box; }
+    .tui-secs i[data-st="2"] { background: currentColor; }
+    .tui-secs i[data-st="1"] { background: repeating-linear-gradient(-45deg, currentColor 0 3px, transparent 3px 6px); }
+    .tui-secs i:is([data-st="3"], [data-st="4"]) { background: linear-gradient(to top, currentColor 50%, transparent 50%); }
+    .tui-secs i[data-st="5"] { border-style: dashed; opacity: 0.7; }
+
+    /* --- Work pages: dashboard (page without the map) ---------------------------- */
+    #tui-dash { position: fixed; z-index: 11; left: calc(8px + var(--sal)); right: var(--tui-dash-right, 16px);
+      top: calc(var(--sat) + var(--tui-sb-h) + 8px); bottom: var(--tui-dash-bottom, 16px); touch-action: none;
+      grid-template-columns: auto repeat(var(--tui-dash-cols, 3), minmax(0, 1fr));
+      grid-template-rows: minmax(0, 1.15fr) minmax(0, 1fr); gap: 10px; padding: 10px; box-sizing: border-box; border-radius: 14px;
+      background: var(--tui-card-2); border: 1px solid var(--tui-card-line); overflow: hidden; }
+    /* Dashboard: the page switcher runs down the left edge, so the values get the height. */
+    #tui-dash .tui-pager { grid-column: 1; grid-row: 1 / -1; flex-direction: column; justify-content: space-between; }
+    #tui-dash .tui-pager .pg-t { flex: 0 0 auto; }
+    #tui-dash .tui-pager .pg-n { white-space: normal; max-width: calc(var(--tui-pg) + 4px); }
+    #tui-dash .pg-dots { flex-direction: column; align-items: center; }
+    #tui-dash .tui-card { display: flex; flex-direction: column; justify-content: center; padding: 8px 14px; overflow: hidden;
+      --tui-card-fs: calc(var(--tui-xte-fs) * 0.85); }
+    #tui-dash .tui-card.d-xte { grid-column: 2 / -1; }
+    #tui-dash.solo .tui-card.d-xte, #tui-dash.noxte .tui-card { grid-row: 1 / -1; }
+    #tui-dash .d-xte .c-v { font-size: calc(var(--tui-xte-fs) * 1.4); display: flex; align-items: center; justify-content: center; gap: 0.3em; }
+    #tui-dash .d-xte .x-dir { display: flex; align-items: center; gap: 0.15em; visibility: hidden; font-size: 0.7em; }
+    #tui-dash .d-xte .x-dir.on { visibility: visible; }
+    #tui-dash .d-xte .x-dir svg { height: 0.9em; width: auto; fill: currentColor; }
+    #tui-dash .d-xte .x-let { font-weight: 900; padding: 0 0.12em; border-radius: 6px; background: currentColor; }
+    #tui-dash .d-xte .x-let span { color: var(--tui-card); }
+    #tui-dash .d-xte .x-l { color: var(--tui-left); } #tui-dash .d-xte .x-r { color: var(--tui-right); }
+    #tui-dash .d-xte[data-st="on"] .x-let span { color: var(--tui-acc); }
+    #tui-dash .d-xte .c-cap { text-align: center; font: 700 var(--tui-fs-val) system-ui, sans-serif; color: var(--tui-ink-2); }
+    #tui-dash .d-xte:is([data-st="on"], [data-st="fault"]) .c-cap { color: inherit; }
+    #tui-dash .d-xte { position: relative; }
+    #tui-dash .d-xte .c-k { position: absolute; left: 14px; top: 8px; }
+    #tui-dash .tui-secs { height: calc(var(--tui-fs-val) * 1.6); }
+
+    /* --- Quick bar (right nav): order and count set by app.js -------------------- */
+    :root[data-tui-layout="terminal"] .rn-btn { height: min(var(--tui-rn-h), calc((100vh - var(--tui-sb-h) - var(--sat) - var(--sab) - 48px) / var(--tui-q-n) - 6px)); }
+    :root[data-tui-layout="terminal"] .rn-btn.tui-qhide { display: none !important; }
+    :root[data-tui-layout="terminal"] #rn-readonly { order: 99; }
+    .rn-btn.tui-qp { display: none; }
+    :root[data-tui-layout="terminal"] .rn-btn.tui-qp { display: flex; }
+    .rn-btn.tui-qp .rn-ic { flex: none; }
+    .rn-btn.tui-qp svg.rn-ic { width: var(--tui-rn-ic); height: var(--tui-rn-ic); }
+    .rn-btn.tui-qp.disabled { opacity: 0.4; }
+
+    /* --- Menu (tile grid) and editor sheets ------------------------------------- */
+    #tui-scrim { position: fixed; inset: 0; z-index: 34; background: var(--tui-scrim); display: none; }
+    #tui-scrim.open { display: block; }
+    .tui-sheet { position: fixed; z-index: 35; left: calc(12px + var(--sal)); right: calc(12px + var(--sar));
+      top: calc(var(--sat) + var(--tui-sb-h) + 8px); bottom: calc(12px + var(--sab)); display: none; flex-direction: column;
+      background: var(--panel); color: var(--text); border: 1px solid var(--border-2); border-radius: 14px;
+      box-shadow: 0 10px 34px rgba(0,0,0,0.5); overflow: hidden; font-family: system-ui, sans-serif; }
+    .tui-sheet.open { display: flex; }
+    .tui-sheet.narrow { left: 50%; right: auto; width: min(640px, calc(100vw - 24px)); transform: translateX(-50%); }
+    .tui-sh-hdr { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; border-bottom: 1px solid var(--border-2); flex: none; }
+    .tui-sh-hdr .t { flex: 1; font: 800 calc(var(--tui-fs-lbl) + 4px) system-ui, sans-serif; }
+    .tui-sh-hdr button { width: max(48px, var(--tui-pg)); height: max(48px, var(--tui-pg)); border: 0; border-radius: 10px; cursor: pointer;
+      background: rgba(var(--ov),0.08); color: var(--text); font: 700 22px system-ui, sans-serif; }
+    .tui-sh-body { flex: 1; overflow-y: auto; padding: 12px 16px 16px; }
+    .tui-sh-sec { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 8px; font: 800 var(--tui-fs-lbl) system-ui, sans-serif;
+      text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); }
+    .tui-sh-sec small { font-weight: 600; text-transform: none; letter-spacing: 0; }
+    .tui-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(var(--tui-tile-w), 1fr)); gap: 10px; margin-bottom: 14px; }
+    .tui-tile { height: var(--tui-tile-h); border: 1px solid var(--border-2); border-radius: 12px; cursor: pointer;
+      background: rgba(var(--ov),0.06); color: var(--text); display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 8px; padding: 8px; font: 700 var(--tui-fs-lbl)/1.15 system-ui, sans-serif; text-align: center; }
+    .tui-tile svg { width: calc(var(--tui-tile-h) * 0.38); height: calc(var(--tui-tile-h) * 0.38); flex: none;
+      fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .tui-tile:active { background: var(--tui-acc-soft); }
+    .tui-tile.field { border-left: 6px solid var(--tui-acc); }
+    .tui-tile.setup { border-left: 6px solid var(--tui-warn); background: rgba(240,180,41,0.08); }
+    .tui-tiles.setup-band { padding: 10px; border-radius: 12px; border: 2px dashed var(--tui-warn); }
+    :root[data-theme="day"][data-tui-sun] .tui-tile { border: 2px solid #000; }
+    :root[data-theme="day"][data-tui-sun] .tui-tile.field { border-left: 8px solid #000; }
+    :root[data-theme="day"][data-tui-sun] .tui-tile.setup { border-left: 8px double #000; background: #fff; }
+    :root[data-theme="day"][data-tui-sun] .tui-tiles.setup-band { border-color: #000; }
+    /* Editors */
+    .tui-erow { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-bottom: 1px solid var(--border-2); flex-wrap: wrap; }
+    .tui-erow .e-n { min-width: 6.5em; font: 800 var(--tui-fs-lbl) system-ui, sans-serif; }
+    .tui-erow .e-grow { flex: 1; }
+    .tui-chip { min-height: max(48px, var(--tui-tap)); padding: 0 12px; border-radius: 999px; border: 2px solid var(--border);
+      background: transparent; color: var(--text); font: 700 var(--tui-fs-lbl) system-ui, sans-serif; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 6px; }
+    .tui-chip.on { background: var(--tui-acc); border-color: var(--tui-acc); color: var(--tui-acc-ink); }
+    .tui-chip.on::before { content: "✓"; font-weight: 900; }
+    .tui-chip.lock { border-style: dashed; cursor: default; }
+    .tui-ibtn { width: max(48px, var(--tui-tap)); height: max(48px, var(--tui-tap)); border-radius: 10px; border: 1px solid var(--border);
+      background: rgba(var(--ov),0.06); color: var(--text); font: 800 18px system-ui, sans-serif; cursor: pointer; }
+    .tui-ibtn:disabled { opacity: 0.35; cursor: default; }
+    .tui-ebar { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+    .tui-ebar button { min-height: max(48px, var(--tui-tap)); padding: 0 16px; border-radius: 10px; border: 1px solid var(--border);
+      background: rgba(var(--ov),0.06); color: var(--text); font: 700 var(--tui-fs-lbl) system-ui, sans-serif; cursor: pointer; }
+    .tui-ebar button.pri { background: var(--tui-acc); color: var(--tui-acc-ink); border-color: var(--tui-acc); }
+    .tui-qitem { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border-2); }
+    .tui-qitem img, .tui-qitem svg { width: 36px; height: 36px; object-fit: contain; flex: none; }
+    .tui-qitem .e-grow { font: 700 var(--tui-fs-lbl) system-ui, sans-serif; }
+    .tui-seg.tui-seg2 { grid-template-columns: repeat(2, 1fr); }
   </style>
 </head>
 <body>
