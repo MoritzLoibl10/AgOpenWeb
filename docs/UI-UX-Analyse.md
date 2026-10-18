@@ -431,6 +431,15 @@ Neue Texte laufen über `tr('…')` und `Tools/i18n-extract.py` (siehe `Docs/TRA
   belegbare Schnellzugriffsleiste rechts (Lenkung immer unten); Menü als Kachelraster;
   eigene Farbwelt (Petrol / Bernstein / Ziegelrot) und eigene Symbole. Das klassische Layout
   bleibt unter *Screen & Alerts → Classic layout* wählbar.
+- **Phase 2b** (Feinschliff und Deutsch): Lenkstatus nur noch oben in der Statusleiste und als
+  Knopf rechts, die linke Kachel zeigt die Arbeitsbreite; Distanzen mit Etikett („Vorgewende
+  319,0 m“ = Abstand bis zur Vorgewendelinie voraus, „Wende 83 m“ = Weg bis zum Start der
+  automatischen Wende); Kamera-Pad im Fahrmodus aus (Tippen auf die Karte zeigt es 5 s);
+  untere Leiste beschriftet, selten Gebrauchtes (Überspringen, Wendemuster, Fahrgassen,
+  Flächenfarbe, Geräterichtung) unter *Menü → Weitere Feldwerkzeuge*; Wende- und Spurknöpfe auf
+  der Karte mit Rahmen und Namen (≥ 64 px); Teilbreiten direkt auf der unteren Leiste.
+  Deutsche Oberfläche (`de.json` vollständig, Standardsprache, Sprachkachel im Menü unter
+  Einrichtung), Dezimalkomma, km/h, ha/h. Begriffe: [Glossar-DE.md](Glossar-DE.md).
 - Offen: U6–U8, U13 (nur nach Abstimmung), U14–U17.
 
 ### 4.4 Was nicht angefasst wird

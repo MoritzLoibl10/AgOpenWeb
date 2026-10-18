@@ -65,3 +65,19 @@ simulierter VRS-Caster). Doku: Abschnitt „NTRIP Connection Format“ in `CLAUD
    Fork-Version von `TryBuildGga` gegen die upstream-Lösung abwägen und möglichst upstream nehmen.
 3. Danach `dotnet test Tests/AgOpenWeb.Services.Tests --filter FullyQualifiedName~Ntrip`
    und `python3 Tools/i18n-extract.py --check`.
+
+## 2. Phase 2b: Deutsch als Standard (Oktober 2026)
+
+Keine Host-Änderung. Für Rebases wichtig, weil es upstream-Dateien außerhalb des
+tablet-ui-Blocks betrifft:
+
+| Datei | Änderung | Rebase-Hinweis |
+|---|---|---|
+| `wwwroot/i18n.js` | `lookup` sucht auch den normalisierten Schlüssel (ein Schlüssel mit doppelten Leerzeichen wie „Done {area}  Left …“ wurde in keiner Sprache übersetzt) | eine Zeile; Kandidat für einen upstream-PR |
+| `wwwroot/i18n/de.json` | vollständig übersetzt (Fork-Begriffe, siehe `docs/Glossar-DE.md`) | upstream füllt `de.json` über Weblate: bei Konflikten die Fork-Fassung behalten und neue Schlüssel nachtragen; `Tools/i18n-extract.py --check` meldet Lücken |
+| `Tools/i18n-extract.py` | `--check` schlägt fehl, wenn `de.json` einen englischen Schlüssel nicht abdeckt (`REQUIRED = ("de",)`); veraltete Schlüssel werden nur gemeldet | kleiner Block vor `main()` |
+
+Deutsch als Standard: Der Client schickt einmal je Gerät den vorhandenen Befehl
+`app.setLanguage|de`, wenn der Host noch Englisch spricht (`aow.ui.langChosen` im localStorage).
+Meldungen, die der Host als fertigen Text schickt (z. B. „RTK Fixed“, NTRIP-Status), bleiben
+englisch.
