@@ -40,6 +40,7 @@ public partial class MainViewModel
     private string _ntripMountPoint = "";
     private string _ntripUsername = "";
     private string _ntripPassword = "";
+    private int _ntripVersion = 1;
 
     #endregion
 
@@ -92,6 +93,13 @@ public partial class MainViewModel
         set => SetProperty(ref _ntripPassword, value);
     }
 
+    /// <summary>NTRIP protocol version of the connected profile (1 or 2).</summary>
+    public int NtripVersion
+    {
+        get => _ntripVersion;
+        set => SetProperty(ref _ntripVersion, value);
+    }
+
     #endregion
 
     #region NTRIP Connection Methods
@@ -107,6 +115,7 @@ public partial class MainViewModel
                 MountPoint = NtripMountPoint,
                 Username = NtripUsername,
                 Password = NtripPassword,
+                NtripVersion = NtripVersion,
                 // The modules' /24 as discovered (followed live), else the Network IO
                 // subnet (default 192.168.5) — AgIO sends to its subnet setting.
                 SubnetAddress = $"{SubnetOctet1}.{SubnetOctet2}.{SubnetOctet3}",
@@ -259,6 +268,7 @@ public partial class MainViewModel
         NtripMountPoint = profile.MountPoint;
         NtripUsername = profile.Username;
         NtripPassword = profile.Password;
+        NtripVersion = profile.NtripVersion;
 
         await ConnectToNtripAsync();
     }
@@ -277,7 +287,7 @@ public partial class MainViewModel
             if (!wasThisOne) return;
             bool changed = before.CasterHost != after.CasterHost || before.CasterPort != after.CasterPort
                 || before.MountPoint != after.MountPoint || before.Username != after.Username
-                || before.Password != after.Password;
+                || before.Password != after.Password || before.NtripVersion != after.NtripVersion;
             if (!changed) return;
 
             await _ntripService.DisconnectAsync();
@@ -286,6 +296,7 @@ public partial class MainViewModel
             NtripMountPoint = after.MountPoint;
             NtripUsername = after.Username;
             NtripPassword = after.Password;
+            NtripVersion = after.NtripVersion;
             _logger.LogInformation("NTRIP profile '{ProfileName}' changed while connected; reconnecting", after.Name);
             await ConnectToNtripAsync();
         }

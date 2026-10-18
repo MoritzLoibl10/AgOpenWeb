@@ -2968,6 +2968,7 @@ function openNtripEditor(p) {
   document.getElementById('nte-mount').value = p ? p.mountPoint : '';
   document.getElementById('nte-user').value = p ? p.username : '';
   document.getElementById('nte-pass').value = p ? p.password : '';
+  document.getElementById('nte-ver').value = p && p.ntripVersion === 2 ? '2' : '1';
   document.getElementById('nte-auto').checked = p ? !!p.autoConnect : true;
   document.getElementById('nte-default').checked = p ? !!p.isDefault : false;
   document.getElementById('nte-teststatus').textContent = '';
@@ -3004,7 +3005,8 @@ document.getElementById('nte-test').addEventListener('pointerdown', e => {
   if (!mount) { st.textContent = tr('Error: Mount point is required'); return; }
   _nteTestActive = true;
   st.textContent = tr('Testing connection...');
-  transport.send('ntrip.test|' + [host, port, mount, user, pass].join('\t'));
+  const ver = document.getElementById('nte-ver').value;
+  transport.send('ntrip.test|' + [host, port, mount, user, pass, ver].join('\t'));
 });
 document.getElementById('nte-save').addEventListener('pointerdown', e => {
   e.stopPropagation();
@@ -3020,6 +3022,7 @@ document.getElementById('nte-save').addEventListener('pointerdown', e => {
     document.getElementById('nte-auto').checked ? '1' : '0',
     document.getElementById('nte-default').checked ? '1' : '0',
     nteBuf.associatedFields.join(','),
+    document.getElementById('nte-ver').value,
   ];
   transport.send('ntrip.save|' + fields.join('\t'));
   openNtripProfiles(); // native SaveNtripProfileCommand ends in NavigateBack → list

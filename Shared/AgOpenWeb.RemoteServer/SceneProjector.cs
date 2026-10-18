@@ -450,7 +450,7 @@ public sealed class SceneProjector
             .Select(p => new NtripProfileDto(
                 p.Id, p.Name, p.CasterHost, p.CasterPort, p.MountPoint,
                 p.Username, p.Password, p.AutoConnectOnFieldLoad, p.IsDefault,
-                p.AssociatedFields.ToList()))
+                p.AssociatedFields.ToList(), p.NtripVersion))
             .ToList();
         return new NtripProfilesDto(profiles, _ntripProfiles.GetAvailableFields().ToList());
     }
@@ -468,6 +468,7 @@ public sealed class SceneProjector
             h = h * 31 + (p.MountPoint?.GetHashCode() ?? 0);
             h = h * 31 + (p.Username?.GetHashCode() ?? 0);
             h = h * 31 + (p.IsDefault ? 1 : 0) + (p.AutoConnectOnFieldLoad ? 2 : 0);
+            h = h * 31 + p.NtripVersion;
             h = h * 31 + p.AssociatedFields.Count;
             foreach (var f in p.AssociatedFields) h = h * 31 + (f?.GetHashCode() ?? 0);
         }
