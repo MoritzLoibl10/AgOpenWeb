@@ -18,8 +18,12 @@ Screenshot und messen:
 - **Fahrwerte:** Schriftgröße der Werte, die man beim Fahren abliest (Statusleiste,
   Querabweichung, Lichtbalken-Text, HUDs, Teilbreiten, Beschriftung der Schnellzugriffe, Module;
   Liste `DRIVE_READOUTS` in `lib.js`). Pro Ansicht die kleinste Größe und alle Einträge.
+- **Abgeschnittene Texte:** sichtbarer Text, der über den Kasten hinausragt, der ihn beschneidet
+  (`overflow: hidden`), aus einem Knopf heraussteht oder mit „…“ gekürzt wird. Text in
+  Scrollbereichen zählt nicht. Wichtig für die längeren deutschen Texte.
 - **Überlappungen:** feste Elemente über der Karte (Leisten, Anzeigen, Module, Kamera-Pad, …;
-  Liste `LAYOUT_BOXES` in `lib.js`), die sich in beiden Richtungen um mehr als 4 px schneiden.
+  Liste `LAYOUT_BOXES` in `lib.js`), die sich in beiden Richtungen um mehr als 4 px schneiden
+  oder mehr als 4 px über den Bildschirmrand hinausragen.
 
 > **Nur ohne angeschlossene Module laufen lassen.** Das Szenario schaltet im Simulator
 > Teilbreiten-Automatik und AutoSteer ein, und der Host schickt seine Lenk- und
@@ -69,6 +73,7 @@ beenden, sonst misst man den alten Build auf `:5174`.
 | `--url URL` | Adresse des Hosts, Standard `http://localhost:5174/` |
 | `--out DIR` | Ausgabeordner, Standard `out` |
 | `--viewport BxH` | Fenstergröße, Standard `1280x800`; Ansicht 17 nutzt immer `1024x600` |
+| `--ls aow.ui.langChosen=user` | Sprache des Hosts lassen (sonst stellt der Client einmal auf Deutsch um) |
 | `--ls key=value` | Eintrag im `localStorage` vor dem Laden setzen (mehrfach möglich), z. B. für Client-Einstellungen wie die UI-Skalierung |
 | `CHROMIUM_PATH` (Umgebung) | anderes Chromium statt dem von Playwright |
 

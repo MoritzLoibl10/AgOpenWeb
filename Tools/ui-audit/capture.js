@@ -43,13 +43,14 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
     const m = await L.measure(page);
     const contrast = await L.contrast(page);
     const v = { sum: L.summarize(m), controls: m.controls, contrast, contrastByRegion: L.contrastByRegion(contrast),
-      driveFonts: await L.driveFonts(page), overlaps: await L.overlaps(page) };
+      driveFonts: await L.driveFonts(page), overlaps: await L.overlaps(page), truncated: await L.truncated(page) };
     if (guideline) v.guideline = await L.guidelineContrast(page, guideline);
     views[name] = v;
     console.log(name.padEnd(28), `n=${v.sum.n} <48=${v.sum.lt48} >=64=${v.sum.ge64} text<14=${v.sum.textLt14}/${v.sum.textNodes}`
-      + ` fahrwerte>=${v.driveFonts.min}px überlappt=${v.overlaps.length}`
+      + ` fahrwerte>=${v.driveFonts.min}px überlappt=${v.overlaps.length} abgeschnitten=${v.truncated.length}`
       + (v.guideline ? ` leitlinie=${v.guideline.cr}:1` : ''));
     for (const o of v.overlaps) console.log('   überlappt:', o);
+    for (const t of v.truncated) console.log('   abgeschnitten:', t);
   };
   const glareShot = async (page, name) => {
     const tag = await page.addStyleTag({ content: GLARE_CSS });
