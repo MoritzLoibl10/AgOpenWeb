@@ -61,6 +61,12 @@ public class NtripProfile
     public string Password { get; set; } = string.Empty;
 
     /// <summary>
+    /// NTRIP protocol version for this caster: 1 (HTTP/1.0, "ICY 200 OK") or 2
+    /// (HTTP/1.1 with "Ntrip-Version: Ntrip/2.0"). Profiles saved without it use 1.
+    /// </summary>
+    public int NtripVersion { get; set; } = 1;
+
+    /// <summary>
     /// List of field directory names associated with this profile.
     /// When a field in this list is loaded, this profile will be used.
     /// </summary>

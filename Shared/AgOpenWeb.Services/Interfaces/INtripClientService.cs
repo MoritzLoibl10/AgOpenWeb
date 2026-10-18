@@ -111,9 +111,10 @@ public class NtripConfiguration
     public string Password { get; set; } = "";
 
     /// <summary>
-    /// HTTP version (1.0 or 1.1)
+    /// NTRIP protocol version: 1 ("GET /mount HTTP/1.0", reply "ICY 200 OK") or
+    /// 2 ("HTTP/1.1" + "Ntrip-Version: Ntrip/2.0", reply "HTTP/1.1 200 OK").
     /// </summary>
-    public string HttpVersion { get; set; } = "1.0";
+    public int NtripVersion { get; set; } = 1;
 
     /// <summary>
     /// UDP port to forward RTCM data to (default 2233)

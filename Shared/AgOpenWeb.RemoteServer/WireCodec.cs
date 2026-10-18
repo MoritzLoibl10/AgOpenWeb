@@ -237,6 +237,7 @@ public static class WireCodec
             w.Write((byte)(e.IsDefault ? 1 : 0));
             w.Write(e.AssociatedFields.Count);
             foreach (var f in e.AssociatedFields) WriteStr(w, f);
+            w.Write((byte)(e.NtripVersion == 2 ? 2 : 1));
         }
         w.Write(p.AvailableFields.Count);
         foreach (var f in p.AvailableFields) WriteStr(w, f);

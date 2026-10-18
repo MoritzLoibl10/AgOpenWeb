@@ -42,6 +42,45 @@ public static class NtripResponse
         return false;
     }
 
+    private static string? HeaderValue(string? header, string name)
+    {
+        foreach (string line in (header ?? "").Split('\n'))
+        {
+            int colon = line.IndexOf(':');
+            if (colon > 0 && line[..colon].Trim().Equals(name, StringComparison.OrdinalIgnoreCase))
+                return line[(colon + 1)..].Trim();
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The first lines of what the caster sent, for the log and the status line: at most
+    /// <paramref name="maxLines"/> non-empty lines joined with " | ", control and non-ASCII
+    /// bytes shown as '·', cut at <paramref name="maxChars"/>. Empty when nothing came.
+    /// </summary>
+    public static string Preview(ReadOnlySpan<byte> data, int maxLines = 3, int maxChars = 200)
+    {
+        var sb = new System.Text.StringBuilder();
+        int lines = 0;
+        bool lineHasText = false;
+        foreach (byte b in data)
+        {
+            if (b == (byte)'\r') continue;
+            if (b == (byte)'\n')
+            {
+                if (lineHasText && ++lines >= maxLines) break;
+                if (lineHasText) sb.Append(" | ");
+                lineHasText = false;
+                continue;
+            }
+            sb.Append(b >= 0x20 && b < 0x7F ? (char)b : '·');
+            lineHasText = true;
+            if (sb.Length >= maxChars) { sb.Length = maxChars; sb.Append('…'); return sb.ToString(); }
+        }
+        string s = sb.ToString();
+        return s.EndsWith(" | ", StringComparison.Ordinal) ? s[..^3] : s;
+    }
+
     public static (NtripReply Reply, string Reason) Classify(string header)
     {
         string first = (header ?? "").Split('\n')[0].Trim();
@@ -58,6 +97,11 @@ public static class NtripResponse
         var m = HttpStatus.Match(first);
         if (!m.Success)
             return (NtripReply.RejectedRetry, "Unexpected caster reply: " + first);
+
+        // An NTRIP 2 caster answers an unknown mount point with "200 OK" and its source table.
+        if (m.Groups[1].Value == "200" && HeaderValue(header, "Content-Type")
+                ?.Contains("sourcetable", StringComparison.OrdinalIgnoreCase) == true)
+            return (NtripReply.Rejected, "Mount point not found (the caster sent its source table)");
 
         return m.Groups[1].Value switch
         {

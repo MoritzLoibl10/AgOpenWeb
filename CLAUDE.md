@@ -313,14 +313,21 @@ Playwright: wait for `iHoldControl === true`, then `transport.send(...)`; read `
 old build on `:5174`.
 
 ## NTRIP Connection Format
-The NTRIP client uses HTTP/1.1 format:
+Each NTRIP profile picks the protocol version (`NtripProfile.NtripVersion`, default 1);
+`NtripRequest.Build` writes the request for both the client and the connection test:
 ```
-GET /mountpoint HTTP/1.1
-Host: caster.example.com
-Ntrip-Version: Ntrip/2.0
-Authorization: Basic base64(username:password)
-User-Agent: NTRIP AgOpenWeb
+NTRIP 1 (reply "ICY 200 OK")          NTRIP 2 (reply "HTTP/1.1 200 OK")
+GET /mountpoint HTTP/1.0              GET /mountpoint HTTP/1.1
+User-Agent: NTRIP AgOpenWeb/1.0       Host: caster.example.com:2101
+Authorization: Basic base64(u:p)      Ntrip-Version: Ntrip/2.0
+                                      User-Agent: NTRIP AgOpenWeb/1.0
+                                      Authorization: Basic base64(u:p)
 ```
+Network RTK (VRS) casters need a GGA: the first goes out as soon as the caster accepts
+(NTRIP 1: right after the request too), then every 10 s. It is built from the receiver's
+position whenever it has any fix (quality > 0), not only one that passes the guidance
+quality gate (`GpsData.IsValid`, by default RTK fixed); with no fix, none is sent. On a
+refusal or an early close the status line quotes the caster's reply (`NtripResponse.Preview`).
 
 ### RTCM forwarding
 `NtripClientService` frames the caster's stream into RTCM 3 messages (`RtcmFramer`, after

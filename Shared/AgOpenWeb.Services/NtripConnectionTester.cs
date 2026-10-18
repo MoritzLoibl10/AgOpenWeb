@@ -20,8 +20,8 @@ using System.Threading.Tasks;
 namespace AgOpenWeb.Services;
 
 /// <summary>
-/// One-shot NTRIP caster reachability probe: opens a TCP connection, sends an
-/// NTRIP/2.0 GET for the mount point, and classifies the response. Returns a
+/// One-shot NTRIP caster reachability probe: opens a TCP connection, sends the
+/// mount-point request in the profile's NTRIP version, and classifies the response. Returns a
 /// human-readable status string (success / auth-failed / not-found / timeout /
 /// error). Pure network IO with no UI or VM dependency, so the native profile
 /// editor and the remote (web) Network IO editor share the exact same logic.
@@ -29,7 +29,7 @@ namespace AgOpenWeb.Services;
 public static class NtripConnectionTester
 {
     public static async Task<string> TestAsync(string host, int port, string mountPoint,
-        string username, string password)
+        string username, string password, int ntripVersion = 1)
     {
         if (string.IsNullOrWhiteSpace(host)) return "Error: Caster host is required";
         if (string.IsNullOrWhiteSpace(mountPoint)) return "Error: Mount point is required";
@@ -45,18 +45,7 @@ public static class NtripConnectionTester
                 return "Error: Could not connect to caster";
 
             using var stream = tcpClient.GetStream();
-            var request = $"GET /{mountPoint} HTTP/1.1\r\n" +
-                          $"Host: {host}\r\n" +
-                          $"Ntrip-Version: Ntrip/2.0\r\n" +
-                          $"User-Agent: NTRIP AgOpenWeb/Test\r\n";
-
-            if (!string.IsNullOrEmpty(username))
-            {
-                var credentials = Convert.ToBase64String(
-                    System.Text.Encoding.ASCII.GetBytes($"{username}:{password}"));
-                request += $"Authorization: Basic {credentials}\r\n";
-            }
-            request += "\r\n";
+            var request = NtripRequest.Build(ntripVersion, host, port, mountPoint, username, password);
 
             var requestBytes = System.Text.Encoding.ASCII.GetBytes(request);
             await stream.WriteAsync(requestBytes, 0, requestBytes.Length);
@@ -71,9 +60,13 @@ public static class NtripConnectionTester
 
             var response = System.Text.Encoding.ASCII.GetString(buffer, 0, bytesRead);
             var (reply, reason) = NtripResponse.Classify(response);
-            return reply == NtripReply.Accepted
-                ? "Success: Connected to caster and mount point"
-                : "Error: " + reason;
+            if (reply == NtripReply.Accepted)
+                return "Success: Connected to caster and mount point";
+            // The caster's own words, so the reason for a refusal is visible.
+            string raw = NtripResponse.Preview(buffer.AsSpan(0, bytesRead));
+            return reason.Contains(raw, StringComparison.Ordinal)
+                ? "Error: " + reason
+                : $"Error: {reason}. Caster replied: \"{raw}\"";
         }
         catch (Exception ex)
         {
