@@ -1655,6 +1655,75 @@
     .tui-qitem img, .tui-qitem svg { width: 36px; height: 36px; object-fit: contain; flex: none; }
     .tui-qitem .e-grow { font: 700 var(--tui-fs-lbl) system-ui, sans-serif; }
     .tui-seg.tui-seg2 { grid-template-columns: repeat(2, 1fr); }
+
+    /* ===== Phase 2b: polish ======================================================
+       Terminal layout only, unless noted. Camera pad hidden while driving (a map tap shows it
+       for 5 s, html[data-tui-cam]); bottom bar with names, rarely used buttons in the menu;
+       framed on-screen U-turn / track buttons; section bar docked on the bottom bar. */
+    :root { --tui-bn-fs: 11px; --tui-osb: 64px; }
+    :root[data-tui-scale="large"] { --tui-bn-fs: 12px; }
+    :root[data-tui-scale="glove"] { --tui-bn-fs: 14px; --tui-osb: 72px; --tui-osb-wf: 1.5; }
+    :root[data-tui-layout="terminal"] .osb-row { gap: 8px; }
+
+    /* A3: camera pad */
+    :root[data-tui-layout="terminal"][data-tui-mode="drive"]:not([data-tui-cam]) #campad { visibility: hidden; }
+
+    /* A4: bottom bar, names under the icons; moved buttons only in the menu */
+    .tui-bn-lbl { display: none; }
+    :root[data-tui-layout="terminal"] #bottomnav .bn-bar > .bn-btn.tui-bnmove { display: none; }
+    :root[data-tui-band][data-tui-layout="terminal"] {
+      --tui-bnw: min(calc(var(--tui-nav) * 1.6), calc((var(--tui-stack-w) - 16px) / var(--tui-bn-n) - 6px)); }
+    :root[data-tui-layout="terminal"] #bottomnav .bn-bar > .bn-btn {
+      width: var(--tui-bnw, var(--tui-bn)); height: max(var(--tui-bn), 52px); flex-direction: column; gap: 2px; padding: 4px 3px; }
+    :root[data-tui-layout="terminal"] #bottomnav .bn-bar > .bn-btn > :not(.tui-bn-lbl) {
+      flex: 1 1 0; min-height: 0; max-height: calc(100% - var(--tui-bn-fs) * 1.2); }
+    :root[data-tui-layout="terminal"] .tui-bn-lbl { display: block; flex: none; max-width: 100%; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap; font: 700 var(--tui-bn-fs)/1.15 system-ui, sans-serif; color: var(--text); }
+    :root[data-tui-layout="terminal"] #bottomnav .bn-btn.active .tui-bn-lbl { color: #fff; }
+    /* More field tools in the menu: icon, name and state of the original button */
+    .tui-tile.more { position: relative; }
+    .tui-tile.more .m-ic { height: calc(var(--tui-tile-h) * 0.38); display: flex; align-items: center; justify-content: center; }
+    .tui-tile.more .m-ic img { height: 100%; width: auto; }
+    .tui-tile.more .m-st { position: absolute; top: 6px; right: 8px; font: 900 var(--tui-fs-val) system-ui, sans-serif; }
+    .tui-tile.disabled { opacity: 0.4; }
+
+    /* A5: on-screen U-turn / track shift as framed buttons with a name, at least glove size */
+    :root[data-tui-layout="terminal"] .osb-btn { width: calc(var(--tui-osb) * var(--tui-osb-wf, 1.4)); height: var(--tui-osb);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px;
+      background: var(--tui-card); border: 2px solid var(--tui-card-line); border-radius: 12px; box-sizing: border-box;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.3); filter: none; }
+    :root[data-tui-layout="terminal"] .osb-btn svg { width: auto; height: calc(var(--tui-osb) - var(--tui-bn-fs) * 1.1 - 12px); flex: none; }
+    .tui-osb-lbl { display: none; }
+    :root[data-tui-layout="terminal"] .tui-osb-lbl { display: block; flex: none; white-space: nowrap;
+      font: 800 var(--tui-bn-fs)/1.1 system-ui, sans-serif; color: var(--tui-ink); pointer-events: none; }
+    :root[data-tui-layout="terminal"] .osb-btn:active { background: var(--tui-acc-soft); }
+    :root[data-theme="day"][data-tui-sun][data-tui-layout="terminal"] .osb-btn { border-color: #000; box-shadow: none; }
+    :root[data-theme="day"][data-tui-sun] .osb-btn svg :is(path) { filter: drop-shadow(0 0 1px #000); }
+
+    /* A6: section bar docked on the bottom bar (no gap, one panel); the SIM launcher above its left end */
+    :root[data-tui-layout="terminal"] #bottomstack { gap: 0; }
+    :root[data-tui-layout="terminal"] #simbar { margin-bottom: 6px; }
+    :root[data-tui-layout="terminal"] #sectionbar { border-radius: 10px 10px 0 0; border-bottom: 0; box-shadow: none; padding: 6px 8px 4px; }
+    :root[data-tui-layout="terminal"] #sectionbar.open + #bottomnav.open .bn-bar { border-radius: 0; }
+    :root[data-tui-layout="terminal"] #sim-launch { position: absolute; left: 0; bottom: calc(100% + 6px); } /* bench tool: above the left end */
+
+    /* Longer (German) texts: the rotating status line may take two lines, the menu button keeps its
+       word, action buttons wrap, quick-bar editor rows line up. */
+    @media (min-width: 1200px) { /* narrower screens hide the line (Phase 2) */
+      :root[data-tui-layout="terminal"] #sb-rot.sb-rot { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical; line-height: 1.12; overflow-wrap: anywhere; } }
+    #statusbar #tui-menu-btn { flex: none; white-space: nowrap; }
+    :root[data-tui-layout="terminal"][data-tui-mode="setup"] #sb-rot { display: none; } /* the setup band needs the room */
+    .tui-dk { font: 800 var(--tui-fs-lbl) system-ui, sans-serif; letter-spacing: 0.01em; margin-right: 0.15em; }
+    .as-actbtn { min-width: 0; white-space: normal; text-align: center; line-height: 1.15; }
+    .tui-qitem .e-grow { flex: 1; min-width: 0; }
+
+    /* Dashboard: with the distance line the big number makes room for it (7" and glove). */
+    #tui-dash .d-xte.has-extra .c-v { font-size: calc(var(--tui-xte-fs) * 1.15); }
+    @media (max-height: 720px) { #tui-dash .d-xte.has-extra .c-v { font-size: calc(var(--tui-xte-fs) * 0.9); } }
+
+    /* A7: NTRIP version choice in the same type as the fields around it */
+    #nte-ver { font: 600 14px ui-monospace, monospace; }
   </style>
 </head>
 <body>

@@ -106,13 +106,36 @@ def collect():
     return {s: s for s in sorted(strings, key=lambda s: (s.lower(), s))}
 
 
+# Fork (tablet UI): languages that must cover every English key; --check fails on a gap.
+REQUIRED = ("de",)
+
+
+def check_required(keys):
+    ok = True
+    for code in REQUIRED:
+        path = WWW / f"i18n/{code}.json"
+        tr = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        missing = [k for k in keys if not tr.get(k)]
+        stale = [k for k in tr if k not in keys]
+        if missing:
+            ok = False
+            print(f"i18n/{code}.json: {len(missing)} key(s) missing or empty:", file=sys.stderr)
+            for k in missing:
+                print(f"  {k}", file=sys.stderr)
+        if stale:
+            print(f"i18n/{code}.json: {len(stale)} key(s) no longer in en.json (can go):", file=sys.stderr)
+            for k in stale:
+                print(f"  {k}", file=sys.stderr)
+    return ok
+
+
 def main():
     text = json.dumps(collect(), ensure_ascii=False, indent=2) + "\n"
     if "--check" in sys.argv:
         if not OUT.exists() or OUT.read_text(encoding="utf-8") != text:
             print("i18n/en.json is out of date — run Tools/i18n-extract.py", file=sys.stderr)
             return 1
-        return 0
+        return 0 if check_required(list(json.loads(text))) else 1
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(text, encoding="utf-8")
     print(f"{OUT.relative_to(ROOT)}: {len(json.loads(text))} strings")

@@ -6373,21 +6373,25 @@ const TabletTerminal = (() => {
     sections: svg('<path d="M3 9h18M3 9v8M7.5 9v8M12 9v8M16.5 9v8M21 9v8"/><path d="M3 6h18"/>', STROKE),
     xte: svg('<path d="M12 3v18"/><path d="M5 12h5M7.5 9.5 10 12l-2.5 2.5"/>', STROKE),
     map: svg('<path d="M3 6.5 9 4l6 2.5L21 4v13.5L15 20l-6-2.5L3 20z"/><path d="M9 4v13.5M15 6.5V20"/>', STROKE),
+    language: svg('<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.2 3 14.8 0 18M12 3c-3 3.2-3 14.8 0 18"/>', STROKE),
     left: svg('<path d="M15.5 4 6.5 12l9 8z"/>', 'fill="currentColor"'),
     right: svg('<path d="M8.5 4l9 8-9 8z"/>', 'fill="currentColor"'),
+    width: svg('<path d="M3 7v10M21 7v10"/><path d="M6.5 12h11M9 9l-3 3 3 3M15 9l3 3-3 3"/>', STROKE),
     arrowL: '<svg viewBox="0 0 30 24" aria-hidden="true"><path d="M1 12 13 1v6.5h16v9H13V23z"/></svg>',
     arrowR: '<svg viewBox="0 0 30 24" aria-hidden="true"><path d="M29 12 17 1v6.5H1v9h16V23z"/></svg>',
   };
 
   // --- State ---------------------------------------------------------------------------
-  const MODS = ['map', 'xte', 'speed', 'steer', 'sections'];
-  const MOD_NAME = { map: tr('Map'), xte: tr('Cross-track'), speed: tr('Speed'), steer: tr('Steering'), sections: tr('Sections') };
-  const DEFAULT_PAGES = [['map', 'xte', 'speed', 'steer'], ['map', 'xte', 'sections', 'speed'], ['xte', 'speed', 'steer', 'sections']];
+  // Steering shows once, in the status bar (plus the Steer button on the right): the module
+  // column carries the working width instead (Phase 2b). Stored pages with 'steer' get 'width'.
+  const MODS = ['map', 'xte', 'speed', 'width', 'sections'];
+  const MOD_NAME = { map: tr('Map'), xte: tr('Cross-track'), speed: tr('Speed'), width: tr('Working width'), sections: tr('Sections') };
+  const DEFAULT_PAGES = [['map', 'xte', 'speed', 'width'], ['map', 'xte', 'sections', 'speed'], ['xte', 'speed', 'width', 'sections']];
   const MAX_PAGES = 5;
   const cleanPages = v => {
     if (!Array.isArray(v)) return null;
     const out = v.filter(Array.isArray).slice(0, MAX_PAGES)
-      .map(p => MODS.filter(m => p.includes(m))).filter(p => p.length);
+      .map(p => MODS.filter(m => p.includes(m) || (m === 'width' && p.includes('steer')))).filter(p => p.length);
     return out.length ? out : null;
   };
   let layout = lsGet('aow.ui.layout', 'terminal') === 'classic' ? 'classic' : 'terminal';
@@ -6447,11 +6451,14 @@ const TabletTerminal = (() => {
   function xteInfo() {
     const xte = tick.crossTrackError || 0, a = Math.abs(xte);
     let val, unit;
-    if (a >= 10) { val = toDisplayUnit(a, 'm').toFixed(1); unit = unitLabel('m'); }
-    else { val = toDisplayUnit(a * 100, 'cm').toFixed(isMetric() ? 0 : 1); unit = unitLabel('cm'); }
-    const dir = +val === 0 ? 0 : xte > 0 ? -1 : 1;
+    let raw;
+    if (a >= 10) { raw = toDisplayUnit(a, 'm').toFixed(1); unit = unitLabel('m'); }
+    else { raw = toDisplayUnit(a * 100, 'cm').toFixed(isMetric() ? 0 : 1); unit = unitLabel('cm'); }
+    const dir = +raw === 0 ? 0 : xte > 0 ? -1 : 1;
+    val = tuiDec(raw);
     const pass = tick.op && !tick.op.contour ? tr('Pass {n}', { n: Math.abs((tick.op.passNumber | 0)) + 1 }) : '';
-    const word = dir < 0 ? tr('Steer left') : dir > 0 ? tr('Steer right') : tr('On line');
+    // Translated here: the caption is joined from two strings, so the page translator can't match it.
+    const word = I18n.text(dir < 0 ? tr('Steer left') : dir > 0 ? tr('Steer right') : tr('On line'));
     return { val, unit, dir, cap: pass ? word + ' · ' + pass : word };
   }
   let xteLast = '';
@@ -6512,7 +6519,7 @@ const TabletTerminal = (() => {
   }
   const CARD = {
     speed: () => '<div class="tui-card" data-m="speed"><div class="c-k">' + IC.speed + esc(MOD_NAME.speed) + '</div><div class="c-v"><span class="c-n">—</span><span class="c-u"></span></div></div>',
-    steer: () => '<div class="tui-card" data-m="steer"><div class="c-k">' + IC.steer + esc(MOD_NAME.steer) + '</div><div class="c-v c-word">—</div></div>',
+    width: () => '<div class="tui-card" data-m="width"><div class="c-k">' + IC.width + esc(MOD_NAME.width) + '</div><div class="c-v"><span class="c-n">—</span><span class="c-u"></span></div></div>',
     sections: () => '<div class="tui-card" data-m="sections"><div class="c-k">' + IC.sections + esc(MOD_NAME.sections) + '</div><div class="c-v"><span class="c-n">—</span></div><div class="tui-secs"></div></div>',
     xte: () => '<div class="tui-card d-xte" data-m="xte"><div class="c-k">' + IC.xte + esc(MOD_NAME.xte) + '</div>' +
       '<div class="c-v"><span class="x-dir x-l">' + IC.arrowL + '<span class="x-let"><span>L</span></span></span>' +
@@ -6530,7 +6537,7 @@ const TabletTerminal = (() => {
     col.innerHTML = ''; dash.innerHTML = '';
     if (!terminal()) return;
     const host = nm ? dash : col;
-    const order = nm ? ['xte', 'speed', 'steer', 'sections'] : ['speed', 'steer', 'sections'];
+    const order = nm ? ['xte', 'speed', 'width', 'sections'] : ['speed', 'width', 'sections'];
     host.innerHTML = pagerHtml() + order.filter(m => p.includes(m)).map(m => CARD[m]()).join('');
     const others = order.filter(m => m !== 'xte' && p.includes(m)).length;
     dash.style.setProperty('--tui-dash-cols', String(Math.max(1, others)));
@@ -6572,10 +6579,11 @@ const TabletTerminal = (() => {
   function renderCards() {
     if (!terminal() || mode !== 'drive') return;
     const mps = lastTick ? lastTick.speed : 0;
-    const spd = toDisplayUnit(Math.abs(mps) * 3.6, 'kmh').toFixed(1), su = unitLabel('kmh');
+    const spd = tuiNum(toDisplayUnit(Math.abs(mps) * 3.6, 'kmh'), 1), su = unitLabel('kmh');
     setCard('speed', spd + su, c => { c.querySelector('.c-n').textContent = spd; c.querySelector('.c-u').textContent = su; });
-    const [st, word] = steerState();
-    setCard('steer', st + word, c => { c.dataset.st = st; c.querySelector('.c-v').textContent = word; });
+    const wm = scene && scene.hasField ? toolWidthM() : 0;
+    const wv = wm > 0 ? tuiNum(toDisplayUnit(wm, 'm'), wm < 100 ? 1 : 0) : '—', wu = wm > 0 ? unitLabel('m') : '';
+    setCard('width', wv + wu, c => { c.querySelector('.c-n').textContent = wv; c.querySelector('.c-u').textContent = wu; });
     const secs = tick && scene && scene.hasField ? tick.sections : null;
     const sk = secs ? secs.join('') : '-';
     setCard('sections', sk, c => {
@@ -6595,13 +6603,12 @@ const TabletTerminal = (() => {
         c.querySelector('.x-r').classList.toggle('on', !!i && i.dir > 0);
         c.dataset.st = i ? (i.dir === 0 ? 'on' : '') : 'none';
       });
-      // The map's boundary-distance HUD and U-turn indicator are hidden on this page; their values go here.
-      const hud = $('headland-hud'), uti = $('uturn-indicator');
-      const parts = [];
-      if (hud && hud.style.display === 'block' && hud.textContent) parts.push(tr('Boundary {d}', { d: hud.textContent }));
-      if (uti && !uti.hidden && $('uti-distval')) parts.push(tr('U-turn in {d}', { d: $('uti-distval').textContent }));
+      // The map's headland-distance HUD and U-turn indicator are hidden on this page; their values go here.
+      const parts = [], hd = tuiHeadlandText(), ud = tuiUTurnText();
+      if (hd) parts.push(hd);
+      if (ud) parts.push(ud);
       const ex = cards.xte.el.querySelector('.c-extra'), et = parts.join(' · ');
-      if (ex.textContent !== et) ex.textContent = et;
+      if (ex.textContent !== et) { ex.textContent = et; cards.xte.el.classList.toggle('has-extra', !!et); }
     }
   }
   // Column / dashboard end above the bottom stack (sim bar, sections, bottom nav) and left
@@ -6646,7 +6653,7 @@ const TabletTerminal = (() => {
     const rr = rn && getComputedStyle(rn).display !== 'none' ? rn.getBoundingClientRect() : null;
     const L = Math.round(lr && lr.width > 0 ? lr.right + 8 : 8);
     const R = Math.round(rr && rr.width > 0 ? rr.left - 8 : vw - 8);
-    const n = document.querySelectorAll('#bottomnav .bn-bar > .bn-btn:not(.hide)').length || 12;
+    const n = document.querySelectorAll('#bottomnav .bn-bar > .bn-btn:not(.hide)' + (terminal() ? ':not(.tui-bnmove)' : '')).length || 12;
     const key = L + ',' + R + ',' + n;
     if (key === bandKey) return;
     bandKey = key;
@@ -6795,13 +6802,52 @@ const TabletTerminal = (() => {
     ['tools', tr('Tools & Wizards'), 'ln-tools'],
     ['display', tr('Screen & Alerts'), 'ln-screenalerts'],
     ['file', tr('App & Files'), 'ln-filemenu'],
+    ['language', tr('Language'), 'language'],
   ];
+  // Phase 2b: bottom-bar buttons used now and then live here; each tile presses the original
+  // (hidden) button, so its own handler, command and control gate apply. The menu stays open,
+  // so a cycling button can be tapped again; the tile shows the original's current state.
+  const TILES_MORE = [ // [source selector, label, state (text) from the original]
+    ['#bn-skipcycle', tr('Skip rows'), () => ($('bn-skipnum') || {}).textContent || ''],
+    ['#bn-skiptoggle', tr('Skip mode'), null],
+    ['#bn-tram', tr('Tram lines'), null],
+    ['#bottomnav .bn-bar [data-cmd="map.cycleColor"]', tr('Coverage colour'), null],
+    ['#bottomnav .bn-bar [data-cmd="tool.resetHeading"]', tr('Reset tool heading'), null],
+  ];
+  let moreTiles = [];
+  function renderMoreTiles() {
+    for (const m of moreTiles) {
+      const src = document.querySelector(m.sel);
+      const ok = !!src && $('bottomnav').classList.contains('open') && !src.classList.contains('hide');
+      m.t.classList.toggle('disabled', !ok);
+      const img = src && src.querySelector('img'), icon = img ? img.getAttribute('src') || '' : '';
+      if (icon !== m.icon) { m.icon = icon; m.ic.innerHTML = icon ? '<img src="' + esc(icon) + '" alt="">' : ''; }
+      const st = m.state ? m.state() : '';
+      if (m.st.textContent !== st) m.st.textContent = st;
+    }
+  }
   function renderMenu() {
     menuBody.innerHTML =
       '<div class="tui-sh-sec">' + esc(tr('In the field')) + '</div><div class="tui-tiles tui-f"></div>' +
       '<div class="tui-sh-sec">' + esc(tr('Setup')) + '<small>' + esc(tr('opens setup mode; the left bar comes back')) + '</small></div>' +
       '<div class="tui-tiles setup-band tui-s"></div>';
     const fBox = menuBody.querySelector('.tui-f'), sBox = menuBody.querySelector('.tui-s');
+    const mBox = el('div', 'tui-tiles tui-m');
+    fBox.after(Object.assign(el('div', 'tui-sh-sec'), { textContent: tr('More field tools') }), mBox);
+    moreTiles = TILES_MORE.map(([sel, label, state]) => {
+      const t = el('button', 'tui-tile field more', '<span class="m-ic"></span><span class="m-l"></span><span class="m-st" translate="no"></span>');
+      t.querySelector('.m-l').textContent = label;
+      t.dataset.tile = sel;
+      onTap(t, () => {
+        const src = document.querySelector(sel);
+        if (!src || t.classList.contains('disabled')) return;
+        src.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+        setTimeout(renderMoreTiles, 150);
+      });
+      mBox.appendChild(t);
+      return { t, sel, state, ic: t.querySelector('.m-ic'), st: t.querySelector('.m-st'), icon: null };
+    });
+    renderMoreTiles();
     for (const [ic, label, key, fn] of TILES_FIELD) {
       const t = el('button', 'tui-tile field', IC[ic] + '<span></span>'); t.querySelector('span').textContent = label;
       t.dataset.tile = key;
@@ -6811,6 +6857,13 @@ const TabletTerminal = (() => {
     for (const [ic, label, nav] of TILES_SETUP) {
       const t = el('button', 'tui-tile setup', IC[ic] + '<span></span>'); t.querySelector('span').textContent = label;
       t.dataset.tile = nav;
+      if (nav === 'language') { // the language panel lives in the App menu; findable in any language
+        const sp = t.querySelector('span'); sp.setAttribute('translate', 'no');
+        sp.textContent = I18n.text('Language') === 'Language' ? 'Language' : I18n.text('Language') + ' · Language';
+        onTap(t, () => { closeSheets(); setMode('setup'); if (typeof lnOpen === 'function') lnOpen('language', 'ln-filemenu', renderLanguage); });
+        sBox.appendChild(t);
+        continue;
+      }
       onTap(t, () => { closeSheets(); setMode('setup'); pressNav(nav); });
       sBox.appendChild(t);
     }
@@ -6944,6 +6997,7 @@ const TabletTerminal = (() => {
     if (stackNow) stackTop(); // otherwise every 300 ms (layout reads stay out of the frame loop)
     renderCards();
     renderProxies();
+    if (menuSheet.classList.contains('open')) renderMoreTiles();
     requestAnimationFrame(frame);
   }
   apply();
@@ -6987,4 +7041,143 @@ const TabletTerminal = (() => {
   frame();
   return { get layout() { return layout; }, get mode() { return mode; }, setMode, openMenu, goPage,
     get page() { return pageIdx; }, get pages() { return pages.map(p => p.slice()); } };
+})();
+// ===== Tablet UI (Phase 2b): polish and German ===================================
+// Display only, like Phases 1 and 2: the labels, the moved buttons and the camera pad change
+// what is shown; every press still goes to the original button and its handler.
+//   aow.ui.langChosen = auto | user   — German was set once as the default / a language was picked
+// Numbers and units follow the language: German gets the decimal comma, km/h and ha/h. The
+// formatters below are global so the Phase 2 renderers (called during their first frame) find them.
+function tuiIsDe() { return String(I18n.language || 'en').split('-')[0] === 'de'; }
+// "12.5" → "12,5" in German. Not for IP addresses or versions (two dots or more).
+function tuiDec(s) {
+  s = String(s);
+  if (!tuiIsDe() || /\d\.\d+\.\d/.test(s)) return s;
+  return s.replace(/(\d)\.(\d)/g, '$1,$2');
+}
+function tuiNum(v, dec) { return tuiDec(Number(v).toFixed(dec)); }
+// Driving distances with what they measure: to the headland line ahead (tool pivot, along the
+// heading) and to the start of the armed auto U-turn.
+function tuiHeadlandText() {
+  const on = config && config.display && config.display.headlandDistanceVisible;
+  const d = tick ? tick.headlandDist : -1;
+  if (!on || d == null || d < 0 || document.body.classList.contains('maptap')) return '';
+  return tr('Headland {d}', { d: isMetric() ? fmtUnit(d, 'm', 1) : fmtUnit(d, 'm', 0) });
+}
+function tuiUTurnText() {
+  const op = tick && tick.op;
+  if (!(scene && scene.hasField && op && op.youturn && op.distToTrigger > 0)) return '';
+  return tr('U-turn {d}', { d: fmtUnit(op.distToTrigger, 'm', 0) });
+}
+const TabletPolish = (() => {
+  const root = document.documentElement;
+  const $ = id => document.getElementById(id);
+  const lsGet = (k, d) => { try { const v = window.localStorage.getItem(k); return v === null ? d : v; } catch (_) { return d; } };
+  const lsSet = (k, v) => { try { window.localStorage.setItem(k, v); } catch (_) { /* private / blocked */ } };
+  const terminal = () => root.getAttribute('data-tui-layout') === 'terminal';
+
+  // --- Units and numbers in German ------------------------------------------------------
+  // German: decimal comma, and number and unit stay on one line (no-break space).
+  fmtUnit = (orig => function (v, u, dec) { const r = tuiDec(orig(v, u, dec)); return tuiIsDe() ? r.replace(' ', '\u00a0') : r; })(fmtUnit);
+  unitLabel = (orig => function (u) { const l = orig(u); return tuiIsDe() && l === 'kph' ? 'km/h' : l; })(unitLabel);
+  fmtRate = (orig => function (h) { const r = orig(h); return tuiIsDe() ? r.replace(/\/hr$/, '/h') : r; })(fmtRate);
+  // Readouts the upstream code writes with toFixed(): rewritten in place (decimal comma).
+  const DEC_IDS = ['sb-speed', 'sb-unit', 'sb-hdg', 'sb-age', 'sb-rot', 'lb', 'roll-deg', 'sim-speedval', 'sim-steerval', 'bn-nudgeval'];
+  function fixText(node) {
+    if (!tuiIsDe()) return;
+    const v = node.nodeValue;
+    if (!v || !/\d\.\d|kph|\/hr/.test(v)) return;
+    let out = tuiDec(v).replace(/\bkph\b/g, 'km/h').replace(/ha\/hr\b/g, 'ha/h');
+    if (out !== v) node.nodeValue = out;
+  }
+  function fixAll(elm) {
+    const w = document.createTreeWalker(elm, NodeFilter.SHOW_TEXT);
+    for (let n = w.nextNode(); n; n = w.nextNode()) fixText(n);
+  }
+  const decObs = new MutationObserver(recs => {
+    for (const r of recs) {
+      if (r.type === 'characterData') fixText(r.target);
+      else for (const n of r.addedNodes) { if (n.nodeType === Node.TEXT_NODE) fixText(n); else if (n.nodeType === Node.ELEMENT_NODE) fixAll(n); }
+    }
+  });
+  for (const id of DEC_IDS) { const e = $(id); if (e) { decObs.observe(e, { subtree: true, childList: true, characterData: true }); fixAll(e); } }
+
+  // --- German as the default language --------------------------------------------------------
+  // Once per device: if the host still speaks English and German is offered, switch to German
+  // with the existing language command. Picking a language in the language panel ends that.
+  const LANG_KEY = 'aow.ui.langChosen';
+  setInterval(() => {
+    if (!appInfo || lsGet(LANG_KEY, '')) return;
+    const de = (appInfo.languages || []).some(l => l.code === 'de');
+    if (de && (appInfo.currentLanguage || 'en') === 'en') transport.send('app.setLanguage|de');
+    lsSet(LANG_KEY, 'auto');
+  }, 1000);
+  const langList = $('lang-list');
+  if (langList) langList.addEventListener('pointerdown', () => lsSet(LANG_KEY, 'user'), true);
+
+  // --- Distances with a label ---------------------------------------------------------------
+  // The name in the label size, the value as before: "Vorgewende 319,0 m". The upstream
+  // renderers write the plain value every frame; the name goes in front of it again.
+  function labelled(node, key) {
+    const first = node.firstElementChild;
+    if (first && first.classList.contains('tui-dk')) return;
+    node.innerHTML = '<span class="tui-dk">' + esc(I18n.text(key)) + '</span> ' + esc(node.textContent);
+  }
+  updateHeadlandHud = (orig => function () {
+    orig();
+    if (hlHud.style.display === 'block' && tuiHeadlandText()) labelled(hlHud, tr('Headland'));
+  })(updateHeadlandHud);
+  renderUTurnIndicator = (orig => function () {
+    orig();
+    if (UTI.root && !UTI.root.hidden && tuiUTurnText()) labelled(UTI.dist, tr('U-Turn'));
+  })(renderUTurnIndicator);
+
+  // --- Camera pad: hidden while driving; a tap on the map shows it for 5 s -------------------------
+  const pad = $('campad');
+  let camTimer = 0;
+  function showCam() {
+    root.setAttribute('data-tui-cam', '');
+    clearTimeout(camTimer);
+    camTimer = setTimeout(() => root.removeAttribute('data-tui-cam'), 5000);
+  }
+  const ck = $('ck');
+  // Only touches that reach the map: overlays stop their own pointer events.
+  window.addEventListener('pointerdown', e => { if (e.target === ck || e.target === document.body) showCam(); });
+  if (pad) pad.addEventListener('pointerdown', showCam); // keep it up while it is used
+
+  // --- Bottom bar: a name under every button; rarely used ones go to the menu ---------------------
+  const BN_LABEL = [ // [selector in .bn-bar, label, moved to the menu]
+    ['#bn-skipcycle', tr('Skip rows'), true],
+    ['#bn-skiptoggle', tr('Skip mode'), true],
+    ['[data-cmd="map.cycleColor"]', tr('Coverage colour'), true],
+    ['[data-cmd="tool.resetHeading"]', tr('Reset tool heading'), true],
+    ['#bn-secheadland', tr('HL sections'), false],
+    ['#bn-headland', tr('Headland'), false],
+    ['#bn-flags', tr('Flags'), false],
+    ['[data-cmd="track.snapLeft"]', tr('Track left'), false],
+    ['[data-cmd="track.snapRight"]', tr('Track right'), false],
+    ['[data-cmd="track.snapPivot"]', tr('Line to me'), false],
+    ['#bn-tram', tr('Tram lines'), true],
+    ['#bn-abmenu', tr('AB line'), false],
+  ];
+  const bar = document.querySelector('#bottomnav .bn-bar');
+  if (bar) for (const [sel, label, moved] of BN_LABEL) {
+    const b = bar.querySelector(':scope > ' + sel);
+    if (!b) continue;
+    const l = document.createElement('span'); l.className = 'tui-bn-lbl'; l.textContent = label;
+    b.appendChild(l);
+    if (moved) b.classList.add('tui-bnmove');
+  }
+
+  // --- On-screen U-turn / track shift: framed buttons with a name ----------------------------------
+  const OSB_LABEL = { 'youturn.manualLeft': tr('U-turn left'), 'youturn.manualRight': tr('U-turn right'),
+    'track.snapLeft': tr('Track left'), 'track.snapRight': tr('Track right') };
+  for (const b of document.querySelectorAll('#onscreenbtns .osb-btn')) {
+    const t = OSB_LABEL[b.dataset.cmd];
+    if (!t) continue;
+    const l = document.createElement('span'); l.className = 'tui-osb-lbl'; l.textContent = t;
+    b.appendChild(l);
+  }
+
+  return { showCam };
 })();
