@@ -851,7 +851,13 @@ public class NtripClientService : INtripClientService, IDisposable
         {
             await socket.SendAsync(Encoding.ASCII.GetBytes(gga + "\r\n"), SocketFlags.None);
             if (Interlocked.Increment(ref _ggaSentThisSession) == 1)
-                _logger.LogInformation("[NTRIP] first GGA sent to the caster: {Gga}", gga);
+            {
+                // Not the sentence itself: every client's log viewer and the bug report show the
+                // log, and the exact position is not needed to see that a GGA went out.
+                var f = gga.Split(',');
+                _logger.LogInformation("[NTRIP] first GGA sent to the caster (fix quality {Quality}, {Sats} satellites)",
+                    f.Length > 7 ? f[6] : "?", f.Length > 7 ? f[7] : "?");
+            }
         }
         catch (ObjectDisposedException)
         {
