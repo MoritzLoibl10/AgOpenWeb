@@ -883,6 +883,19 @@ public partial class MainViewModel : ObservableObject
                 _logger.LogInformation("Migrated v1 vehicle profiles to v2 (split vehicle/tool)");
             }
 
+            // Fork, one time: U-Turn/Tram values from the vehicle into the tool profiles
+            // (upstream #330 moved them; see ToolUTurnTramMigration, docs/Host-Aenderungen.md).
+            try
+            {
+                AgOpenWeb.Services.Profile.ToolUTurnTramMigration.Run(AppDataRoot.Documents,
+                    _configurationService.ProfilesDirectory, _configurationService.ToolsDirectory,
+                    _settingsService.Settings.FieldsDirectory, _settingsService.Settings.LastUsedVehicleProfile, _logger);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "U-Turn/Tram migration to tool profiles failed; the tools load their defaults");
+            }
+
             var profiles = _configurationService.GetAvailableProfiles();
             if (profiles.Count == 0)
             {
