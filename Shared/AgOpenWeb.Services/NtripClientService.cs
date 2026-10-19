@@ -210,6 +210,11 @@ public class NtripClientService : INtripClientService, IDisposable
                 _sessionOpen = true;
                 _cancellationTokenSource = new CancellationTokenSource();
                 token = _cancellationTokenSource.Token;
+                // The GGA timer starts when the caster accepts (StartGgaTimer): the first GGA
+                // goes out right then, the next ones every GgaIntervalSeconds. Made here, before
+                // the request, so a fast "accepted" can never find it missing.
+                if (config.GgaIntervalSeconds > 0)
+                    _ggaTimer = new Timer(GgaTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
             }
 
             await SendNtripRequestAsync();
@@ -223,11 +228,6 @@ public class NtripClientService : INtripClientService, IDisposable
             // The loop gets its own socket, so a stale loop can never read a newer session's.
             _ = Task.Run(() => ReceiveLoop(sock, gen, token));
             _ = Task.Run(() => SendLoop(token));
-
-            // The GGA timer starts when the caster accepts (StartGgaTimer): the first GGA
-            // goes out right then, the next ones every GgaIntervalSeconds.
-            if (config.GgaIntervalSeconds > 0)
-                _ggaTimer = new Timer(GgaTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
 
             // Stall watchdog — drives the periodic [NTRIP] health log line and reconnects
             // if nothing has arrived for WATCHDOG_RECONNECT_SECONDS, including a caster
