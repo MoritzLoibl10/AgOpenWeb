@@ -7312,6 +7312,8 @@ const TabletProfiles = (() => {
     if (connState !== 'connected') return tr('No connection to the guidance computer.');
     // Stale ticks: steering and speed below would be the last known values.
     if (!lastTick || performance.now() - lastTick.t > 2000) return tr('No current data from the guidance computer.');
+    // Observers: the operator may switch steering back on at any moment with these values.
+    if (!iHoldControl && lastControl && lastControl.held) return tr('Another device has control. Profiles can only be changed there.');
     if (tick && tick.op && tick.op.autoSteer) return tr('Steering is on. Switch steering off to change profiles.');
     if (lastTick && Math.abs(lastTick.speed || 0) > STILL_MPS) return tr('The vehicle is moving. Stop to change profiles.');
     return '';
