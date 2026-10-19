@@ -6471,12 +6471,12 @@ const TabletTerminal = (() => {
   // Sign as the light bar: + = right of the line, so the way to steer is left.
   function xteInfo() {
     const xte = tick.crossTrackError || 0, a = Math.abs(xte);
-    let val, unit;
-    let raw;
+    let raw, unit;
     if (a >= 10) { raw = toDisplayUnit(a, 'm').toFixed(1); unit = unitLabel('m'); }
     else { raw = toDisplayUnit(a * 100, 'cm').toFixed(isMetric() ? 0 : 1); unit = unitLabel('cm'); }
-    const dir = +raw === 0 ? 0 : xte > 0 ? -1 : 1;
-    val = tuiDec(raw);
+    // "On line" within 5 cm, as the light bar's centre LED and #lb (upstream onLine).
+    const dir = a < 0.05 ? 0 : xte > 0 ? -1 : 1;
+    const val = tuiDec(raw);
     const pass = tick.op && !tick.op.contour ? tr('Pass {n}', { n: Math.abs((tick.op.passNumber | 0)) + 1 }) : '';
     // Translated here: the caption is joined from two strings, so the page translator can't match it.
     const word = I18n.text(dir < 0 ? tr('Steer left') : dir > 0 ? tr('Steer right') : tr('On line'));
