@@ -7466,7 +7466,10 @@ const TabletProfiles = (() => {
     foot.innerHTML = '';
     const classic = el('button', 'tp-btn quiet'); classic.textContent = T(tr('Classic view'));
     classic.disabled = !!lock;
-    onTap(classic, () => { close(); lnOpenOrig('vehtoolhub', 'ln-vehicle', refreshHub); });
+    onTap(classic, () => {
+      if (pending) { openRecover(); return; } // its Load would save the half-applied values too
+      close(); lnOpenOrig('vehtoolhub', 'ln-vehicle', refreshHub);
+    });
     const changed = sel.vehicle !== profiles.activeVehicle || sel.tool !== profiles.activeTool;
     const load = el('button', 'tp-btn pri big');
     load.innerHTML = '✓ <span></span>';
