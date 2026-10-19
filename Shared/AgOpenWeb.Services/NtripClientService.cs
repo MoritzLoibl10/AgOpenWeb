@@ -115,8 +115,12 @@ public class NtripClientService : INtripClientService, IDisposable
     // when the fix passes the guidance quality gate (GpsData.IsValid, by default RTK fixed),
     // which a receiver can't reach before the corrections arrive. With no fix yet, the last
     // position with a fix is used; with none at all, no GGA is sent (never a made-up one).
-    private readonly record struct GgaFix(double Latitude, double Longitude, double Altitude, int FixQuality, int Satellites);
+    // A class, so the timer thread and the connect path swap whole fixes, never torn ones.
+    private sealed record GgaFix(double Latitude, double Longitude, double Altitude, int FixQuality, int Satellites, long Stamp = 0);
     private GgaFix? _lastGgaFix;
+    // How long the last fix stands in for a lost one: past that the position may be far away
+    // and the caster would build its virtual base there.
+    internal const double MaxLastFixAgeSeconds = 300;
     private int _ggaSentThisSession;
     private bool _ggaMissingLogged;
     // What the caster sent: its reply header, and the first bytes after it while no RTCM
@@ -792,7 +796,8 @@ public class NtripClientService : INtripClientService, IDisposable
 
     /// <summary>
     /// The GGA for the caster: the manual position when configured, else the receiver's
-    /// position whenever it has a fix of any quality, else the last position that had one.
+    /// position whenever it has a fix of any quality, else the last position that had one
+    /// (for at most <see cref="MaxLastFixAgeSeconds"/>).
     /// False (and a one-time log line) when there is no position at all.
     /// </summary>
     internal bool TryBuildGga(out string gga)
@@ -807,8 +812,9 @@ public class NtripClientService : INtripClientService, IDisposable
         else
         {
             fix = UsableGgaFix(_gpsService.CurrentData);
-            if (fix != null) _lastGgaFix = fix;
-            else fix = _lastGgaFix;
+            long now = Clock.Current.GetTimestamp();
+            if (fix != null) _lastGgaFix = fix = fix with { Stamp = now };
+            else if (_lastGgaFix is { } last && Clock.Current.ElapsedSeconds(last.Stamp, now) <= MaxLastFixAgeSeconds) fix = last;
         }
 
         if (fix is not { } f)

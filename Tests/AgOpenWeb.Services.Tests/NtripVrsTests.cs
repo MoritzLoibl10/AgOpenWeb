@@ -170,6 +170,28 @@ public class NtripVrsTests
     }
 
     [Test]
+    public void Gga_LastFix_ExpiresAfterMaxAge()
+    {
+        var clock = new AgOpenWeb.Models.Timing.TestClock();
+        AgOpenWeb.Models.Timing.Clock.Set(clock);
+        try
+        {
+            var data = Fix(5);
+            var svc = Client(Gps(data), out _);
+            SetConfig(svc, new NtripConfiguration());
+            Assert.That(svc.TryBuildGga(out _), Is.True);
+            data.FixQuality = 0;
+            clock.AdvanceSeconds(NtripClientService.MaxLastFixAgeSeconds - 10);
+            Assert.That(svc.TryBuildGga(out _), Is.True, "within the limit the last fix stands in");
+            clock.AdvanceSeconds(20);
+            Assert.That(svc.TryBuildGga(out _), Is.False, "too old: no GGA rather than a stale position");
+            data.FixQuality = 1;
+            Assert.That(svc.TryBuildGga(out _), Is.True);
+        }
+        finally { AgOpenWeb.Models.Timing.Clock.Reset(); }
+    }
+
+    [Test]
     public void Gga_MinutesNeverRoundTo60()
     {
         var svc = Client(Gps(Fix(1, lat: 47.99999999, lon: 15.99999999)), out _);
