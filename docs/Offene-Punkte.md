@@ -43,6 +43,7 @@ Board und Motor sind nicht auf echter Hardware getestet; kein Punkt hier sagt et
 | 28 | i18n: Fast-Dubletten und ein unübersetzter upstream-Text | niedrig | nein |
 | 29 | Name auf Desktop/iOS und in den Artefakten weiter „AgOpenWeb“ | niedrig | ja |
 | 30 | Kleinigkeiten nach dem Upstream-Merge (#350, #352) | niedrig | teils |
+| 31 | 7 Zoll, Handschuh: Bildschirmknöpfe verdecken die Vorgewende-Anzeige | mittel | nein |
 
 ---
 
@@ -412,3 +413,14 @@ Board und Motor sind nicht auf echter Hardware getestet; kein Punkt hier sagt et
   - #352 fragt am Desktop „Exit AgOpenWeb?“ mit festem Namen.
 - **Vorschlag:** Beim Merge mitnehmen.
 - **Host-Änderung nötig:** teils (#352)
+
+### 31. 7 Zoll, Handschuh: Bildschirmknöpfe verdecken die Vorgewende-Anzeige
+- **Priorität:** mittel
+- **Dateien:** `index.html` tablet-ui-Block (`#onscreenbtns`, `#headland-hud` Lage), `app.js` TabletTerminal `stackTop`, `fitOverlays`.
+- **Beschreibung:** Bei 1024×600 im Handschuh-Modus legen sich die upstream-Knöpfe „Wende
+  links/rechts“ und „Spur links/rechts“ (sichtbar, solange gelenkt wird) über die
+  Vorgewende-Anzeige: Ihr Abstand ist halb verdeckt. Der UI-Audit misst das in jeder Ansicht
+  mit eingeschalteter Lenkung (108×47 px), vor und nach der Gesamtprüfung gleich.
+- **Vorschlag:** Die Knöpfe unter die HUD-Zeile setzen (`--tui-y-hud` + Höhe) oder auf 7 Zoll
+  in die Spalte rechts neben der Querablage; danach Audit bei 1024×600 Handschuh.
+- **Host-Änderung nötig:** nein
