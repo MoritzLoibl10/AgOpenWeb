@@ -8695,17 +8695,22 @@ const TabletBrand = (() => {
     L.push('GPS: fix ' + s.fixQuality + ' (' + (s.fixText || '?') + '), sats ' + s.sats + ', hdop ' + s.hdop + ', correction age ' + s.age + ' s' + (s.gpsLost ? ', DATA LOST' : ''));
     L.push('NTRIP: ' + (s.ntripEnabled ? 'on' : 'off') + ', connected ' + !!s.ntripConnected + ', bytes ' + s.ntripBytes + ', to ' + (s.ntripDestination || '?'));
     L.push('  status: ' + (s.ntripStatus || ''));
-    if (s.ntripRtcm) L.push('  rtcm: ' + JSON.stringify(s.ntripRtcm));
     L.push('Modules: gps ' + !!s.gpsOk + ', imu ' + !!s.imuOk + ', steer ' + !!s.autoSteerOk + ', machine ' + !!s.machineOk);
-    L.push('');
-    L.push('Last log lines (this device):');
-    for (const e of (appInfo && appInfo.logs ? appInfo.logs.slice(-60) : [])) L.push('  ' + e.time + ' [' + e.level + '] ' + e.message);
+    // The host's log and RTCM report are in the file as logs.txt and ntrip_rtcm.txt.
     let out = L.join('\n');
     // Never a password or NTRIP user name, even if it appears in a log line.
     const secrets = [];
     const np = ntripProfiles && ntripProfiles.profiles;
     if (np) for (const k of Object.keys(np)) for (const f of ['password', 'username']) { const x = np[k] && np[k][f]; if (x && x.length >= 3) secrets.push(x); }
     for (const x of secrets.sort((a, b) => b.length - a.length)) out = out.split(x).join('***');
+    // The host reads a command in 1 KB pieces and runs each piece on its own: the summary has
+    // to fit in one, with the command prefix (code points, so no character is cut in half).
+    const enc = new TextEncoder(), max = 1000 - enc.encode('app.bugReport|diagnose\t').length;
+    if (enc.encode(out).length > max) {
+      let cp = Array.from(out);
+      while (enc.encode(cp.join('') + ' …').length > max) cp = cp.slice(0, -16);
+      out = cp.join('') + ' …';
+    }
     return out;
   }
   let diagSent = false;
