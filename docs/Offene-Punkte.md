@@ -9,41 +9,48 @@ Priorität: **hoch** = Sicherheit oder Daten, **mittel** = Fehlfunktion, **niedr
 Wo „unsicher“ steht, ist der Befund aus dem Code abgeleitet, aber nicht nachgestellt.
 Board und Motor sind nicht auf echter Hardware getestet; kein Punkt hier sagt etwas über sie.
 
+## Stand
+
+Nach `sync/upstream` (Merge von upstream bis #357) sind die Punkte 1, 2, 8, 16 und 18 erledigt,
+17 und 30 teilweise. Zu 3, 4 und 5 gibt es einen englischen Issue-Text für upstream. Punkt 31
+ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachlesen stehen.
+
 ## Übersicht
 
-| Nr. | Titel | Priorität | Host |
-|---|---|---|---|
-| 1 | Sicherheitsfixes von upstream fehlen (25 PRs Rückstand) | hoch | ja (upstream-Code) |
-| 2 | Nach dem Upstream-Merge: U-Turn- und Fahrgassenwerte bestehender Geräteprofile werden Standardwerte | hoch | ja |
-| 3 | Beobachter können Geometrie und Profile ändern, auch bei eingeschalteter Lenkung | hoch | ja |
-| 4 | Zwei Geräte speichern gleichzeitig: Befehle mischen sich, fremdes Profil wird beschrieben | hoch | ja |
-| 5 | NTRIP-Passwörter und AgShare-Schlüssel gehen an jeden Browser im LAN | hoch | ja |
-| 6 | Lizenz: `LICENSE.md` ist Apache 2.0, Dateiköpfe und README sagen GPL v3 | hoch | nein |
-| 7 | Host liest Befehle in 1-KB-Stücken (WebSocket) | mittel | ja |
-| 8 | Unvollständiges Speichern lässt sich nicht verwerfen | mittel | nein |
-| 9 | Speicher-Merker gilt pro Adresse, nicht pro Lenkrechner | mittel | ja |
-| 10 | Deutsch als Standard überstimmt eine bewusste Sprachwahl | mittel | ja |
-| 11 | Host-Meldungen als Toast bleiben englisch, auch sicherheitsnahe | mittel | nein |
-| 12 | Bei Verbindungsverlust frieren upstream-Anzeigen ein (Fix-Chip, Lichtleiste, Rollanzeige) | mittel | nein |
-| 13 | `GpsService.CurrentData` veraltet nie, wenn das GPS verstummt | mittel | ja |
-| 14 | Neues Feld ohne GPS bekommt den Ursprung New York | mittel | ja |
-| 15 | Network IO: Subnetz-Ersatz 192.168.5 wird gesendet | mittel | nein |
-| 16 | Nach dem Upstream-Merge: Schnellleiste bricht (#339, #318) | mittel | nein |
-| 17 | Nach dem Upstream-Merge: i18n-Prüfung rot, `de.json` kollidiert bei jedem Merge | mittel | nein |
-| 18 | Nach dem Upstream-Merge: „Report on GitHub“ führt zum Upstream-Repo | mittel | nein |
-| 19 | Dauerlast: Beobachter auf Bild-für-Bild-Texten, 9 Intervalle, erzwungene Layouts | mittel | nein |
-| 20 | Binärdateien ohne Lizenzdatei und ohne Hinweise auf Fremdkomponenten | mittel | nein |
-| 21 | „Gespeichert“ beweist nicht, dass der Host auf die Platte geschrieben hat | niedrig | ja |
-| 22 | Gesperrter localStorage: das rote Band überlebt kein Neuladen, ohne Hinweis | niedrig | nein |
-| 23 | Profilnamen und Eingaben: Kleinigkeiten | niedrig | teils |
-| 24 | NTRIP: kleinere Punkte (HDOP, Fix 7/8, Rest-Wettlauf, Backoff) | niedrig | ja |
-| 25 | Anzeige: kleine Ersatz-Nullen und Ausblendungen | niedrig | nein |
-| 26 | Hilfslinien und Raster rechnen mit 6 m ohne Teilbreiten | niedrig | nein |
-| 27 | Doppelte Hilfsfunktionen im tablet-ui-Block | niedrig | nein |
-| 28 | i18n: Fast-Dubletten und ein unübersetzter upstream-Text | niedrig | nein |
-| 29 | Name auf Desktop/iOS und in den Artefakten weiter „AgOpenWeb“ | niedrig | ja |
-| 30 | Kleinigkeiten nach dem Upstream-Merge (#350, #352) | niedrig | teils |
-| 31 | 7 Zoll, Handschuh: Bildschirmknöpfe verdecken die Vorgewende-Anzeige | mittel | nein |
+| Nr. | Titel | Priorität | Host | Stand |
+|---|---|---|---|---|
+| 1 | Sicherheitsfixes von upstream fehlen (25 PRs Rückstand) | hoch | ja (upstream-Code) | erledigt (sync/upstream: Merge) |
+| 2 | Nach dem Upstream-Merge: U-Turn- und Fahrgassenwerte bestehender Geräteprofile werden Standardwerte | hoch | ja | erledigt (sync/upstream: Migration) |
+| 3 | Beobachter können Geometrie und Profile ändern, auch bei eingeschalteter Lenkung | hoch | ja | Issue-Text an upstream |
+| 4 | Zwei Geräte speichern gleichzeitig: Befehle mischen sich, fremdes Profil wird beschrieben | hoch | ja | Issue-Text an upstream |
+| 5 | NTRIP-Passwörter und AgShare-Schlüssel gehen an jeden Browser im LAN | hoch | ja | Issue-Text an upstream |
+| 6 | Lizenz: `LICENSE.md` ist Apache 2.0, Dateiköpfe und README sagen GPL v3 | hoch | nein | offen |
+| 7 | Host liest Befehle in 1-KB-Stücken (WebSocket) | mittel | ja | offen |
+| 8 | Unvollständiges Speichern lässt sich nicht verwerfen | mittel | nein | erledigt (sync/upstream: Verwerfen in Sackgassen) |
+| 9 | Speicher-Merker gilt pro Adresse, nicht pro Lenkrechner | mittel | ja | offen |
+| 10 | Deutsch als Standard überstimmt eine bewusste Sprachwahl | mittel | ja | offen |
+| 11 | Host-Meldungen als Toast bleiben englisch, auch sicherheitsnahe | mittel | nein | offen |
+| 12 | Bei Verbindungsverlust frieren upstream-Anzeigen ein (Fix-Chip, Lichtleiste, Rollanzeige) | mittel | nein | offen |
+| 13 | `GpsService.CurrentData` veraltet nie, wenn das GPS verstummt | mittel | ja | offen |
+| 14 | Neues Feld ohne GPS bekommt den Ursprung New York | mittel | ja | offen |
+| 15 | Network IO: Subnetz-Ersatz 192.168.5 wird gesendet | mittel | nein | offen |
+| 16 | Nach dem Upstream-Merge: Schnellleiste bricht (#339, #318) | mittel | nein | erledigt (sync/upstream) |
+| 17 | Nach dem Upstream-Merge: i18n-Prüfung rot, `de.json` kollidiert bei jedem Merge | mittel | nein | teils: Prüfung grün; `de.json` kollidiert weiter |
+| 18 | Nach dem Upstream-Merge: „Report on GitHub“ führt zum Upstream-Repo | mittel | nein | erledigt (sync/upstream: ausgeblendet) |
+| 19 | Dauerlast: Beobachter auf Bild-für-Bild-Texten, 9 Intervalle, erzwungene Layouts | mittel | nein | offen |
+| 20 | Binärdateien ohne Lizenzdatei und ohne Hinweise auf Fremdkomponenten | mittel | nein | offen |
+| 21 | „Gespeichert“ beweist nicht, dass der Host auf die Platte geschrieben hat | niedrig | ja | offen |
+| 22 | Gesperrter localStorage: das rote Band überlebt kein Neuladen, ohne Hinweis | niedrig | nein | offen |
+| 23 | Profilnamen und Eingaben: Kleinigkeiten | niedrig | teils | offen |
+| 24 | NTRIP: kleinere Punkte (HDOP, Fix 7/8, Rest-Wettlauf, Backoff) | niedrig | ja | offen |
+| 25 | Anzeige: kleine Ersatz-Nullen und Ausblendungen | niedrig | nein | offen |
+| 26 | Hilfslinien und Raster rechnen mit 6 m ohne Teilbreiten | niedrig | nein | offen |
+| 27 | Doppelte Hilfsfunktionen im tablet-ui-Block | niedrig | nein | offen |
+| 28 | i18n: Fast-Dubletten und ein unübersetzter upstream-Text | niedrig | nein | offen |
+| 29 | Name auf Desktop/iOS und in den Artefakten weiter „AgOpenWeb“ | niedrig | ja | offen |
+| 30 | Kleinigkeiten nach dem Upstream-Merge (#350, #352) | niedrig | teils | teils: #350 erledigt, #352 offen |
+| 31 | 7 Zoll, Handschuh: Bildschirmknöpfe verdecken die Vorgewende-Anzeige | mittel | nein | vorgemerkt für die nächste UI-Runde |
+| 32 | IMU-Kurs aus PGN 253: eine 0 der AiO-Firmware gilt als gültiger Kurs (upstream #357) | hoch | ja | offen, nur eingetragen (Lenklogik) |
 
 ---
 
@@ -424,3 +431,23 @@ Board und Motor sind nicht auf echter Hardware getestet; kein Punkt hier sagt et
 - **Vorschlag:** Die Knöpfe unter die HUD-Zeile setzen (`--tui-y-hud` + Höhe) oder auf 7 Zoll
   in die Spalte rechts neben der Querablage; danach Audit bei 1024×600 Handschuh.
 - **Host-Änderung nötig:** nein
+
+### 32. IMU-Kurs aus PGN 253: eine 0 der AiO-Firmware gilt als gültiger Kurs (upstream #357)
+- **Priorität:** hoch (Sicherheit; Lenklogik, deshalb nur eingetragen; nicht auf echter Hardware geprüft)
+- **Dateien:** `Shared/AgOpenWeb.Services/AutoSteer/PgnBuilder.cs` 665–669 (`hasImuHeading = headingRaw != 9999`), Kursfusion.
+- **Beschreibung:**
+  - Seit #357 nimmt der Host den IMU-Kurs aus PGN 253 (Lenkmodul) und PGN 211 und mischt
+    ihn mit dem Kurs aus aufeinanderfolgenden Fixes.
+  - „Kein IMU“ ist nur 9999. Der PR-Text sagt selbst, dass die AiO-v26-Firmware dort 0
+    sendet (Firmware_Teensy_AiO_26#60). Eine Firmware, die 0 statt 9999 sendet, würde also
+    einen Kurs von 0° (Nord) in die Fusion geben.
+  - Ob die Firmware deines AiO v4.5 mit BNO085 einen echten Kurs oder 0 sendet, ist nicht
+    geprüft.
+  - Seit #356 wird außerdem die Rollneigung aus PGN 253 verwendet (vorher immer 0). Roll-Null
+    und Roll-Umkehr wirken damit erst jetzt.
+- **Vorschlag:**
+  - Vor dem ersten Lenken mit der echten Hardware im GPS-Fenster prüfen, ob „IMU-Kurs“ dem
+    Fahrzeugkurs folgt; Roll-Null kalibrieren.
+  - Upstream fragen, ob 0 bei fehlendem IMU abgefangen werden soll, bis die Firmware
+    korrigiert ist.
+- **Host-Änderung nötig:** ja (Lenklogik, nur upstream)
