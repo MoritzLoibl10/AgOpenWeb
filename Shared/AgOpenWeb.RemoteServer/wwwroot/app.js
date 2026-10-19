@@ -8382,12 +8382,13 @@ const TabletProfiles = (() => {
       t.querySelector('.l').textContent = T(kind === 'vehicle' ? tr('Vehicle') : tr('Tool'));
       t.querySelector('.v').textContent = name || '—';
       t.querySelector('.s').textContent = s;
-      t.querySelector('.tp-n-go').textContent = lock ? T(tr('Locked while driving')) : T(tr('Change'));
+      // The lock has several reasons now (driving, steering, no data, another device has control).
+      t.querySelector('.tp-n-go').textContent = lock ? T(tr('Locked')) : T(tr('Change'));
+      t.title = lock ? T(lock) : '';
       t.classList.toggle('locked', !!lock);
     }
   }
   setInterval(() => { const m = $('tui-menu'); if (m && m.classList.contains('open')) nowTiles(); }, 300);
-  tr('Change'); tr('Locked while driving');
 
   return { open, get view() { return view; } };
 })();
