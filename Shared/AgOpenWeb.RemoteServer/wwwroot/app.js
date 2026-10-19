@@ -9123,3 +9123,65 @@ const TabletBrand = (() => {
 
   return { get on() { return on(); }, apply, openHelp, openInfo, openDiag, summary };
 })();
+
+// ===== Heading check (test bench): GPS heading beside the IMU heading, setup mode only ========
+// Display only: reads what the host already sends (tick: GPS fix-to-fix heading and the IMU
+// heading with the fusion's learned offset; status: the IMU heading as it came in, NaN when
+// there is none) and sends nothing. Since upstream #357 the host also takes the IMU heading
+// from PGN 253 / 211; a firmware that sends 0 there instead of 9999 ("no IMU") feeds 0°
+// into the heading fusion (docs/Offene-Punkte.md, point 32). The warnings show that on the
+// bench. The steering itself is not changed by any of this.
+const TabletHeadingCheck = (() => {
+  const MOVING_MPS = 0.5;      // ≈ 1.8 km/h: below this the fix-to-fix heading isn't meaningful
+  const ZERO_SECONDS = 5;      // raw IMU heading exactly 0 for this long while moving
+  const DEV_DEG = 20, DEV_SECONDS = 1;
+  const T = k => I18n.text(k);
+  const box = document.createElement('div');
+  box.id = 'tui-hdgchk'; box.setAttribute('translate', 'no'); box.hidden = true;
+  box.innerHTML = '<div class="hc-t"></div><div class="hc-g"></div><div class="hc-w"></div>';
+  document.body.appendChild(box);
+  const [title, grid, warn] = box.children;
+  let zeroSince = 0, devSince = 0, last = '';
+  const fin = v => typeof v === 'number' && Number.isFinite(v);
+  const norm = d => ((d % 360) + 360) % 360;
+  const diff = (a, b) => { const d = norm(a - b); return d > 180 ? 360 - d : d; };
+  const deg = v => fin(v) ? tuiNum(norm(v), 1) + '°' : '—';
+  function render() {
+    const show = typeof TabletTerminal !== 'undefined' && TabletTerminal.mode === 'setup';
+    if (box.hidden === show) box.hidden = !show;
+    if (!show) { zeroSince = devSince = 0; last = ''; return; }
+    const now = performance.now();
+    const live = connState === 'connected' && !!lastTick && now - lastTick.t < 2000;
+    const moving = live && Math.abs(lastTick.speed || 0) > MOVING_MPS;
+    const gps = tick ? tick.chartGpsHeading : NaN, corr = tick ? tick.chartImuHeading : NaN;
+    const sd = statusBar && statusBar.systemData, raw = sd ? sd.imuHeading : NaN;
+    const dev = fin(gps) && fin(corr) ? diff(corr, gps) : NaN;
+    zeroSince = moving && fin(raw) && Math.abs(raw) < 0.05 ? (zeroSince || now) : 0;
+    devSince = moving && fin(dev) && dev > DEV_DEG ? (devSince || now) : 0;
+    const w = [];
+    if (zeroSince && now - zeroSince >= ZERO_SECONDS * 1000)
+      w.push(tr('The IMU heading has been exactly 0° for {s} s while driving. The module probably sends no real IMU heading.', { s: Math.round((now - zeroSince) / 1000) }));
+    if (devSince && now - devSince >= DEV_SECONDS * 1000)
+      w.push(tr('The IMU heading differs from the GPS heading by {d}°.', { d: tuiNum(dev, 0) }));
+    const rows = [
+      [T(tr('GPS heading')), live ? deg(gps) : '—'],
+      [T(tr('IMU heading (as received)')), !live ? '—' : fin(raw) ? deg(raw) : T(tr('none'))],
+      [T(tr('IMU heading (with offset)')), live ? deg(corr) : '—'],
+      [T(tr('Difference')), live && fin(dev) ? tuiNum(dev, 1) + '°' : '—'],
+    ];
+    const key = rows.map(r => r.join('=')).join('|') + '|' + w.join('|') + moving;
+    if (key === last) return;
+    last = key;
+    title.textContent = T(tr('Heading check')) + (live && !moving ? ' · ' + T(tr('standing')) : '');
+    grid.innerHTML = '';
+    for (const [k, v] of rows) {
+      grid.appendChild(Object.assign(document.createElement('span'), { textContent: k }));
+      grid.appendChild(Object.assign(document.createElement('b'), { textContent: v }));
+    }
+    warn.innerHTML = '';
+    for (const t of w) warn.appendChild(Object.assign(document.createElement('div'), { textContent: '⚠ ' + t }));
+    box.classList.toggle('warn', w.length > 0);
+  }
+  setInterval(render, 250);
+  return { render };
+})();

@@ -1981,6 +1981,22 @@
     :root[data-theme="day"][data-tui-sun] :is(.tp-card, .tp-fld, .tp-btn, .tp-ch, .tp-sym, .tp-segb) { border-color: #000; }
     /* outside the block: Field Builder inset without a working width */
     .fb-twmiss { font: 700 13px system-ui, sans-serif; color: var(--tui-warn); }
+  
+    /* ===== Heading check (test bench, setup mode): GPS and IMU heading side by side ======== */
+    #tui-hdgchk { position: fixed; z-index: 12; top: calc(var(--tui-sb-h) + 10px + var(--sat, 0px)); right: 10px;
+      width: max(320px, 26vw); max-height: calc(100vh - var(--tui-sb-h) - 30px); overflow: auto; background: var(--tui-card); color: var(--tui-ink); border: 2px solid var(--tui-card-line);
+      border-radius: 12px; padding: 8px 12px 10px; box-shadow: 0 4px 14px rgba(0,0,0,0.3); box-sizing: border-box; }
+    #tui-hdgchk[hidden] { display: none; }
+    #tui-hdgchk .hc-t { font: 800 var(--tui-fs-lbl)/1.3 system-ui, sans-serif; color: var(--tui-ink-2); margin-bottom: 4px; }
+    #tui-hdgchk .hc-g { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; align-items: baseline;
+      font: 600 var(--tui-fs-lbl)/1.35 system-ui, sans-serif; }
+    #tui-hdgchk .hc-g b { font: 800 calc(var(--tui-fs-lbl) + 3px)/1.2 system-ui, sans-serif; font-variant-numeric: tabular-nums; text-align: right; }
+    #tui-hdgchk .hc-w:empty { display: none; }
+    #tui-hdgchk .hc-w { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+    #tui-hdgchk .hc-w div { background: var(--tui-warn); color: var(--tui-warn-ink); border-radius: 8px; padding: 6px 8px;
+      font: 700 var(--tui-fs-lbl)/1.3 system-ui, sans-serif; }
+    #tui-hdgchk.warn { border-color: var(--tui-warn); }
+    :root[data-theme="day"][data-tui-sun] #tui-hdgchk { border: 2px solid #000; box-shadow: none; }
   </style>
 </head>
 <body>
