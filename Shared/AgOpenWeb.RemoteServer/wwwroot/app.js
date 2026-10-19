@@ -8469,11 +8469,41 @@ const TabletProfiles = (() => {
     : !listOf(rec.kind).some(p => sameName(p.name, rec.name)) && activeName(rec.kind) !== rec.src);
   function startJob(rec, cmds, isRevert) {
     for (const c of cmds) transport.send(c);
-    job = { rec, state: 'sending', t0: performance.now(), okAt: 0, revert: !!isRevert, expect: isRevert ? revertList(rec) : rec.ch };
+    const tries = job && job.rec === rec ? (job.tries || 0) + 1 : 0; // attempts after the first, for deadEnd
+    job = { rec, state: 'sending', t0: performance.now(), okAt: 0, revert: !!isRevert, expect: isRevert ? revertList(rec) : rec.ch, tries };
     setPending(rec); // stays until the host confirms
     refreshJob(true);
   }
   function canAct() { return !!job && connState === 'connected' && !lockReason() && !wrongActive(job.rec); }
+  // Dead ends: cases no button here can repair. Only then is "Discard" offered, after a question
+  // listing what is lost; otherwise the band stays until the save is confirmed or reverted.
+  function deadEnd(j) {
+    const rec = j.rec;
+    if (!profiles || !config || connState !== 'connected') return '';
+    const has = n => listOf(rec.kind).some(p => sameName(p.name, n));
+    if (rec.mode === 'edit' && !has(rec.name))
+      return tr('The profile "{name}" no longer exists on this guidance computer (deleted or renamed).', { name: rec.name });
+    if (rec.mode === 'new' && !has(rec.name) && !has(rec.src))
+      return tr('Neither "{name}" nor its template "{src}" exists on this guidance computer.', { name: rec.name, src: rec.src });
+    // Not one value is the old or the new one: the note is not about this computer's data
+    // (another guidance computer at the same address, or the profile was changed elsewhere).
+    if (activeName(rec.kind) === rec.name && rec.ch.length
+      && rec.ch.every(c => c.from !== undefined && !valueOk(c) && !valueOk(Object.assign({}, c, { val: c.from }))))
+      return tr('None of the values on the guidance computer is the old or the new one. The note probably comes from another guidance computer, or the profile was changed elsewhere.');
+    if ((j.tries || 0) >= 2 && j.state !== 'sending' && !matches(rec, rec.ch))
+      return tr('The guidance computer did not take the values after two more attempts.');
+    return '';
+  }
+  function askDiscard(rec) {
+    const lines = rec.ch.map(c => '• ' + (c.label ? T(c.label) : c.key) + ': ' + (c.from !== undefined ? fmtChange(c, c.from) + ' → ' : '') + fmtChange(c, c.val));
+    const text = (rec.mode === 'new' ? tr('The new profile "{name}" is not made complete. These values are not saved:', { name: rec.name })
+      : tr('These values for "{name}" are not saved:', { name: rec.name })) + '\n' + (lines.length ? lines.join('\n') : '—') + '\n\n'
+      + T(tr('The guidance computer keeps the values it has now. They are not saved there until a profile is loaded or saved.'));
+    confirmAsk(T(tr('Discard the unfinished save?')), text, T(tr('Discard')), () => {
+      setPending(null); job = null; msg = ''; close(); syncBand();
+    }, true);
+    const m = ask.querySelector('.tp-ask-m'); if (m) m.style.whiteSpace = 'pre-line';
+  }
   function retryJob() { if (canAct()) startJob(job.rec, planCmds(job.rec, true), false); }
   function revertJob() {
     if (!canAct() || job.rec.mode !== 'edit') return;
@@ -8519,6 +8549,13 @@ const TabletProfiles = (() => {
         : j.state === 'lost' ? T(tr('The connection broke while saving. It is not certain that everything was saved.'))
         : T(tr('The guidance computer did not confirm all values.')), 'bad');
       if (connState !== 'connected') { line(T(tr('Waiting for the connection…')), 'bad'); return; }
+      const dead = deadEnd(j);
+      if (dead) {
+        line(T(dead), 'bad');
+        const b = btn(T(tr('Discard (do not save)')), () => askDiscard(rec), 'dan');
+        b.disabled = false; // sends nothing, so no lock applies
+        if (!canAct()) return; // nothing else would work
+      }
       if (wrongActive(rec)) {
         line(rec.mode === 'edit' ? tr('"{name}" is not active. Load it first, then send again or put the old values back.', { name: rec.name })
           : tr('The new profile is made as a copy of "{name}", which is not active. Load it first, then send again.', { name: rec.src }), 'bad');
