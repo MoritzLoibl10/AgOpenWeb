@@ -115,8 +115,12 @@ public class NtripClientService : INtripClientService, IDisposable
     // when the fix passes the guidance quality gate (GpsData.IsValid, by default RTK fixed),
     // which a receiver can't reach before the corrections arrive. With no fix yet, the last
     // position with a fix is used; with none at all, no GGA is sent (never a made-up one).
-    private readonly record struct GgaFix(double Latitude, double Longitude, double Altitude, int FixQuality, int Satellites);
+    // A class, so the timer thread and the connect path swap whole fixes, never torn ones.
+    private sealed record GgaFix(double Latitude, double Longitude, double Altitude, int FixQuality, int Satellites, long Stamp = 0);
     private GgaFix? _lastGgaFix;
+    // How long the last fix stands in for a lost one: past that the position may be far away
+    // and the caster would build its virtual base there.
+    internal const double MaxLastFixAgeSeconds = 300;
     private int _ggaSentThisSession;
     private bool _ggaMissingLogged;
     // What the caster sent: its reply header, and the first bytes after it while no RTCM
@@ -206,6 +210,11 @@ public class NtripClientService : INtripClientService, IDisposable
                 _sessionOpen = true;
                 _cancellationTokenSource = new CancellationTokenSource();
                 token = _cancellationTokenSource.Token;
+                // The GGA timer starts when the caster accepts (StartGgaTimer): the first GGA
+                // goes out right then, the next ones every GgaIntervalSeconds. Made here, before
+                // the request, so a fast "accepted" can never find it missing.
+                if (config.GgaIntervalSeconds > 0)
+                    _ggaTimer = new Timer(GgaTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
             }
 
             await SendNtripRequestAsync();
@@ -219,11 +228,6 @@ public class NtripClientService : INtripClientService, IDisposable
             // The loop gets its own socket, so a stale loop can never read a newer session's.
             _ = Task.Run(() => ReceiveLoop(sock, gen, token));
             _ = Task.Run(() => SendLoop(token));
-
-            // The GGA timer starts when the caster accepts (StartGgaTimer): the first GGA
-            // goes out right then, the next ones every GgaIntervalSeconds.
-            if (config.GgaIntervalSeconds > 0)
-                _ggaTimer = new Timer(GgaTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
 
             // Stall watchdog — drives the periodic [NTRIP] health log line and reconnects
             // if nothing has arrived for WATCHDOG_RECONNECT_SECONDS, including a caster
@@ -501,9 +505,13 @@ public class NtripClientService : INtripClientService, IDisposable
                     if (!headerReceived)
                     {
                         _replyPreview = NtripResponse.Preview(_headerBuffer.ToArray());
-                        reason = _headerBuffer.Count > 0
-                            ? $"{NtripResponse.Classify(Encoding.ASCII.GetString(_headerBuffer.ToArray())).Reason}. {DescribeCasterReply()}"
-                            : $"Caster closed the connection without answering; {DescribeGgaState()}";
+                        if (_headerBuffer.Count > 0)
+                        {
+                            if (StopOnRefusal(gen, out string said)) return;
+                            reason = said;
+                        }
+                        else
+                            reason = $"Caster closed the connection without answering; {DescribeGgaState()}";
                     }
                     else if (!_rtcmSeen)
                         reason = "Caster closed the connection before sending corrections (mount point or account rejected?). "
@@ -523,11 +531,33 @@ public class NtripClientService : INtripClientService, IDisposable
             {
                 // A socket closed by Disconnect/Teardown lands here too — not a failure.
                 if (cancellationToken.IsCancellationRequested) break;
+                // A refusal followed by a reset (our GGA hit the closed socket) is a refusal too.
+                if (!headerReceived && _headerBuffer.Count > 0)
+                {
+                    _replyPreview = NtripResponse.Preview(_headerBuffer.ToArray());
+                    if (StopOnRefusal(gen, out _)) break;
+                }
                 _logger.LogError(ex, "Receive error");
                 TriggerReconnect($"receive error: {ex.Message}");
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// A reply that ended without its blank line (the caster closed or reset the connection):
+    /// an NTRIP 1 refusal ("ERROR - Bad Password", "ICY 401") often looks like that. A refusal
+    /// stops the client, as a complete one does; anything else gives the reason for a retry.
+    /// </summary>
+    private bool StopOnRefusal(int gen, out string said)
+    {
+        var (reply, why) = NtripResponse.Classify(Encoding.ASCII.GetString(_headerBuffer.ToArray()));
+        said = why.Contains(_replyPreview, StringComparison.Ordinal) ? why : $"{why}. {DescribeCasterReply()}";
+        if (reply != NtripReply.Rejected) return false;
+        _logger.LogWarning("NTRIP caster rejected the request: {Response}",
+            NtripResponse.Preview(_headerBuffer.ToArray(), maxLines: 12, maxChars: 1000));
+        Teardown("Rejected: " + said, gen);
+        return true;
     }
 
     /// <summary>Keep the first bytes after the reply until RTCM shows up, to show them if the
@@ -766,7 +796,8 @@ public class NtripClientService : INtripClientService, IDisposable
 
     /// <summary>
     /// The GGA for the caster: the manual position when configured, else the receiver's
-    /// position whenever it has a fix of any quality, else the last position that had one.
+    /// position whenever it has a fix of any quality, else the last position that had one
+    /// (for at most <see cref="MaxLastFixAgeSeconds"/>).
     /// False (and a one-time log line) when there is no position at all.
     /// </summary>
     internal bool TryBuildGga(out string gga)
@@ -781,8 +812,9 @@ public class NtripClientService : INtripClientService, IDisposable
         else
         {
             fix = UsableGgaFix(_gpsService.CurrentData);
-            if (fix != null) _lastGgaFix = fix;
-            else fix = _lastGgaFix;
+            long now = Clock.Current.GetTimestamp();
+            if (fix != null) _lastGgaFix = fix = fix with { Stamp = now };
+            else if (_lastGgaFix is { } last && Clock.Current.ElapsedSeconds(last.Stamp, now) <= MaxLastFixAgeSeconds) fix = last;
         }
 
         if (fix is not { } f)
@@ -819,7 +851,13 @@ public class NtripClientService : INtripClientService, IDisposable
         {
             await socket.SendAsync(Encoding.ASCII.GetBytes(gga + "\r\n"), SocketFlags.None);
             if (Interlocked.Increment(ref _ggaSentThisSession) == 1)
-                _logger.LogInformation("[NTRIP] first GGA sent to the caster: {Gga}", gga);
+            {
+                // Not the sentence itself: every client's log viewer and the bug report show the
+                // log, and the exact position is not needed to see that a GGA went out.
+                var f = gga.Split(',');
+                _logger.LogInformation("[NTRIP] first GGA sent to the caster (fix quality {Quality}, {Sats} satellites)",
+                    f.Length > 7 ? f[6] : "?", f.Length > 7 ? f[7] : "?");
+            }
         }
         catch (ObjectDisposedException)
         {
@@ -934,7 +972,9 @@ public class NtripClientService : INtripClientService, IDisposable
                 catch (OperationCanceledException) { return; }
 
                 var config = _config;
-                if (config == null || !Volatile.Read(ref _wanted)) return;
+                // A Connect (new profile, version, password) cancelled this loop just after its
+                // delay: it must not connect with the configuration it read before.
+                if (config == null || !Volatile.Read(ref _wanted) || token.IsCancellationRequested) return;
 
                 // Release the guard first: the new session's reply is checked on the
                 // receive loop, and a rejection there must be able to start a new loop.

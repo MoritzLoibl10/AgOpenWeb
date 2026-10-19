@@ -75,11 +75,17 @@ public static class NtripResponse
             }
             sb.Append(b >= 0x20 && b < 0x7F ? (char)b : '·');
             lineHasText = true;
-            if (sb.Length >= maxChars) { sb.Length = maxChars; sb.Append('…'); return sb.ToString(); }
+            if (sb.Length >= maxChars) { sb.Length = maxChars; sb.Append('…'); return HideCredentials(sb.ToString()); }
         }
         string s = sb.ToString();
-        return s.EndsWith(" | ", StringComparison.Ordinal) ? s[..^3] : s;
+        return HideCredentials(s.EndsWith(" | ", StringComparison.Ordinal) ? s[..^3] : s);
     }
+
+    // A caster, proxy or error page that echoes the request would put the login in the
+    // status line, the log and the bug report.
+    private static readonly Regex AuthValue = new(@"((?:Proxy-)?Authorization:\s*\S+\s+)\S+",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static string HideCredentials(string s) => AuthValue.Replace(s, "$1***");
 
     public static (NtripReply Reply, string Reason) Classify(string header)
     {
@@ -91,6 +97,8 @@ public static class NtripResponse
             return (NtripReply.Rejected, "Mount point not found (the caster sent its source table)");
         if (first.StartsWith("ICY 200", StringComparison.Ordinal))
             return (NtripReply.Accepted, "");
+        if (first.StartsWith("ICY 401", StringComparison.Ordinal)) // NTRIP 1 casters that answer in ICY form
+            return (NtripReply.Rejected, "Authentication failed (check username and password)");
         if (first.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))
             return (NtripReply.Rejected, first); // NTRIP 1, e.g. "ERROR - Bad Password"
 

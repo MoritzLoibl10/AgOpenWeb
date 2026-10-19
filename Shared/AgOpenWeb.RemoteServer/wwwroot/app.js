@@ -6403,10 +6403,13 @@ const TabletTerminal = (() => {
   const MOD_NAME = { map: tr('Map'), xte: tr('Cross-track'), speed: tr('Speed'), width: tr('Working width'), sections: tr('Sections') };
   const DEFAULT_PAGES = [['map', 'xte', 'speed', 'width'], ['map', 'xte', 'sections', 'speed'], ['xte', 'speed', 'width', 'sections']];
   const MAX_PAGES = 5;
+  // A page without the map keeps the cross-track module: its card is where the headland and
+  // U-turn distances go when the map's HUDs are hidden.
+  const withXte = p => p.includes('map') || p.includes('xte') ? p : MODS.filter(x => x === 'xte' || p.includes(x));
   const cleanPages = v => {
     if (!Array.isArray(v)) return null;
     const out = v.filter(Array.isArray).slice(0, MAX_PAGES)
-      .map(p => MODS.filter(m => p.includes(m) || (m === 'width' && p.includes('steer')))).filter(p => p.length);
+      .map(p => MODS.filter(m => p.includes(m) || (m === 'width' && p.includes('steer')))).filter(p => p.length).map(withXte);
     return out.length ? out : null;
   };
   let layout = lsGet('aow.ui.layout', 'terminal') === 'classic' ? 'classic' : 'terminal';
@@ -6445,7 +6448,13 @@ const TabletTerminal = (() => {
     if (clockSb.textContent !== t) clockSb.textContent = t;
   }
 
+  // Live data: the socket is up and a tick came in the last 2 s. Otherwise the steer chip
+  // says so and the readouts show "—", instead of freezing on the last values (the host's
+  // deadman may already have released steering and sections).
+  function tuiLive() { return connState === 'connected' && !!lastTick && performance.now() - lastTick.t < 2000; }
   function steerState() {
+    if (connState !== 'connected') return ['fault', tr('Disconnected')];
+    if (!tuiLive()) return ['fault', tr('No data')];
     const op = tick && tick.op;
     if (!op || !scene || !scene.hasField || !op.autoSteerAvail) return ['none', tr('No line')];
     if (op.autoSteer && op.moduleNotSteering) return ['fault', tr('Not steering')];
@@ -6463,15 +6472,22 @@ const TabletTerminal = (() => {
     u: xteBox.querySelector('.x-unit'), c: xteBox.querySelector('.x-cap') };
   // Cross-track error → { val, unit, dir: -1 steer left · 0 on line · 1 steer right, cap }.
   // Sign as the light bar: + = right of the line, so the way to steer is left.
+  const steerBar = () => !!(config && config.autosteer && config.autosteer.steerBarEnabled);
   function xteInfo() {
     const xte = tick.crossTrackError || 0, a = Math.abs(xte);
-    let val, unit;
-    let raw;
+    let raw, unit;
     if (a >= 10) { raw = toDisplayUnit(a, 'm').toFixed(1); unit = unitLabel('m'); }
     else { raw = toDisplayUnit(a * 100, 'cm').toFixed(isMetric() ? 0 : 1); unit = unitLabel('cm'); }
-    const dir = +raw === 0 ? 0 : xte > 0 ? -1 : 1;
-    val = tuiDec(raw);
+    // "On line" within 5 cm, as the light bar's centre LED and #lb (upstream onLine).
+    const dir = a < 0.05 ? 0 : xte > 0 ? -1 : 1;
+    const val = tuiDec(raw);
     const pass = tick.op && !tick.op.contour ? tr('Pass {n}', { n: Math.abs((tick.op.passNumber | 0)) + 1 }) : '';
+    // Steer-bar style: the light bar and #lb show the steer-angle error, which can point the
+    // other way; the readout then only gives the distance, without a steering direction.
+    if (steerBar()) {
+      const w = I18n.text(tr('Cross-track'));
+      return { val, unit, dir: null, cap: pass ? w + ' · ' + pass : w };
+    }
     // Translated here: the caption is joined from two strings, so the page translator can't match it.
     const word = I18n.text(dir < 0 ? tr('Steer left') : dir > 0 ? tr('Steer right') : tr('On line'));
     return { val, unit, dir, cap: pass ? word + ' · ' + pass : word };
@@ -6485,8 +6501,12 @@ const TabletTerminal = (() => {
       if (want) root.setAttribute('data-tui-xte', ''); else root.removeAttribute('data-tui-xte');
       stackNow = true; // re-stack the light bar and HUDs this frame
     }
+    if (steerBar() !== root.hasAttribute('data-tui-steerbar')) {
+      if (steerBar()) root.setAttribute('data-tui-steerbar', ''); else root.removeAttribute('data-tui-steerbar');
+      stackNow = true;
+    }
     if (!want) { xteLast = ''; return; }
-    const i = xteInfo();
+    const i = tuiLive() ? xteInfo() : { val: '—', unit: '', dir: null, cap: I18n.text(tr('No data')) };
     const key = i.val + i.unit + i.dir + i.cap;
     if (key === xteLast) return;
     xteLast = key;
@@ -6512,7 +6532,7 @@ const TabletTerminal = (() => {
     tuiBarDy = y - 54; // lightbarSk draws at y = 54
     if (bar) y += 16 + 6;
     const lbY = y;
-    if (lbEl && lbEl.style.display !== 'none' && !root.hasAttribute('data-tui-xte')) y += lbEl.offsetHeight + 4;
+    if (lbEl && lbEl.style.display !== 'none' && (!root.hasAttribute('data-tui-xte') || root.hasAttribute('data-tui-steerbar'))) y += lbEl.offsetHeight + 4;
     const key = lbY + ',' + y + ',' + xb + ',' + xr;
     if (key === yKey) return;
     yKey = key;
@@ -6593,16 +6613,16 @@ const TabletTerminal = (() => {
   }
   function renderCards() {
     if (!terminal() || mode !== 'drive') return;
-    const mps = lastTick ? lastTick.speed : 0;
-    const spd = tuiNum(toDisplayUnit(Math.abs(mps) * 3.6, 'kmh'), 1), su = unitLabel('kmh');
+    const live = tuiLive();
+    const spd = live ? tuiNum(toDisplayUnit(Math.abs(lastTick.speed) * 3.6, 'kmh'), 1) : '—', su = live ? unitLabel('kmh') : '';
     setCard('speed', spd + su, c => { c.querySelector('.c-n').textContent = spd; c.querySelector('.c-u').textContent = su; });
     // The configured total width, as Tool Configuration shows it ("Total width", 2 decimals).
     // Not toolWidthM(): that falls back to a made-up 6 m when the scene has no sections.
     const wm = config && config.tool ? +config.tool.totalWidth || 0 : 0;
     const wv = wm > 0 ? tuiNum(toDisplayUnit(wm, 'm'), 2) : '—', wu = wm > 0 ? unitLabel('m') : '';
     setCard('width', wv + wu, c => { c.querySelector('.c-n').textContent = wv; c.querySelector('.c-u').textContent = wu; });
-    const secs = tick && scene && scene.hasField ? tick.sections : null;
-    const sk = secs ? secs.join('') : '-';
+    const secs = live && tick && scene && scene.hasField ? tick.sections : null;
+    const sk = secs ? secs.join('') : live ? '-' : 'x';
     setCard('sections', sk, c => {
       const on = secs ? secs.filter(s => s === 1 || s === 2).length : 0;
       c.querySelector('.c-n').textContent = secs && secs.length ? on + ' / ' + secs.length : '—';
@@ -6610,12 +6630,12 @@ const TabletTerminal = (() => {
       c.title = secs ? tr('{on} of {count} sections on', { on, count: secs.length }) : '';
     });
     if (cards.xte) {
-      const ok = !!(tick && tick.guidanceActive && scene && scene.hasField);
+      const ok = !!(live && tick && tick.guidanceActive && scene && scene.hasField);
       const i = ok ? xteInfo() : null;
-      setCard('xte', i ? i.val + i.unit + i.dir + i.cap : '-', c => {
+      setCard('xte', i ? i.val + i.unit + i.dir + i.cap : live ? '-' : 'x', c => {
         c.querySelector('.c-n').textContent = i ? i.val : '—';
         c.querySelector('.c-u').textContent = i ? i.unit : '';
-        c.querySelector('.c-cap').textContent = i ? i.cap : tr('No line');
+        c.querySelector('.c-cap').textContent = i ? i.cap : live ? tr('No line') : tr('No data');
         c.querySelector('.x-l').classList.toggle('on', !!i && i.dir < 0);
         c.querySelector('.x-r').classList.toggle('on', !!i && i.dir > 0);
         c.dataset.st = i ? (i.dir === 0 ? 'on' : '') : 'none';
@@ -6895,10 +6915,13 @@ const TabletTerminal = (() => {
       for (const m of MODS) {
         const c = el('button', 'tui-chip' + (p.includes(m) ? ' on' : ''));
         c.textContent = MOD_NAME[m];
+        const fixed = m === 'xte' && !p.includes('map'); // see withXte
+        if (fixed) c.classList.add('lock');
         onTap(c, () => {
+          if (fixed) return;
           const has = p.includes(m);
           if (has && p.length === 1) return; // a page keeps at least one module
-          pages[i] = has ? p.filter(x => x !== m) : MODS.filter(x => x === m || p.includes(x));
+          pages[i] = withXte(has ? p.filter(x => x !== m) : MODS.filter(x => x === m || p.includes(x)));
           savePages(); built = ''; buildPage(); renderPagesEditor();
         });
         row.appendChild(c);
@@ -7091,7 +7114,6 @@ const TabletPolish = (() => {
   const $ = id => document.getElementById(id);
   const lsGet = (k, d) => { try { const v = window.localStorage.getItem(k); return v === null ? d : v; } catch (_) { return d; } };
   const lsSet = (k, v) => { try { window.localStorage.setItem(k, v); } catch (_) { /* private / blocked */ } };
-  const terminal = () => root.getAttribute('data-tui-layout') === 'terminal';
 
   // --- Units and numbers in German ------------------------------------------------------
   // German: decimal comma, and number and unit stay on one line (no-break space).
@@ -7128,14 +7150,15 @@ const TabletPolish = (() => {
   // with the existing language command. Picking a language in the language panel ends that.
   // Only the device holding control does it, so an observer tablet never flips the host.
   const LANG_KEY = 'aow.ui.langChosen';
+  let langDone = false; // also in memory: with storage blocked it would switch back every second
   setInterval(() => {
-    if (!appInfo || !iHoldControl || lsGet(LANG_KEY, '')) return;
+    if (langDone || !appInfo || !iHoldControl || lsGet(LANG_KEY, '')) return;
     const de = (appInfo.languages || []).some(l => l.code === 'de');
     if (de && (appInfo.currentLanguage || 'en') === 'en') transport.send('app.setLanguage|de');
-    lsSet(LANG_KEY, 'auto');
+    lsSet(LANG_KEY, 'auto'); langDone = true;
   }, 1000);
   const langList = $('lang-list');
-  if (langList) langList.addEventListener('pointerdown', () => lsSet(LANG_KEY, 'user'), true);
+  if (langList) langList.addEventListener('pointerdown', () => { lsSet(LANG_KEY, 'user'); langDone = true; }, true);
 
   // --- Distances with a label ---------------------------------------------------------------
   // The name in the label size, the value as before: "Vorgewende 319,0 m". The upstream
@@ -7293,6 +7316,10 @@ const TabletProfiles = (() => {
   const STILL_MPS = 0.15; // ≈ 0.5 km/h: GPS jitter at a standstill stays below this
   function lockReason() {
     if (connState !== 'connected') return tr('No connection to the guidance computer.');
+    // Stale ticks: steering and speed below would be the last known values.
+    if (!lastTick || performance.now() - lastTick.t > 2000) return tr('No current data from the guidance computer.');
+    // Observers: the operator may switch steering back on at any moment with these values.
+    if (!iHoldControl && lastControl && lastControl.held) return tr('Another device has control. Profiles can only be changed there.');
     if (tick && tick.op && tick.op.autoSteer) return tr('Steering is on. Switch steering off to change profiles.');
     if (lastTick && Math.abs(lastTick.speed || 0) > STILL_MPS) return tr('The vehicle is moving. Stop to change profiles.');
     return '';
@@ -7439,7 +7466,10 @@ const TabletProfiles = (() => {
     foot.innerHTML = '';
     const classic = el('button', 'tp-btn quiet'); classic.textContent = T(tr('Classic view'));
     classic.disabled = !!lock;
-    onTap(classic, () => { close(); lnOpenOrig('vehtoolhub', 'ln-vehicle', refreshHub); });
+    onTap(classic, () => {
+      if (pending) { openRecover(); return; } // its Load would save the half-applied values too
+      close(); lnOpenOrig('vehtoolhub', 'ln-vehicle', refreshHub);
+    });
     const changed = sel.vehicle !== profiles.activeVehicle || sel.tool !== profiles.activeTool;
     const load = el('button', 'tp-btn pri big');
     load.innerHTML = '✓ <span></span>';
@@ -7448,12 +7478,18 @@ const TabletProfiles = (() => {
     load.disabled = !!lock || !changed;
     onTap(load, () => {
       if (lockReason()) return;
+      if (pending) { openRecover(); return; } // the host would save the half-applied values first
       transport.send('profile.load|' + sel.vehicle + '\t' + sel.tool); // saves the outgoing pair first (host)
       msg = tr('Loaded: {vehicle} + {tool}', { vehicle: sel.vehicle, tool: sel.tool });
     });
     foot.append(classic, el('span', 'tp-grow'), load);
   }
+  // While a save is unfinished, the active pair holds half-applied values only in memory.
+  // Load, duplicate and rename make the host save it (profile.load / profile.new save the
+  // active pair first, rename leaves the record pointing at a name that is gone), so the
+  // recovery view comes first, as for the assistant.
   function duplicate(kind) {
+    if (pending) { openRecover(); return; }
     const src = activeName(kind);
     nameAsk(kind, T(kind === 'vehicle' ? tr('Duplicate vehicle') : tr('Duplicate tool')), tr('{name} copy', { name: src }), null, n => {
       if (lockReason()) return;
@@ -7463,6 +7499,7 @@ const TabletProfiles = (() => {
     });
   }
   function rename(kind) {
+    if (pending) { openRecover(); return; }
     const old = sel[kind];
     nameAsk(kind, T(tr('Rename')), old, old, n => {
       if (lockReason() || n === old) return;
@@ -7570,7 +7607,9 @@ const TabletProfiles = (() => {
     st.syncSeg = syncSeg; syncSeg();
     st.row = fieldRow(f, inp, seg);
     st.changed = () => st.side !== st.side0 || (f.sides.find(s => s[0] === st.side)[1] !== 0 && inp.value !== inp.dataset.init);
-    st.value = () => { const sg = f.sides.find(s => s[0] === st.side)[1]; if (sg === 0) return 0; const a = metricOf(inp); return Number.isFinite(a) ? sg * Math.abs(a) : NaN; };
+    st.value = () => { const sg = f.sides.find(s => s[0] === st.side)[1]; if (sg === 0) return 0;
+      // Magnitude untouched (only the side changed): the host's exact value, not the rounded text.
+      const a = inp.value === inp.dataset.init && Number.isFinite(st.base) && Math.abs(st.base) > 0.005 ? Math.abs(st.base) : metricOf(inp); return Number.isFinite(a) ? sg * Math.abs(a) : NaN; };
     return st;
   }
   function plainField(f, metricVal) {
@@ -7600,13 +7639,15 @@ const TabletProfiles = (() => {
     return '';
   }
 
+  // The host's values for the profile kind (a tool also depends on the vehicle type).
+  const snapOf = kind => JSON.stringify(config[kind]) + (kind === 'tool' ? '|' + (config.vehicle.type | 0) : '');
   function startWizard(kind, mode) {
     if (lockReason() || !config || !config.vehicle || !config.tool || !profiles) return;
     if (pending) { openRecover(); return; } // an unfinished save comes first
     const src = activeName(kind);
     const v = config.vehicle, t = config.tool;
     W = { kind, mode, src, name: mode === 'edit' ? src : '', step: 0, focus: '', save: null, sym: null,
-      harvester: (v.type | 0) === 1, baseToolType: t.type };
+      harvester: (v.type | 0) === 1, baseToolType: t.type, snap: snapOf(kind), metric: isMetric() };
     if (kind === 'vehicle') {
       W.type = { key: 'vehicle.type', base: v.type | 0, cur: v.type | 0 };
       W.f = {
@@ -7765,7 +7806,7 @@ const TabletProfiles = (() => {
   }
   function renderWizFoot() {
     foot.innerHTML = '';
-    const s = W.steps[W.step], wj = wjob(), sending = wj && wj.state === 'sending';
+    const s = W.steps[W.step], wj = wjob();
     const back = el('button', 'tp-btn'); back.textContent = '← ' + T(W.step === 0 ? tr('Cancel') : tr('Back'));
     back.disabled = !!wj;
     onTap(back, () => { if (W.step === 0) tryClose(); else { W.step--; renderWizard(); } });
@@ -7937,10 +7978,15 @@ const TabletProfiles = (() => {
   }
   function problems() {
     const p = [];
+    // Units switched (a host setting, from any device): the fields still show the old units
+    // but would now be read in the new ones.
+    if (isMetric() !== W.metric) p.push(T(tr('The units were changed. Please cancel and start the assistant again.')));
     for (const c of changes()) if (c.kindOf == null && !Number.isFinite(c.val)) p.push(tr('{field}: please enter a number.', { field: T(c.label) }));
     if (W.kind === 'tool') {
       const n = parseInt(W.nSec.inp.value, 10);
       if (!(n >= 1 && n <= 64)) p.push(T(tr('Number of sections: 1 to 64.')));
+      // The host stores these as max(0, value): a negative entry would never be confirmed.
+      for (const k of ['hitchLength', 'length']) if (W.f[k].value() < 0) p.push(tr('{field}: 0 or more.', { field: T(W.f[k].f.label) }));
     }
     return p;
   }
@@ -8075,7 +8121,11 @@ const TabletProfiles = (() => {
   // after a reload, until "send again" or "put the old values back" has been confirmed.
   const PEND_KEY = 'aow.ui.profilePending';
   let pending = null, job = null; // job: { rec, state, t0, okAt, revert, expect, k }
-  try { const r = JSON.parse(lsGet(PEND_KEY, '') || 'null'); if (r && r.v === 1 && Array.isArray(r.ch) && r.name) pending = r; } catch (_) { /* unreadable: none */ }
+  // Only a record this code could have written: a broken one would send "config.set|key:undefined".
+  const recOk = r => !!r && r.v === 1 && (r.kind === 'vehicle' || r.kind === 'tool') && (r.mode === 'new' || r.mode === 'edit')
+    && typeof r.name === 'string' && !!r.name && typeof r.src === 'string' && Array.isArray(r.ch)
+    && r.ch.every(c => c && typeof c.key === 'string' && c.send !== undefined && c.send !== null);
+  try { const r = JSON.parse(lsGet(PEND_KEY, '') || 'null'); if (recOk(r)) pending = r; } catch (_) { /* unreadable: none */ }
   if (pending) job = { rec: pending, state: 'lost', reloaded: true };
   function setPending(r) { pending = r; lsSet(PEND_KEY, r ? JSON.stringify(r) : null); syncBand(); }
   const wjob = () => (job && W && W.rec && job.rec === W.rec ? job : null); // this assistant's save
@@ -8127,7 +8177,11 @@ const TabletProfiles = (() => {
     if (!config || !profiles || activeName(rec.kind) !== rec.name) return false;
     return list.every(valueOk);
   }
-  const wrongActive = rec => rec.mode === 'edit' && profiles && activeName(rec.kind) !== rec.name;
+  // The profile the commands must go to is not active: for an edit the profile itself; for a
+  // new one not made yet its template, since profile.new copies whatever is active.
+  const loadName = rec => rec.mode === 'edit' ? rec.name : rec.src;
+  const wrongActive = rec => !!profiles && (rec.mode === 'edit' ? activeName(rec.kind) !== rec.name
+    : !listOf(rec.kind).some(p => sameName(p.name, rec.name)) && activeName(rec.kind) !== rec.src);
   function startJob(rec, cmds, isRevert) {
     for (const c of cmds) transport.send(c);
     job = { rec, state: 'sending', t0: performance.now(), okAt: 0, revert: !!isRevert, expect: isRevert ? revertList(rec) : rec.ch };
@@ -8144,8 +8198,8 @@ const TabletProfiles = (() => {
   // Edit, other profile active (e.g. after a reload): load the one the save was for.
   function loadTarget() {
     if (!job || connState !== 'connected' || lockReason()) return;
-    const r = job.rec;
-    transport.send('profile.load|' + (r.kind === 'vehicle' ? r.name + '\t' + profiles.activeTool : profiles.activeVehicle + '\t' + r.name));
+    const r = job.rec, n = loadName(r);
+    transport.send('profile.load|' + (r.kind === 'vehicle' ? n + '\t' + profiles.activeTool : profiles.activeVehicle + '\t' + n));
   }
   function doSave() {
     if (!W || lockReason() || problems().length) return;
@@ -8154,7 +8208,9 @@ const TabletProfiles = (() => {
       const p = nameProblem(W.kind, W.name);
       if (p) { W.step = W.steps.indexOf('name'); renderWizard(); W.nameErr && (W.nameErr.textContent = p); return; }
     }
-    if (W.mode === 'edit' && activeName(W.kind) !== W.src) { W.err = 'stale'; renderResult(); return; }
+    // Another device loaded or changed the profile since the assistant opened: the review page
+    // no longer shows what would be saved (a new profile copies the active one as it is now).
+    if (activeName(W.kind) !== W.src || snapOf(W.kind) !== W.snap) { W.err = 'stale'; renderResult(); return; }
     if (connState !== 'connected') { W.err = 'offline'; renderResult(); return; }
     W.err = '';
     const rec = makeRec();
@@ -8179,8 +8235,9 @@ const TabletProfiles = (() => {
         : T(tr('The guidance computer did not confirm all values.')), 'bad');
       if (connState !== 'connected') { line(T(tr('Waiting for the connection…')), 'bad'); return; }
       if (wrongActive(rec)) {
-        line(tr('"{name}" is not active. Load it first, then send again or put the old values back.', { name: rec.name }), 'bad');
-        const b = btn(tr('Load "{name}"', { name: rec.name }), loadTarget); b.disabled = !!lockReason();
+        line(rec.mode === 'edit' ? tr('"{name}" is not active. Load it first, then send again or put the old values back.', { name: rec.name })
+          : tr('The new profile is made as a copy of "{name}", which is not active. Load it first, then send again.', { name: rec.src }), 'bad');
+        const b = btn(tr('Load "{name}"', { name: loadName(rec) }), loadTarget); b.disabled = !!lockReason();
         return;
       }
       line(matches(rec, rec.ch) ? T(tr('The values are there now. Save again to be sure.')) : T(tr('Some values are missing.')), 'bad');
@@ -8337,12 +8394,13 @@ const TabletProfiles = (() => {
       t.querySelector('.l').textContent = T(kind === 'vehicle' ? tr('Vehicle') : tr('Tool'));
       t.querySelector('.v').textContent = name || '—';
       t.querySelector('.s').textContent = s;
-      t.querySelector('.tp-n-go').textContent = lock ? T(tr('Locked while driving')) : T(tr('Change'));
+      // The lock has several reasons now (driving, steering, no data, another device has control).
+      t.querySelector('.tp-n-go').textContent = lock ? T(tr('Locked')) : T(tr('Change'));
+      t.title = lock ? T(lock) : '';
       t.classList.toggle('locked', !!lock);
     }
   }
   setInterval(() => { const m = $('tui-menu'); if (m && m.classList.contains('open')) nowTiles(); }, 300);
-  tr('Change'); tr('Locked while driving');
 
   return { open, get view() { return view; } };
 })();
@@ -8353,7 +8411,8 @@ const TabletProfiles = (() => {
 // anything unknown stays English. Exact texts are keys (the page translates them itself);
 // texts with a variable part are rewritten on the elements that show them.
 const TabletHostText = (() => {
-  [tr('No Fix'), tr('GPS Fix'), tr('DGPS Fix'), tr('RTK Fixed'), tr('RTK Float'), tr('Connected'), tr('Caster sent an invalid reply')];
+  [tr('No Fix'), tr('GPS Fix'), tr('DGPS Fix'), tr('RTK Fixed'), tr('RTK Float'), tr('Connected'), tr('Caster sent an invalid reply'),
+   tr('Success: Connected to caster and mount point')];
   const FIX = /\b(No Fix|GPS Fix|DGPS Fix|RTK Fixed|RTK Float)\b/g;
   const PAT = [
     [/^Connecting to (.+)…$/s, x => tr('Connecting to {x}…', { x })],
@@ -8383,8 +8442,8 @@ const TabletHostText = (() => {
       }
     }
   });
-  // Where the host's texts are shown: status bar, GPS popup, Network IO, System Data.
-  const IDS = ['sb-fix', 'sb-gps-d', 'gc-fix', 'nio-ntrip-status', 'nio-ntrip-rx', 'sd-fix'];
+  // Where the host's texts are shown: status bar, GPS popup, Network IO, System Data, NTRIP test.
+  const IDS = ['sb-fix', 'sb-gps-d', 'gc-fix', 'nio-ntrip-status', 'nio-ntrip-rx', 'sd-fix', 'nte-teststatus'];
   for (const id of IDS) { const e = document.getElementById(id); if (e) obs.observe(e, { subtree: true, childList: true, characterData: true }); }
   return { de };
 })();
@@ -8494,6 +8553,10 @@ const TabletBrand = (() => {
     const ori = el('div', 'tb-box');
     ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Based on AgOpenWeb and AgOpenGPS (Brian Tee and contributors).')) }));
     ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Free software under the GNU General Public License v3. You may use, change and pass it on; the source code is open.')) }));
+    // GPL v3 §0 / §5a: copyright, no warranty, and that this is a changed version.
+    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Copyright © 2024–2026 AgOpenWeb contributors; AgOpenGPS © Brian Tee and contributors.')) }));
+    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('This is a changed version (fork), changed since October 2026.')) }));
+    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('This program comes with ABSOLUTELY NO WARRANTY, to the extent permitted by law (see the licence text).')) }));
     const lr = el('div', 'tb-row');
     const bg = el('button', 'tp-btn'); bg.textContent = T(tr('Licence text GPL v3')); onTap(bg, () => showLicense('gpl'));
     const ba = el('button', 'tp-btn'); ba.textContent = T(tr('Licence text Apache 2.0 (as in the original project)')); onTap(ba, () => showLicense('apache'));
@@ -8650,17 +8713,22 @@ const TabletBrand = (() => {
     L.push('GPS: fix ' + s.fixQuality + ' (' + (s.fixText || '?') + '), sats ' + s.sats + ', hdop ' + s.hdop + ', correction age ' + s.age + ' s' + (s.gpsLost ? ', DATA LOST' : ''));
     L.push('NTRIP: ' + (s.ntripEnabled ? 'on' : 'off') + ', connected ' + !!s.ntripConnected + ', bytes ' + s.ntripBytes + ', to ' + (s.ntripDestination || '?'));
     L.push('  status: ' + (s.ntripStatus || ''));
-    if (s.ntripRtcm) L.push('  rtcm: ' + JSON.stringify(s.ntripRtcm));
     L.push('Modules: gps ' + !!s.gpsOk + ', imu ' + !!s.imuOk + ', steer ' + !!s.autoSteerOk + ', machine ' + !!s.machineOk);
-    L.push('');
-    L.push('Last log lines (this device):');
-    for (const e of (appInfo && appInfo.logs ? appInfo.logs.slice(-60) : [])) L.push('  ' + e.time + ' [' + e.level + '] ' + e.message);
+    // The host's log and RTCM report are in the file as logs.txt and ntrip_rtcm.txt.
     let out = L.join('\n');
     // Never a password or NTRIP user name, even if it appears in a log line.
     const secrets = [];
     const np = ntripProfiles && ntripProfiles.profiles;
     if (np) for (const k of Object.keys(np)) for (const f of ['password', 'username']) { const x = np[k] && np[k][f]; if (x && x.length >= 3) secrets.push(x); }
     for (const x of secrets.sort((a, b) => b.length - a.length)) out = out.split(x).join('***');
+    // The host reads a command in 1 KB pieces and runs each piece on its own: the summary has
+    // to fit in one, with the command prefix (code points, so no character is cut in half).
+    const enc = new TextEncoder(), max = 1000 - enc.encode('app.bugReport|diagnose\t').length;
+    if (enc.encode(out).length > max) {
+      let cp = Array.from(out);
+      while (enc.encode(cp.join('') + ' …').length > max) cp = cp.slice(0, -16);
+      out = cp.join('') + ' …';
+    }
     return out;
   }
   let diagSent = false;

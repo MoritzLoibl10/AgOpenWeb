@@ -69,6 +69,8 @@ public class NtripVrsTests
     [TestCase("ICY 200 OK", NtripReply.Accepted)]
     [TestCase("HTTP/1.1 200 OK\r\nNtrip-Version: Ntrip/2.0\r\nContent-Type: gnss/data", NtripReply.Accepted)]
     [TestCase("HTTP/1.1 200 OK\r\nNtrip-Version: Ntrip/2.0\r\nContent-Type: gnss/sourcetable", NtripReply.Rejected)]
+    [TestCase("ICY 401 Unauthorized", NtripReply.Rejected)]
+    [TestCase("ERROR - Bad Password", NtripReply.Rejected)]
     public void Classify_Ntrip1And2(string header, NtripReply expected) =>
         Assert.That(NtripResponse.Classify(header).Reply, Is.EqualTo(expected));
 
@@ -79,6 +81,16 @@ public class NtripVrsTests
         Assert.That(NtripResponse.Preview(raw), Is.EqualTo("HTTP/1.1 403 Forbidden | Server: Caster | Position outside network"));
         Assert.That(NtripResponse.Preview(new byte[] { 0xD3, 0x00, 0x41 }), Is.EqualTo("··A"));
         Assert.That(NtripResponse.Preview(Array.Empty<byte>()), Is.EqualTo(""));
+    }
+
+    [Test]
+    public void Preview_HidesCredentials()
+    {
+        var echo = Encoding.ASCII.GetBytes("GET /M HTTP/1.0\r\nAuthorization: Basic dXNlcjpwYXNz\r\nUser-Agent: x\r\n\r\n");
+        string p = NtripResponse.Preview(echo);
+        Assert.That(p, Does.Not.Contain("dXNlcjpwYXNz"));
+        Assert.That(p, Is.EqualTo("GET /M HTTP/1.0 | Authorization: Basic *** | User-Agent: x"));
+        Assert.That(NtripResponse.Preview(echo, maxChars: 30), Does.Not.Contain("dXNl"));
     }
 
     // ── GGA ──────────────────────────────────────────────────────────────
@@ -155,6 +167,28 @@ public class NtripVrsTests
         data.FixQuality = 0;
         Assert.That(svc.TryBuildGga(out string gga), Is.True);
         Assert.That(gga.Split(',')[6], Is.EqualTo("5"));
+    }
+
+    [Test]
+    public void Gga_LastFix_ExpiresAfterMaxAge()
+    {
+        var clock = new AgOpenWeb.Models.Timing.TestClock();
+        AgOpenWeb.Models.Timing.Clock.Set(clock);
+        try
+        {
+            var data = Fix(5);
+            var svc = Client(Gps(data), out _);
+            SetConfig(svc, new NtripConfiguration());
+            Assert.That(svc.TryBuildGga(out _), Is.True);
+            data.FixQuality = 0;
+            clock.AdvanceSeconds(NtripClientService.MaxLastFixAgeSeconds - 10);
+            Assert.That(svc.TryBuildGga(out _), Is.True, "within the limit the last fix stands in");
+            clock.AdvanceSeconds(20);
+            Assert.That(svc.TryBuildGga(out _), Is.False, "too old: no GGA rather than a stale position");
+            data.FixQuality = 1;
+            Assert.That(svc.TryBuildGga(out _), Is.True);
+        }
+        finally { AgOpenWeb.Models.Timing.Clock.Reset(); }
     }
 
     [Test]
@@ -349,6 +383,27 @@ public class NtripVrsTests
         string msg = events.Last().Message!;
         Assert.That(msg, Does.Contain("Authentication failed"));
         Assert.That(msg, Does.Contain("HTTP/1.1 401 Unauthorized | WWW-Authenticate: Basic realm=\"/APOS_Standard\""));
+        svc.Dispose();
+    }
+
+    // NTRIP 1 casters often refuse with one line and a close, no blank line: that is still a
+    // refusal, not a reason to reconnect every 15 s.
+    [TestCase("ERROR - Bad Password\r\n")]
+    [TestCase("ICY 401 Unauthorized\r\n\r\n")]
+    public async Task Ntrip1Rejection_StopsRetrying(string reply)
+    {
+        using var caster = new FakeCaster(async (s, c) =>
+        {
+            // As a caster does: read the request (and the GGA after it), answer, close.
+            WaitFor(() => c.Ggas.Length > 0, 1000);
+            await Send(s, reply);
+        });
+        var svc = Client(Gps(Fix(1)), out var events);
+        await svc.ConnectAsync(Config(caster.Port, 1));
+        Assert.That(WaitFor(() => events.Any(e => e.Message?.StartsWith("Rejected") == true), 3000), Is.True,
+            string.Join(" / ", events.Select(e => e.Message)));
+        Thread.Sleep(2500); // the first backoff step is 1 s
+        Assert.That(caster.Accepted, Is.EqualTo(1), string.Join(" / ", events.Select(e => e.Message)));
         svc.Dispose();
     }
 
