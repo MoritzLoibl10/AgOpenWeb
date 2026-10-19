@@ -8539,6 +8539,10 @@ const TabletBrand = (() => {
     const ori = el('div', 'tb-box');
     ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Based on AgOpenWeb and AgOpenGPS (Brian Tee and contributors).')) }));
     ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Free software under the GNU General Public License v3. You may use, change and pass it on; the source code is open.')) }));
+    // GPL v3 §0 / §5a: copyright, no warranty, and that this is a changed version.
+    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Copyright © 2024–2026 AgOpenWeb contributors; AgOpenGPS © Brian Tee and contributors.')) }));
+    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('This is a changed version (fork), changed since October 2026.')) }));
+    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('This program comes with ABSOLUTELY NO WARRANTY, to the extent permitted by law (see the licence text).')) }));
     const lr = el('div', 'tb-row');
     const bg = el('button', 'tp-btn'); bg.textContent = T(tr('Licence text GPL v3')); onTap(bg, () => showLicense('gpl'));
     const ba = el('button', 'tp-btn'); ba.textContent = T(tr('Licence text Apache 2.0 (as in the original project)')); onTap(ba, () => showLicense('apache'));
