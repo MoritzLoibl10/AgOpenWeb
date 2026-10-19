@@ -7465,12 +7465,18 @@ const TabletProfiles = (() => {
     load.disabled = !!lock || !changed;
     onTap(load, () => {
       if (lockReason()) return;
+      if (pending) { openRecover(); return; } // the host would save the half-applied values first
       transport.send('profile.load|' + sel.vehicle + '\t' + sel.tool); // saves the outgoing pair first (host)
       msg = tr('Loaded: {vehicle} + {tool}', { vehicle: sel.vehicle, tool: sel.tool });
     });
     foot.append(classic, el('span', 'tp-grow'), load);
   }
+  // While a save is unfinished, the active pair holds half-applied values only in memory.
+  // Load, duplicate and rename make the host save it (profile.load / profile.new save the
+  // active pair first, rename leaves the record pointing at a name that is gone), so the
+  // recovery view comes first, as for the assistant.
   function duplicate(kind) {
+    if (pending) { openRecover(); return; }
     const src = activeName(kind);
     nameAsk(kind, T(kind === 'vehicle' ? tr('Duplicate vehicle') : tr('Duplicate tool')), tr('{name} copy', { name: src }), null, n => {
       if (lockReason()) return;
@@ -7480,6 +7486,7 @@ const TabletProfiles = (() => {
     });
   }
   function rename(kind) {
+    if (pending) { openRecover(); return; }
     const old = sel[kind];
     nameAsk(kind, T(tr('Rename')), old, old, n => {
       if (lockReason() || n === old) return;
