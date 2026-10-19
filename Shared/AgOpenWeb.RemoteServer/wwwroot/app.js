@@ -7636,7 +7636,7 @@ const TabletProfiles = (() => {
     const src = activeName(kind);
     const v = config.vehicle, t = config.tool;
     W = { kind, mode, src, name: mode === 'edit' ? src : '', step: 0, focus: '', save: null, sym: null,
-      harvester: (v.type | 0) === 1, baseToolType: t.type, snap: snapOf(kind) };
+      harvester: (v.type | 0) === 1, baseToolType: t.type, snap: snapOf(kind), metric: isMetric() };
     if (kind === 'vehicle') {
       W.type = { key: 'vehicle.type', base: v.type | 0, cur: v.type | 0 };
       W.f = {
@@ -7967,6 +7967,9 @@ const TabletProfiles = (() => {
   }
   function problems() {
     const p = [];
+    // Units switched (a host setting, from any device): the fields still show the old units
+    // but would now be read in the new ones.
+    if (isMetric() !== W.metric) p.push(T(tr('The units were changed. Please cancel and start the assistant again.')));
     for (const c of changes()) if (c.kindOf == null && !Number.isFinite(c.val)) p.push(tr('{field}: please enter a number.', { field: T(c.label) }));
     if (W.kind === 'tool') {
       const n = parseInt(W.nSec.inp.value, 10);
