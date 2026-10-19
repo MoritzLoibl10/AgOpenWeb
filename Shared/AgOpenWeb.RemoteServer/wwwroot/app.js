@@ -7598,7 +7598,9 @@ const TabletProfiles = (() => {
     st.syncSeg = syncSeg; syncSeg();
     st.row = fieldRow(f, inp, seg);
     st.changed = () => st.side !== st.side0 || (f.sides.find(s => s[0] === st.side)[1] !== 0 && inp.value !== inp.dataset.init);
-    st.value = () => { const sg = f.sides.find(s => s[0] === st.side)[1]; if (sg === 0) return 0; const a = metricOf(inp); return Number.isFinite(a) ? sg * Math.abs(a) : NaN; };
+    st.value = () => { const sg = f.sides.find(s => s[0] === st.side)[1]; if (sg === 0) return 0;
+      // Magnitude untouched (only the side changed): the host's exact value, not the rounded text.
+      const a = inp.value === inp.dataset.init && Number.isFinite(st.base) && Math.abs(st.base) > 0.005 ? Math.abs(st.base) : metricOf(inp); return Number.isFinite(a) ? sg * Math.abs(a) : NaN; };
     return st;
   }
   function plainField(f, metricVal) {
