@@ -7589,8 +7589,8 @@ const TabletProfiles = (() => {
     return a && !l.some(p => p.name === a) ? [{ name: a, preview: '' }].concat(l) : l;
   };
   const sameName = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
-  // Working width = sum of the sections, as the host computes it (ActualToolWidth); only the
-  // active tool's is known here. Same format as the width card on the work pages.
+  // Working width = sum of the sections, as the host computes it (ActualToolWidth); for the
+  // active tool from the config, same format as the width card on the work pages.
   function activeWidth() {
     const wm = config && config.tool ? +config.tool.totalWidth || 0 : 0;
     return wm > 0 ? tuiNum(toDisplayUnit(wm, 'm'), 2) + ' ' + unitLabel('m') : '—';
@@ -7693,7 +7693,8 @@ const TabletProfiles = (() => {
     } else {
       ic = ICON[toolSymbol(p.name)];
       rows = [];
-      if (active) rows.push([tr('Working width'), activeWidth()]); // inactive: no width (the preview's "Width" is not the working width)
+      // Inactive: the preview's "Width", which is the sum of the sections since upstream #350.
+      rows.push([tr('Working width'), active ? activeWidth() : hostVal(m['Width'])]);
       rows.push([tr('Sections'), hostVal(m['Sections'])], [tr('Attach'), m['Attach'] && m['Attach'] !== '—' ? T(m['Attach']) : '—']);
     }
     return '<span class="tp-c-top"><span class="tp-c-ic">' + ic + '</span><span class="tp-c-n" translate="no"></span>' +
