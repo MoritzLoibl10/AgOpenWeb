@@ -70,6 +70,13 @@ public interface IUdpCommunicationService
     void SendToModules(byte[] data);
 
     /// <summary>
+    /// Send data to programs on this machine that listen where AgIO does
+    /// (127.255.255.255:17777), e.g. GPS_Out. AgIO isn't running beside AgOpenWeb,
+    /// so these programs get the packet straight from us.
+    /// </summary>
+    void SendToLoopback(byte[] data);
+
+    /// <summary>
     /// Send hello/ping packet to check module connections
     /// PGN 200 (0xC8) - communication check
     /// </summary>
@@ -92,10 +99,17 @@ public interface IUdpCommunicationService
     string? GetModuleIpAddress(ModuleType moduleType);
 
     /// <summary>
-    /// The /24 subnet (first three octets, e.g. "192.168.5") most recently
-    /// reported by a module in a PGN 203 scan reply, or null if none seen.
+    /// The /24 subnet (first three octets, e.g. "192.168.5") of the module that sent
+    /// the most recent PGN 203 scan reply, from its IP, or null if none seen.
     /// </summary>
     string? GetModuleSubnet();
+
+    /// <summary>
+    /// Bytes 9–11 of the most recent scan reply: in AgOpenGPS firmware the subnet the
+    /// scan came from, which AgIO's Auto Set offers as the one to move the modules to
+    /// (#334). AiO v26 repeats the module's own subnet there. Null if none seen.
+    /// </summary>
+    string? GetScanReplySubnet();
 
     /// <summary>
     /// The /24 the modules are on right now: the subnet outgoing PGNs are locked to

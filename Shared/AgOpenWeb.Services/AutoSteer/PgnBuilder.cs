@@ -45,6 +45,7 @@ public static class PgnBuilder
     public const byte PGN_MACHINE_PINS = 0xEC;   // 236 - Machine Pin Config
     public const byte PGN_STEER_DATA = 0xFD;     // 253 - Steer Data FROM Module
     public const byte PGN_SENSOR_DATA = 0xFA;    // 250 - Sensor Data FROM Module
+    public const byte PGN_CORRECTED_POSITION = 0x64; // 100 - Corrected position (seed monitors, rate control)
 
     // Buffer sizes: header(2) + source(1) + pgn(1) + length(1) + data(N) + crc(1)
     public const int AUTOSTEER_PGN_SIZE = 14;       // 5 header + 8 data + 1 crc
@@ -54,6 +55,7 @@ public static class PgnBuilder
     public const int STEER_CONFIG_PGN_SIZE = 11;    // 5 header + 5 data + 1 crc
     public const int MACHINE_CONFIG_PGN_SIZE = 14;  // 5 header + 8 data + 1 crc
     public const int MACHINE_PINS_PGN_SIZE = 30;    // 5 header + 24 data + 1 crc
+    public const int CORRECTED_POSITION_PGN_SIZE = 30; // 5 header + 24 data + 1 crc
 
     // Thread-local buffers to avoid allocation
     [ThreadStatic]
@@ -70,6 +72,9 @@ public static class PgnBuilder
 
     [ThreadStatic]
     private static byte[]? _steerConfigBuffer;
+
+    [ThreadStatic]
+    private static byte[]? _correctedPositionBuffer;
 
     /// <summary>
     /// Build PGN 254 (Steer Data) from VehicleState.
@@ -260,6 +265,34 @@ public static class PgnBuilder
     }
 
     /// <summary>
+    /// Build PGN 100 (0x64) — corrected position, AgOpenGPS's 24-byte layout
+    /// (Position.designer.cs "Corrected Position"). Seed monitors, rate controllers
+    /// and GPS_Out read it.
+    ///
+    /// Bytes 5–12:  longitude, double (little-endian)
+    /// Bytes 13–20: latitude, double
+    /// Bytes 21–28: heading, degrees, double
+    /// Byte 29:     CRC
+    /// </summary>
+    public static byte[] BuildCorrectedPositionPgn(double latitude, double longitude, double headingDegrees)
+    {
+        _correctedPositionBuffer ??= new byte[CORRECTED_POSITION_PGN_SIZE];
+        var buf = _correctedPositionBuffer;
+
+        buf[0] = HEADER1;
+        buf[1] = HEADER2;
+        buf[2] = SOURCE;
+        buf[3] = PGN_CORRECTED_POSITION;
+        buf[4] = 24;  // Data length
+
+        System.Buffers.Binary.BinaryPrimitives.WriteDoubleLittleEndian(buf.AsSpan(5, 8), longitude);
+        System.Buffers.Binary.BinaryPrimitives.WriteDoubleLittleEndian(buf.AsSpan(13, 8), latitude);
+        System.Buffers.Binary.BinaryPrimitives.WriteDoubleLittleEndian(buf.AsSpan(21, 8), headingDegrees);
+
+        return WithCrc(buf);
+    }
+
+    /// <summary>
     /// Build PGN 238 (0xEE) Machine Config - hydraulic settings and user values.
     /// Sent to machine module when config changes (not periodic).
     ///
@@ -329,6 +362,23 @@ public static class PgnBuilder
     /// Calculate CRC as sum of bytes (matching PgnMessage.CalculateCRC)
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    /// <summary>
+    /// Build PGN 241 (0xF1) for the ISOBUS task controller: section control mode, one
+    /// data byte, 1 = automatic (the task controller drives the implement's sections),
+    /// 0 = manual (#312). AgOpenGPS CISOBUS.RequestSectionControlEnabled, with the CRC.
+    /// </summary>
+    public static byte[] BuildIsobusSectionControlPgn(bool enabled)
+    {
+        var buf = new byte[7];
+        buf[0] = HEADER1;
+        buf[1] = HEADER2;
+        buf[2] = SOURCE;
+        buf[3] = PgnNumbers.ISOBUS_SECTION_CONTROL;
+        buf[4] = 1;
+        buf[5] = (byte)(enabled ? 1 : 0);
+        return WithCrc(buf);
+    }
+
     private static byte CalculateCrc(byte[] data, int start, int length)
     {
         byte crc = 0;
@@ -399,14 +449,17 @@ public static class PgnBuilder
 
     /// <summary>
     /// Parse a PGN 203 scan reply (13 bytes): module id at [2], full module IP at
-    /// [5..8], subnet (3 octets) at [9..11]. Returns false if not a well-formed
-    /// scan reply. Pure so it can be unit-tested without sockets.
+    /// [5..8], and at [9..11] the first three octets of the address the scan came
+    /// from (AgOpenGPS firmware: <c>rem_ip</c>), which AgIO's Auto Set offers as the
+    /// subnet to move the modules to. Some firmware (AiO v26) repeats the module's own
+    /// subnet there instead. Returns false if not a well-formed scan reply. Pure so it
+    /// can be unit-tested without sockets.
     /// </summary>
-    public static bool TryParseScanReply(byte[] data, out byte moduleId, out string ip, out string subnet)
+    public static bool TryParseScanReply(byte[] data, out byte moduleId, out string ip, out string scanSubnet)
     {
         moduleId = 0;
         ip = string.Empty;
-        subnet = string.Empty;
+        scanSubnet = string.Empty;
 
         if (data == null || data.Length < 12) return false;
         if (data[0] != HEADER1 || data[1] != HEADER2) return false;
@@ -414,7 +467,7 @@ public static class PgnBuilder
 
         moduleId = data[2];
         ip = $"{data[5]}.{data[6]}.{data[7]}.{data[8]}";
-        subnet = $"{data[9]}.{data[10]}.{data[11]}";
+        scanSubnet = $"{data[9]}.{data[10]}.{data[11]}";
         return true;
     }
 
@@ -574,8 +627,8 @@ public static class PgnBuilder
     /// Format: [0x80, 0x81, Source, 0xFD, 8, AngleLo, AngleHi, HeadingLo, HeadingHi, RollLo, RollHi, Switches, PWM, CRC]
     ///
     /// Byte 5-6:  Actual steer angle * 100 (signed int16, little-endian)
-    /// Byte 7-8:  Heading from IMU * 0.1 (signed int16, little-endian)
-    /// Byte 9-10: Roll from IMU * 0.1 (signed int16, little-endian)
+    /// Byte 7-8:  Heading from IMU * 0.1 (signed int16, little-endian); 9999 = no IMU
+    /// Byte 9-10: Roll from IMU * 0.1 (signed int16, little-endian); 8888 = no IMU
     /// Byte 11:   Switch status byte
     ///            bit 0: Work switch (INVERTED: 0=ON, 1=OFF)
     ///            bit 1: Steer switch active
@@ -609,15 +662,17 @@ public static class PgnBuilder
         short angleRaw = (short)(data[5] | (data[6] << 8));
         double actualSteerAngle = angleRaw / 100.0;
 
-        // Parse IMU heading (signed int16, heading * 0.1) - deprecated, GNSS supplies this now
-        // Little-endian: low byte first
+        // Parse IMU heading (signed int16, heading * 0.1; 9999 = no IMU). AgOpenGPS uses it
+        // when the GPS sentence carries no IMU heading. Little-endian: low byte first
         short headingRaw = (short)(data[7] | (data[8] << 8));
         double imuHeading = headingRaw * 0.1;
+        bool hasImuHeading = headingRaw != 9999;
 
-        // Parse IMU roll (signed int16, roll * 0.1) - deprecated, GNSS supplies this now
-        // Little-endian: low byte first
+        // Parse IMU roll (signed int16, roll * 0.1; 8888 = no IMU). AgOpenGPS uses it
+        // when the GPS sentence carries no roll (#353). Little-endian: low byte first
         short rollRaw = (short)(data[9] | (data[10] << 8));
         double imuRoll = rollRaw * 0.1;
+        bool hasImuRoll = rollRaw != 8888;
 
         // Parse switch status byte (byte 11)
         // Bit 0: Work switch (INVERTED: 1=OFF, 0=ON)
@@ -641,7 +696,9 @@ public static class PgnBuilder
             steerSwitchActive,
             remoteButton,
             vwasFusionActive,
-            pwmDisplay);
+            pwmDisplay,
+            hasImuRoll,
+            hasImuHeading);
 
         return true;
     }
@@ -653,6 +710,25 @@ public static class PgnBuilder
     public static bool TryParseSteerData(byte[] data, out SteerModuleData result)
     {
         return TryParseSteerData(data.AsSpan(), out result);
+    }
+
+    #endregion
+
+    #region PGN 211 Parser (External IMU)
+
+    /// <summary>
+    /// Parse PGN 211 (0xD3, external IMU) as AgOpenGPS does: 14 bytes, heading ×10 at
+    /// bytes 5-6 and roll ×10 at bytes 7-8 (signed int16, little-endian). Roll is
+    /// uncalibrated.
+    /// </summary>
+    public static bool TryParseImuData(ReadOnlySpan<byte> data, out double headingDegrees, out double rollDegrees)
+    {
+        headingDegrees = rollDegrees = 0;
+        if (data.Length != 14 || data[0] != HEADER1 || data[1] != HEADER2 || data[3] != PgnNumbers.IMU_DATA)
+            return false;
+        headingDegrees = (short)(data[5] | (data[6] << 8)) * 0.1;
+        rollDegrees = (short)(data[7] | (data[8] << 8)) * 0.1;
+        return true;
     }
 
     #endregion

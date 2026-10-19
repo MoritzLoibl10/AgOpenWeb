@@ -720,6 +720,33 @@ public static class WireCodec
         }
         // GPS data lost (append-only): the host's debounced flag, so client and host agree.
         w.Write((byte)(s.GpsLost ? 1 : 0));
+        // ISOBUS task controller (append-only, #312): [u8 present] then u8 section control,
+        // u8 sections, u8 clients, u32 reported low, u32 reported high.
+        var iso = s.Isobus;
+        w.Write((byte)(iso != null ? 1 : 0));
+        if (iso != null)
+        {
+            w.Write((byte)(iso.SectionControl ? 1 : 0));
+            w.Write((byte)Math.Clamp(iso.Sections, 0, 255));
+            w.Write((byte)Math.Clamp(iso.Clients, 0, 255));
+            w.Write((uint)(iso.Reported & 0xFFFFFFFF));
+            w.Write((uint)(iso.Reported >> 32));
+        }
+        // Field data card (append-only, #321): [u8 present] then f64 boundary area,
+        // actual area, trip area (m²), trip distance (m).
+        var fd = s.FieldData;
+        w.Write((byte)(fd != null ? 1 : 0));
+        if (fd != null)
+        {
+            w.Write(fd.BoundaryAreaSqM);
+            w.Write(fd.ActualAreaSqM);
+            w.Write(fd.TripAreaSqM);
+            w.Write(fd.TripDistanceM);
+        }
+        // Network IO: PGN 100 sent (append-only, #337).
+        w.Write((byte)(s.SendCorrectedPosition ? 1 : 0));
+        // Network IO: the subnet the scan came from (append-only, #334).
+        WriteStr(w, s.ScanReplySubnet);
         return ms.ToArray();
     }
 

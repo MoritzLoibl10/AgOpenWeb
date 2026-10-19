@@ -138,6 +138,21 @@
     #sb-gpscard .gc-row { display: flex; justify-content: space-between; gap: 16px; padding: 1px 0; }
     #sb-gpscard .gc-k { color: var(--text-muted); font-size: 12px; }
     #sb-gpscard .gc-v { color: var(--text-2); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    /* Field data card (#321): same look, toggled by the rotating field line under the fix. */
+    #sb-rot { cursor: pointer; }
+    #sb-fieldcard { display: none; position: absolute; top: calc(100% + 8px); left: 0; min-width: 230px;
+      background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.5); z-index: 10; font-weight: 500; }
+    #sb-fieldcard .gc-ll { color: #3498DB; font-size: 13px; font-weight: 700; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis; max-width: 260px; }
+    #sb-fieldcard .gc-rule { height: 1px; background: var(--border); margin: 5px 0; }
+    #sb-fieldcard .gc-row { display: flex; justify-content: space-between; gap: 16px; padding: 1px 0; }
+    #sb-fieldcard .gc-row.fc-hide { display: none; }
+    #sb-fieldcard .gc-k { color: var(--text-muted); font-size: 12px; }
+    #sb-fieldcard .gc-v { color: var(--text-2); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    #fc-reset { margin-top: 6px; width: 100%; text-align: center; height: 34px; border: 1px solid var(--border); border-radius: 8px;
+      background: rgba(var(--ov),0.06); color: var(--text-2); font: 600 12px system-ui, sans-serif; cursor: pointer; }
+    #fc-reset:hover { background: rgba(var(--ov),0.14); }
     /* Lightbar readout (arrow + cm, pass number on a second line) — DOM overlay so it
        renders identically under both the 2D and Skia map renderers (CanvasKit has no
        bundled font). Sits just below the LED strip. */
@@ -284,6 +299,12 @@
     #sectionbar .sec-row { display: flex; gap: 3px; }
     #sectionbar .sec-btn { width: 46px; height: 38px; border: 2px solid var(--bg-sunken); border-radius: 0;
       color: #202020; font: 700 13px system-ui, sans-serif; cursor: pointer; padding: 0; }
+    /* What the ISOBUS implement reports for its own sections, under the buttons (#312). */
+    #sectionbar .sec-iso { display: flex; align-items: center; gap: 6px; align-self: stretch; }
+    #sectionbar .sec-iso-label { color: var(--text-muted); font: 600 10px system-ui, sans-serif; }
+    #sectionbar .sec-iso-cells { display: flex; gap: 2px; flex: 1; }
+    #sectionbar .sec-iso-cell { flex: 1 1 0; min-width: 3px; height: 8px; background: #5a5a5a; }
+    #sectionbar .sec-iso-cell.on { background: #39FF6A; }
     /* Bottom nav (Phase 8) — field-tools toolbar + Flags/AB-line flyouts. */
     #bottomnav { position: relative; display: none; pointer-events: auto;
       -webkit-user-select: none; user-select: none; }
@@ -931,6 +952,13 @@
     .dlg-wide { max-width: 460px; min-width: 420px; }
     .dlg-sub { color: var(--text-muted); font: 700 13px system-ui, sans-serif; text-align: center; margin: 12px 0 6px; }
     .dlg-modes { display: flex; gap: 10px; justify-content: center; }
+    .qab-heading { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 8px;
+      color: var(--text-muted); font: 600 13px system-ui, sans-serif; }
+    .qab-heading .cfg-num { width: 80px; }
+    .ll-pt { margin-top: 10px; }
+    .ll-hdr { display: flex; align-items: center; justify-content: space-between; font: 700 14px system-ui, sans-serif; }
+    .ll-hdr .ll-fill { padding: 6px 10px; font-size: 12px; }
+    .ll-err { color: #e74c3c; font: 600 13px system-ui, sans-serif; min-height: 18px; margin-top: 8px; }
     .dlg-mode { flex: 1; min-height: 84px; display: flex; flex-direction: column; align-items: center;
       justify-content: center; gap: 6px; border-radius: 8px; border: 1px solid var(--border);
       background: rgba(var(--ov),0.05); color: var(--text-2); font: 600 12px system-ui, sans-serif; cursor: pointer; }
@@ -1987,7 +2015,7 @@
         </button>
         <span id="sb-age" class="sb-sec"></span>
       </div>
-      <div id="sb-rot" class="sb-rot">—</div>
+      <div id="sb-rot" class="sb-rot" title="Field data">—</div>
       <!-- GPS-detail card (Phase 5): toggled by the fix dot. Nested in .sb-left so it
            anchors under the fix readout now that the readout lives on the right. -->
       <div id="sb-gpscard">
@@ -2004,6 +2032,26 @@
         <div class="gc-row"><span class="gc-k">Heading:</span><span class="gc-v" id="gc-hdg">—</span></div>
         <div class="gc-row"><span class="gc-k">IMU Roll:</span><span class="gc-v" id="gc-roll">—</span></div>
         <div class="gc-row"><span class="gc-k">FPS:</span><span class="gc-v" id="gc-fps">—</span></div>
+      </div>
+      <!-- Field data card (#321): toggled by the rotating field line. AgOpenGPS FormFieldData.
+           The fc-bnd rows need a boundary. -->
+      <div id="sb-fieldcard">
+        <div class="gc-ll" id="fc-name">—</div>
+        <div class="gc-rule"></div>
+        <div class="gc-row fc-bnd"><span class="gc-k">Total:</span><span class="gc-v" id="fc-total">—</span></div>
+        <div class="gc-row"><span class="gc-k">Worked:</span><span class="gc-v" id="fc-worked">—</span></div>
+        <div class="gc-row fc-bnd"><span class="gc-k">Remaining:</span><span class="gc-v" id="fc-remain">—</span></div>
+        <div class="gc-row fc-bnd"><span class="gc-k">Time left:</span><span class="gc-v" id="fc-time">—</span></div>
+        <div class="gc-rule"></div>
+        <div class="gc-row"><span class="gc-k">Overlap:</span><span class="gc-v" id="fc-overlap">—</span></div>
+        <div class="gc-row"><span class="gc-k">Actual:</span><span class="gc-v" id="fc-actual">—</span></div>
+        <div class="gc-row fc-bnd"><span class="gc-k">Actual remaining:</span><span class="gc-v" id="fc-actremain">—</span></div>
+        <div class="gc-rule"></div>
+        <div class="gc-row"><span class="gc-k">Rate:</span><span class="gc-v" id="fc-rate">—</span></div>
+        <div class="gc-rule"></div>
+        <div class="gc-row"><span class="gc-k">Trip area:</span><span class="gc-v" id="fc-triparea">—</span></div>
+        <div class="gc-row"><span class="gc-k">Trip distance:</span><span class="gc-v" id="fc-tripdist">—</span></div>
+        <button id="fc-reset">Reset trip</button>
       </div>
     </div>
     <button id="sb-fs" title="Fullscreen (hide browser bars)">⛶</button>
@@ -2682,8 +2730,13 @@
     </div>
     <button id="nio-subnet" class="cfg-act cfg-actwide rn-gated">Send Subnet to Modules</button>
     <div class="sa-hint">Changes ALL modules at once, then restarts them.</div>
+    <div class="nio-warn" id="nio-subnet-mismatch" hidden></div>
     <div class="cfg-label" style="margin-top:14px">Host IPs</div>
     <div class="nio-hostips" id="nio-hostips">—</div>
+    <label class="nio-bcrow" title="Send the corrected position (PGN 100) on every fix, for seed monitors, rate controllers and GPS_Out">
+      <input type="checkbox" class="nio-chk" id="nio-pgn100" data-key="conn.sendCorrectedPosition">
+      <span class="nio-mod">Send corrected position</span>
+    </label>
     <hr class="nio-rule">
     <div class="nio-ntriprow">
       <span class="nio-dot" id="nio-ntrip-dot"></span>
@@ -3325,6 +3378,8 @@
     <button class="cfg-act cfg-actwide fj-primary" id="br-submit" style="margin-top:10px">Create Bug Report</button>
     <div class="sa-hint" id="br-status" style="margin-top:6px"></div>
     <button class="cfg-act cfg-actwide" id="br-download" style="margin-top:6px;display:none">Download</button>
+    <button class="cfg-act cfg-actwide" id="br-github" style="margin-top:6px;display:none">Report on GitHub</button>
+    <div class="sa-hint" id="br-github-hint" style="margin-top:6px;display:none">Opens a GitHub bug report with the title, description and version filled in. Drag the downloaded zip into its Bug Report Dump box, and that's all it needs.</div>
   </div>
   <!-- Smart WAS Calibration — chain sub-panel of AutoSteer (watch-the-tractor:
        opts OUT of the light-dismiss scrim so you can pan/zoom to watch the tractor
@@ -3380,8 +3435,14 @@
   <div id="rightnav">
     <button id="rn-contour" class="rn-btn"><img id="rn-contour-i" class="rn-ic" alt="Contour"></button>
     <button id="rn-contourlock" class="rn-btn" style="display:none"><img id="rn-contourlock-i" class="rn-ic" alt="Contour lock"></button>
+    <!-- Track picking, as AgOpenGPS's right panel (#336): shown with two or more visible
+         tracks and an active one, out of contour mode. -->
+    <button id="rn-cycle" class="rn-btn" style="display:none" title="Next track"><img class="rn-ic" src="/icons/ABLineCycle.png" alt="Next track"></button>
+    <button id="rn-cycleback" class="rn-btn" style="display:none" title="Previous track"><img class="rn-ic" src="/icons/ABLineCycleBk.png" alt="Previous track"></button>
+    <button id="rn-autotrack" class="rn-btn" style="display:none" title="Auto track: pick the closest track"><img id="rn-autotrack-i" class="rn-ic" alt="Auto track"></button>
     <button id="rn-manual" class="rn-btn"><img id="rn-manual-i" class="rn-ic" alt="Manual"></button>
     <button id="rn-auto" class="rn-btn"><img id="rn-auto-i" class="rn-ic" alt="Sections"></button>
+    <button id="rn-isobus" class="rn-btn" style="display:none"><img id="rn-isobus-i" class="rn-ic" alt="ISOBUS section control"></button>
     <button id="rn-youturn" class="rn-btn"><img id="rn-youturn-i" class="rn-ic" alt="U-Turn"></button>
     <button id="rn-steer" class="rn-btn"><img id="rn-steer-i" class="rn-ic" alt="AutoSteer"></button>
     <div id="rn-readonly"></div>
@@ -3454,18 +3515,17 @@
       </div>
       <div id="bn-flyout-ab" class="bn-flyout">
         <!-- Mirrors native BottomNavigationPanel AB flyout. Row 1: Tracks manager /
-             Auto-track / Quick-AB (the single creation hub — GPS-driven, from-boundary,
-             and draw-on-map all live in its dialog). Then the active-track ops
-             (cycle/smooth/delete, A/B end length, nudge), shown only with an active track
-             (.bn-abdep). Length and nudge are unrelated, so a divider separates them (#93). -->
+             Quick-AB (the single creation hub — GPS-driven, from-boundary, and draw-on-map
+             all live in its dialog). Then the active-track ops (smooth/delete, A/B end
+             length, nudge), shown only with an active track (.bn-abdep). Length and nudge
+             are unrelated, so a divider separates them (#93). Cycle and auto track are on
+             the right panel, as in AgOpenGPS (#336). -->
         <div class="bn-flyrow">
           <button class="bn-btn" id="bn-tracks" title="Tracks — manage AB lines"><img class="bn-ic" src="/icons/ABTracks.png" alt="Tracks"></button>
           <button class="bn-btn" id="bn-quickab" title="Quick AB line creator"><img class="bn-ic" src="/icons/ABTrackAPlus.png" alt="Quick AB"></button>
-          <button class="bn-btn" id="bn-autotrack" data-cmd="track.autoTrack" data-t2 title="Auto track select (closest track)">AT</button>
         </div>
         <div class="bn-flysep bn-abdep"></div>
         <div class="bn-flyrow bn-abdep">
-          <button class="bn-btn" data-cmd="track.cycle" data-t2 title="Cycle AB lines"><img class="bn-ic" src="/icons/ABLineCycle.png" alt="Cycle"></button>
           <button class="bn-btn" data-cmd="track.smooth" data-t2 title="Smooth AB curve"><img class="bn-ic" src="/icons/ABSmooth.png" alt="Smooth"></button>
           <button class="bn-btn" id="bn-delcontours" data-t2 title="Delete contour paths"><img class="bn-ic" src="/icons/TrashContourRef.png" alt="Delete contours"></button>
         </div>
@@ -3575,6 +3635,16 @@
         <button class="dlg-mode" data-qab="driveAB" title="Drive from A to B"><img src="/icons/ABTrackAB.png" alt=""><span>Drive AB</span></button>
         <button class="dlg-mode" data-qab="recordCurve" title="Drive to record a curve"><img src="/icons/ABTrackCurve.png" alt=""><span>Curve</span></button>
       </div>
+      <!-- A+ heading (#335, AgOpenGPS Quick AB nudHeading): empty = the vehicle's heading,
+           shown as the placeholder; a typed value makes A+ use it instead. -->
+      <label class="qab-heading">A+ heading
+        <input id="qab-aplus-heading" class="cfg-num" type="number" step="0.1" min="0" max="360" inputmode="decimal">°
+      </label>
+      <!-- Ref side (#345, AgOpenGPS isRefRightSide): the driven line is the edge of the work;
+           the track is saved half a working width to this side. Right each time it opens. -->
+      <div class="qab-heading">First pass
+        <div class="ln-seg" id="qab-refside"><button class="ln-segbtn" data-side="left">Left</button><button class="ln-segbtn active" data-side="right">Right</button></div>
+      </div>
       <div class="dlg-sub">From Field Boundary</div>
       <div class="dlg-modes">
         <button class="dlg-mode" data-qab="boundaryEdge" title="AB line along the longest boundary edge"><span class="dlg-bigtxt">AB</span><span>Longest Edge</span></button>
@@ -3586,7 +3656,41 @@
         <button class="dlg-mode" data-qab="drawStraight" title="Tap 2 points on the map for a straight AB line"><img src="/icons/ABTrackAB.png" alt=""><span>Straight</span></button>
         <button class="dlg-mode" data-qab="drawCurve" title="Tap points on the map for a curve, then Finish"><img src="/icons/ABTrackCurve.png" alt=""><span>Curve</span></button>
       </div>
+      <!-- AgOpenGPS Build Tracks "Lat/Lon + Heading" and "Lat/Lon" (#335). -->
+      <div class="dlg-sub">By Coordinates</div>
+      <div class="dlg-modes">
+        <button class="dlg-mode" data-qab="latLonHeading" title="AB line from a latitude/longitude and a heading"><span class="dlg-bigtxt">A+</span><span>Lat/Lon + Heading</span></button>
+        <button class="dlg-mode" data-qab="latLonAB" title="AB line through two latitude/longitude points"><span class="dlg-bigtxt">AB</span><span>Lat/Lon A, B</span></button>
+      </div>
       <div class="dlg-buttons"><button id="dlg-qab-cancel" class="dlg-btn dlg-cancel">Cancel</button></div>
+    </div>
+    <!-- Coordinates line (#335): A + heading, or A + B. The fill buttons put in the
+         vehicle's position. -->
+    <div id="dlg-latlonab" class="dlg-card">
+      <div class="dlg-title" id="ll-title"></div>
+      <div class="ll-pt">
+        <div class="ll-hdr"><span>A</span><button class="dlg-btn ll-fill" data-ll-fill="a">Use current position</button></div>
+        <label class="dlg-label" for="ll-lat-a">Latitude (−90 to 90)</label>
+        <input id="ll-lat-a" class="dlg-input num-field" type="text" placeholder="0.00000000">
+        <label class="dlg-label" for="ll-lon-a">Longitude (−180 to 180)</label>
+        <input id="ll-lon-a" class="dlg-input num-field" type="text" placeholder="0.00000000">
+      </div>
+      <div class="ll-pt" id="ll-heading-row">
+        <label class="dlg-label" for="ll-heading">Heading (degrees true)</label>
+        <input id="ll-heading" class="dlg-input num-field" type="text" placeholder="0.0">
+      </div>
+      <div class="ll-pt" id="ll-b-row">
+        <div class="ll-hdr"><span>B</span><button class="dlg-btn ll-fill" data-ll-fill="b">Use current position</button></div>
+        <label class="dlg-label" for="ll-lat-b">Latitude (−90 to 90)</label>
+        <input id="ll-lat-b" class="dlg-input num-field" type="text" placeholder="0.00000000">
+        <label class="dlg-label" for="ll-lon-b">Longitude (−180 to 180)</label>
+        <input id="ll-lon-b" class="dlg-input num-field" type="text" placeholder="0.00000000">
+      </div>
+      <div class="ll-err" id="ll-err"></div>
+      <div class="dlg-buttons">
+        <button id="ll-cancel" class="dlg-btn dlg-cancel">Cancel</button>
+        <button id="ll-ok" class="dlg-btn dlg-ok">Create</button>
+      </div>
     </div>
     <!-- Tracks manager (mirrors native TracksDialogPanel) — list + toolbar. -->
     <div id="dlg-tracks" class="dlg-card dlg-wide">

@@ -125,7 +125,9 @@ public class ConfigurationService(
                       : t.IsToolTrailing ? "Trailing"
                       : "—";
         return
-            $"Width: {Len(t.Width, isMetric)}\n" +
+            // The sections' total, as guidance and coverage use; Tool.Width is a stored
+            // default the section editor never updates (#345).
+            $"Width: {Len(store.ActualToolWidth, isMetric)}\n" +
             $"Overlap: {Len(t.Overlap, isMetric)}\n" +
             $"Offset: {Len(t.Offset, isMetric)}\n" +
             $"Sections: {store.NumSections}\n" +
@@ -527,6 +529,7 @@ public class ConfigurationService(
         store.Connections.AgShareApiKey = settings.AgShareApiKey;
         store.Connections.AgShareEnabled = settings.AgShareEnabled;
         store.Connections.RtcmBroadcast = settings.RtcmBroadcast;
+        store.Connections.SendCorrectedPosition = settings.SendCorrectedPosition;
         store.Connections.NtripEnabled = settings.NtripEnabled;
         store.Connections.GpsUpdateRate = settings.GpsUpdateRate;
         store.Connections.UseRtk = settings.UseRtk;
@@ -599,6 +602,7 @@ public class ConfigurationService(
         settings.AgShareApiKey = store.Connections.AgShareApiKey;
         settings.AgShareEnabled = store.Connections.AgShareEnabled;
         settings.RtcmBroadcast = store.Connections.RtcmBroadcast;
+        settings.SendCorrectedPosition = store.Connections.SendCorrectedPosition;
         settings.NtripEnabled = store.Connections.NtripEnabled;
         settings.GpsUpdateRate = store.Connections.GpsUpdateRate;
         settings.UseRtk = store.Connections.UseRtk;

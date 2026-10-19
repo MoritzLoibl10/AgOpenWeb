@@ -75,6 +75,14 @@ public class UdpCommunicationService : IUdpCommunicationService, IDisposable
     private DateTime _lastModuleResponse = DateTime.MinValue;
     private DateTime _lastDiscoveryRefresh = DateTime.MinValue;
     private static readonly IPEndPoint _localhostEndpoint = new(IPAddress.Loopback, 8888);
+    // AgIO's loopback port: AgOpenGPS sends PGNs to the loopback broadcast so every program
+    // bound to 17777 gets a copy. Apple platforms accept a loopback broadcast but never
+    // deliver it, so there it goes to 127.0.0.1 (one listener).
+    private static readonly IPEndPoint _agIoLoopbackEndpoint = new(
+        OperatingSystem.IsMacOS() || OperatingSystem.IsIOS() || OperatingSystem.IsMacCatalyst()
+            ? IPAddress.Loopback
+            : IPAddress.Parse("127.255.255.255"),
+        17777);
     private const int ModuleTimeoutSeconds = 5;
     private const int DiscoveryRefreshSeconds = 30;
 
@@ -96,6 +104,7 @@ public class UdpCommunicationService : IUdpCommunicationService, IDisposable
     private string? _imuIp;
     private string? _gpsIp;
     private string? _moduleSubnet;
+    private string? _scanSubnet;
 
     private const int HELLO_TIMEOUT_MS = 3000; // 3 seconds for hello response (tolerates Wi-Fi jitter)
     private const int DATA_TIMEOUT_STEER_MACHINE_MS = 1500; // 50Hz data, allow 1500ms for Wi-Fi latency jitter
@@ -261,6 +270,12 @@ public class UdpCommunicationService : IUdpCommunicationService, IDisposable
             _perfTxCount++;
             EmitTxIfWindowElapsed();
         }
+    }
+
+    public void SendToLoopback(byte[] data)
+    {
+        if (!IsConnected || _udpSocket == null) return;
+        SendPacket(data, _agIoLoopbackEndpoint);
     }
 
     private void SendPacket(byte[] data, IPEndPoint endpoint)
@@ -517,12 +532,13 @@ public class UdpCommunicationService : IUdpCommunicationService, IDisposable
         // Track ALL PGNs as data - if we're getting any PGN from a module, it's sending data
         switch (pgn)
         {
-            // Scan reply: the module self-reports its full IP + subnet (and is the
-            // only inbound PGN that carries the GPS module's IP).
+            // Scan reply: the module self-reports its full IP (and is the only inbound
+            // PGN that carries the GPS module's IP), plus the subnet the scan came from.
             case PgnNumbers.SCAN_REPLY: // 203
                 if (PgnBuilder.TryParseScanReply(data, out byte moduleId, out string scanIp, out string scanSubnet))
                 {
-                    _moduleSubnet = scanSubnet;
+                    _moduleSubnet = scanIp[..scanIp.LastIndexOf('.')];
+                    _scanSubnet = scanSubnet;
                     switch (moduleId)
                     {
                         case 126: _autoSteerIp = scanIp; break;
@@ -570,6 +586,14 @@ public class UdpCommunicationService : IUdpCommunicationService, IDisposable
                 System.Diagnostics.Debug.WriteLine($"IMU HELLO received at {now:HH:mm:ss.fff}");
                 break;
 
+            case PgnNumbers.IMU_DATA: // 211 - external IMU roll/heading (#353)
+                _lastDataFromIMU = now;
+                _imuIp = remoteIp;
+                break;
+
+            case PgnNumbers.ISOBUS_HEARTBEAT: // 240 - task controller; IsobusTaskControllerService reads it
+                break;
+
             default:
                 // Log unknown PGNs to help debug
                 System.Diagnostics.Debug.WriteLine($"Unknown PGN {pgn} (0x{pgn:X2}) received");
@@ -601,10 +625,13 @@ public class UdpCommunicationService : IUdpCommunicationService, IDisposable
     };
 
     /// <summary>
-    /// The /24 subnet (first three octets) most recently reported by a module in
-    /// a PGN 203 scan reply, or null if no scan reply has been seen.
+    /// The /24 subnet (first three octets) of the module that sent the most recent
+    /// PGN 203 scan reply (from its IP), or null if no scan reply has been seen.
     /// </summary>
     public string? GetModuleSubnet() => _moduleSubnet;
+
+    /// <inheritdoc />
+    public string? GetScanReplySubnet() => _scanSubnet;
 
     public IPAddress? GetGpsSourceAddress(double maxAgeSeconds = 10)
     {
