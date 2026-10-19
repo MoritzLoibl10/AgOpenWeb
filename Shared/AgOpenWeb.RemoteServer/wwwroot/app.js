@@ -7108,7 +7108,6 @@ const TabletPolish = (() => {
   const $ = id => document.getElementById(id);
   const lsGet = (k, d) => { try { const v = window.localStorage.getItem(k); return v === null ? d : v; } catch (_) { return d; } };
   const lsSet = (k, v) => { try { window.localStorage.setItem(k, v); } catch (_) { /* private / blocked */ } };
-  const terminal = () => root.getAttribute('data-tui-layout') === 'terminal';
 
   // --- Units and numbers in German ------------------------------------------------------
   // German: decimal comma, and number and unit stay on one line (no-break space).
@@ -7798,7 +7797,7 @@ const TabletProfiles = (() => {
   }
   function renderWizFoot() {
     foot.innerHTML = '';
-    const s = W.steps[W.step], wj = wjob(), sending = wj && wj.state === 'sending';
+    const s = W.steps[W.step], wj = wjob();
     const back = el('button', 'tp-btn'); back.textContent = '← ' + T(W.step === 0 ? tr('Cancel') : tr('Back'));
     back.disabled = !!wj;
     onTap(back, () => { if (W.step === 0) tryClose(); else { W.step--; renderWizard(); } });
