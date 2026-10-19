@@ -6490,6 +6490,7 @@ const TabletUi = (() => {
   const RN_LABELS = [
     ['rn-contour', tr('Contour')], ['rn-contourlock', tr('Lock')], ['rn-manual', tr('Manual')],
     ['rn-auto', tr('Auto')], ['rn-youturn', tr('U-Turn')], ['rn-steer', tr('Steer')],
+    ['rn-autotrack', tr('Auto track')], ['rn-cycle', tr('Next track')], ['rn-cycleback', tr('Previous track')], ['rn-isobus', 'ISOBUS'],
   ];
   const rnState = {};
   for (const [id, label] of RN_LABELS) {
@@ -6514,6 +6515,10 @@ const TabletUi = (() => {
     rnSet('rn-manual', !!op.sectionManual, onOff(op.sectionManual));
     rnSet('rn-auto', !!op.sectionAuto, onOff(op.sectionAuto));
     rnSet('rn-youturn', !!op.youturn, onOff(op.youturn));
+    const at = !!(tick.tools && tick.tools.autoTrack);
+    rnSet('rn-autotrack', at, onOff(at));
+    const iso = statusBar && statusBar.isobus;
+    if (iso) rnSet('rn-isobus', !!iso.sectionControl, !iso.sections ? '—' : onOff(iso.sectionControl));
     rnSet('rn-steer', !!op.autoSteer && !op.moduleNotSteering,
       !op.autoSteerAvail ? tr('No line') : !op.autoSteer ? tr('Off') : op.moduleNotSteering ? tr('Not steering') : tr('On'));
   }
@@ -6980,15 +6985,20 @@ const TabletTerminal = (() => {
     { id: 'headland', src: '#bn-headland', label: tr('Headland'), on: t => t.tools && t.tools.headlandOn },
     { id: 'hlsections', src: '#bn-secheadland', label: tr('Sections in headland'), on: t => t.tools && !t.tools.sectionInHeadland },
     { id: 'tram', src: '#bn-tram', label: tr('Tram lines'), on: t => t.tools && t.tools.tramMode > 0 },
-    { id: 'autotrack', src: '#bn-autotrack', label: tr('Auto track'), on: t => t.tools && t.tools.autoTrack },
+    // Upstream's own track picking (#339): shown by upstream only with two or more visible tracks.
+    { id: 'autotrack', rn: 'rn-autotrack' }, { id: 'cycle', rn: 'rn-cycle' }, { id: 'cycleback', rn: 'rn-cycleback' },
     { id: 'uturnL', src: '#osb-uturn [data-cmd="youturn.manualLeft"]', label: tr('U-turn left') },
     { id: 'uturnR', src: '#osb-uturn [data-cmd="youturn.manualRight"]', label: tr('U-turn right') },
     { id: 'shiftL', src: '#osb-lateral [data-cmd="track.snapLeft"]', label: tr('Shift left') },
     { id: 'shiftR', src: '#osb-lateral [data-cmd="track.snapRight"]', label: tr('Shift right') },
+    // ISOBUS section control (#318): always in the bar while upstream shows it (a task
+    // controller heartbeat is heard), so it is never out of reach; outside the slot budget.
+    { id: 'isobus', rn: 'rn-isobus', auto: true },
     { id: 'steer', rn: 'rn-steer', fixed: true },
   ];
   const QBY = Object.fromEntries(QPOOL.map(q => [q.id, q]));
-  const RN_LABEL = { contour: tr('Contour'), manual: tr('Manual'), auto: tr('Auto'), youturn: tr('U-Turn'), steer: tr('Steer') };
+  const RN_LABEL = { contour: tr('Contour'), manual: tr('Manual'), auto: tr('Auto'), youturn: tr('U-Turn'), steer: tr('Steer'),
+    autotrack: tr('Auto track'), cycle: tr('Next track'), cycleback: tr('Previous track'), isobus: 'ISOBUS' };
   const qLabel = q => q.label || RN_LABEL[q.id] || q.id;
   const DEFAULT_QUICK = ['contour', 'manual', 'auto', 'youturn'];
   const MAX_SLOTS = 6; // with steer; contour counts twice (its lock button). Keeps glove ≥ 64 px at 600 px height.
@@ -6996,7 +7006,7 @@ const TabletTerminal = (() => {
   const cleanQuick = v => {
     if (!Array.isArray(v)) return null;
     const out = [];
-    for (const id of v) if (QBY[id] && !QBY[id].fixed && !out.includes(id) && slotCost(out.concat(id)) <= MAX_SLOTS) out.push(id);
+    for (const id of v) if (QBY[id] && !QBY[id].fixed && !QBY[id].auto && !out.includes(id) && slotCost(out.concat(id)) <= MAX_SLOTS) out.push(id);
     return out;
   };
   let quick = cleanQuick(lsJson('aow.ui.quick', null)) || DEFAULT_QUICK.slice();
@@ -7053,9 +7063,9 @@ const TabletTerminal = (() => {
       const node = q.rn ? $(q.rn) : proxies[q.id] && proxies[q.id].b;
       if (!node) continue;
       const i = quick.indexOf(q.id);
-      const shown = q.fixed || i >= 0;
+      const shown = q.fixed || q.auto || i >= 0;
       node.classList.toggle('tui-qhide', t && !shown);
-      node.style.order = t ? String(q.fixed ? 90 : i * 2) : '';
+      node.style.order = t ? String(q.fixed ? 90 : q.auto ? 80 : i * 2) : '';
       if (q.id === 'contour') {
         const lock = $('rn-contourlock');
         if (lock) { lock.classList.toggle('tui-qhide', t && !shown); lock.style.order = t ? String(i * 2 + 1) : ''; }
@@ -7232,13 +7242,14 @@ const TabletTerminal = (() => {
   }
   function renderQuickEditor() {
     quickBody.innerHTML = '<div class="tui-hint">' + esc(tr('Pick the buttons for the bar on the right edge and their order. Steer always stays at the bottom. Up to {n} buttons (Contour brings its lock button). Saved on this device.', { n: MAX_SLOTS })) + '</div>';
-    const ordered = quick.map(id => QBY[id]).concat(QPOOL.filter(q => !q.fixed && !quick.includes(q.id))).concat([QBY.steer]);
+    const ordered = quick.map(id => QBY[id]).concat(QPOOL.filter(q => !q.fixed && !q.auto && !quick.includes(q.id)))
+      .concat(QPOOL.filter(q => q.auto), [QBY.steer]);
     for (const q of ordered) {
       const row = el('div', 'tui-qitem', qIcon(q) + '<span class="e-grow"></span>');
       row.querySelector('.e-grow').textContent = qLabel(q);
       const i = quick.indexOf(q.id);
-      if (q.fixed) {
-        row.appendChild(Object.assign(el('span', 'tui-chip lock on'), { textContent: tr('Always') }));
+      if (q.fixed || q.auto) {
+        row.appendChild(Object.assign(el('span', 'tui-chip lock on'), { textContent: q.fixed ? tr('Always') : tr('When connected') }));
       } else {
         const chip = el('button', 'tui-chip' + (i >= 0 ? ' on' : ''));
         chip.textContent = i >= 0 ? tr('In the bar') : tr('Add');
