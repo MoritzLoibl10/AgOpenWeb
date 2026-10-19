@@ -43,13 +43,14 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
     const m = await L.measure(page);
     const contrast = await L.contrast(page);
     const v = { sum: L.summarize(m), controls: m.controls, contrast, contrastByRegion: L.contrastByRegion(contrast),
-      driveFonts: await L.driveFonts(page), overlaps: await L.overlaps(page) };
+      driveFonts: await L.driveFonts(page), overlaps: await L.overlaps(page), truncated: await L.truncated(page) };
     if (guideline) v.guideline = await L.guidelineContrast(page, guideline);
     views[name] = v;
     console.log(name.padEnd(28), `n=${v.sum.n} <48=${v.sum.lt48} >=64=${v.sum.ge64} text<14=${v.sum.textLt14}/${v.sum.textNodes}`
-      + ` fahrwerte>=${v.driveFonts.min}px überlappt=${v.overlaps.length}`
+      + ` fahrwerte>=${v.driveFonts.min}px überlappt=${v.overlaps.length} abgeschnitten=${v.truncated.length}`
       + (v.guideline ? ` leitlinie=${v.guideline.cr}:1` : ''));
     for (const o of v.overlaps) console.log('   überlappt:', o);
+    for (const t of v.truncated) console.log('   abgeschnitten:', t);
   };
   const glareShot = async (page, name) => {
     const tag = await page.addStyleTag({ content: GLARE_CSS });
@@ -168,7 +169,15 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
   await openNav(p, 'ln-fieldops'); await p.waitForTimeout(300); await p.click('#fo-fields'); await record(p, '09-fields-dialog'); await close();
   await openNav(p, 'ln-autosteer'); await p.waitForTimeout(300); await p.click('#as-expand'); await record(p, '10-autosteer-expanded');
   await p.click('[data-tab="as-hw"]'); await record(p, '10b-autosteer-hardware'); await close(); await toDrive(p);
-  await openNav(p, 'ln-vehicle'); await p.waitForTimeout(300); await p.click('#vth-vehconfig'); await record(p, '11-vehicle-config'); await close(); await toDrive(p);
+  // Phase 2c: "Vehicle & Tool" opens the profile cards (old lists: "Classic view"). The vehicle
+  // dialog is then opened directly, as the old list's "Configure Vehicle…" did (sim is moving,
+  // so the cards are locked).
+  await openNav(p, 'ln-vehicle'); await p.waitForTimeout(400);
+  if (await p.evaluate(() => !!document.querySelector('#tui-prof.open'))) {
+    await record(p, '11b-vehicle-profiles'); await close();
+    await p.evaluate(() => lnOpen('vehiclecfg', 'ln-vehicle', () => populateVehicleCfg(true)));
+  } else await p.click('#vth-vehconfig');
+  await record(p, '11-vehicle-config'); await close(); await toDrive(p);
 
   // --- Fahrbild, Heading-Up, ohne Simulator-Leiste -------------------------------------------
   if (await simBarOpen()) await p.click('#sim-close');

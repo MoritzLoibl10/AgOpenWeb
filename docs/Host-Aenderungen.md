@@ -65,3 +65,43 @@ simulierter VRS-Caster). Doku: Abschnitt „NTRIP Connection Format“ in `CLAUD
    Fork-Version von `TryBuildGga` gegen die upstream-Lösung abwägen und möglichst upstream nehmen.
 3. Danach `dotnet test Tests/AgOpenWeb.Services.Tests --filter FullyQualifiedName~Ntrip`
    und `python3 Tools/i18n-extract.py --check`.
+
+## 2. Phase 2b: Deutsch als Standard (Oktober 2026)
+
+Keine Host-Änderung. Für Rebases wichtig, weil es upstream-Dateien außerhalb des
+tablet-ui-Blocks betrifft:
+
+| Datei | Änderung | Rebase-Hinweis |
+|---|---|---|
+| `wwwroot/i18n.js` | `lookup` sucht auch den normalisierten Schlüssel (ein Schlüssel mit doppelten Leerzeichen wie „Done {area}  Left …“ wurde in keiner Sprache übersetzt) | eine Zeile; Kandidat für einen upstream-PR |
+| `wwwroot/i18n/de.json` | vollständig übersetzt (Fork-Begriffe, siehe `docs/Glossar-DE.md`) | upstream füllt `de.json` über Weblate: bei Konflikten die Fork-Fassung behalten und neue Schlüssel nachtragen; `Tools/i18n-extract.py --check` meldet Lücken |
+| `.github/workflows/build-and-release.yml` | Schritt „Check language files are untouched“ lässt neben `en.json` auch `de.json` zu (upstream: Sprachdateien nur über Weblate); die anderen Sprachen bleiben gesperrt | ein Ausdruck in `grep -v`; bei Konflikt die Fork-Zeile behalten |
+| `Tools/i18n-extract.py` | `--check` schlägt fehl, wenn `de.json` einen englischen Schlüssel nicht abdeckt (`REQUIRED = ("de",)`); veraltete Schlüssel werden nur gemeldet | kleiner Block vor `main()` |
+
+Deutsch als Standard: Der Client schickt einmal je Gerät den vorhandenen Befehl
+`app.setLanguage|de`, wenn der Host noch Englisch spricht (`aow.ui.langChosen` im localStorage).
+Meldungen, die der Host als fertigen Text schickt (z. B. „RTK Fixed“, NTRIP-Status), bleiben
+englisch.
+
+## 3. Phase 2c: Arbeitsbreite ohne Ersatzwert (Oktober 2026)
+
+Keine Host-Änderung. Kleine Änderungen im upstream-Teil von `app.js` und `index.html`
+(außerhalb des tablet-ui-Blocks), alle mit `fork:` kommentiert:
+
+| Datei / Stelle | Änderung | Rebase-Hinweis |
+|---|---|---|
+| `app.js` `sectionsWidthM()` | **neu**, direkt vor `toolWidthM()`: Breite aus den Teilbreiten der Szene, `0` wenn es keine gibt. `toolWidthM()` selbst ist unverändert (fällt weiter auf 6 m zurück) | neue Funktion, keine Konflikte |
+| `app.js` `fbDefaultOffset()` | nutzt `sectionsWidthM()`; ohne Teilbreiten `0` statt 12 m | eine Zeile |
+| `app.js` `fbApplyTw()` | „N Arbeitsbreiten“ ohne Teilbreiten: Feld bleibt leer, Hinweis „Arbeitsbreite fehlt“ (`#fb-hl-twmiss`) | Funktion ersetzt (vorher eine Zeile) |
+| `app.js` Vorgewende-Knöpfe (`#fb-addhl .fb-addbtn`) | ohne Abstand und ohne Arbeitsbreite wird nichts gesendet, der Hinweis erscheint; mit Abstand unverändert derselbe Befehl | eine Zeile |
+| `app.js` `#fb-hl-newoff` input | blendet den Hinweis aus | eine Zeile |
+| `app.js` Statuszeile Leistung (`sbPage === 1`) | ohne Teilbreiten „—“ statt einer Leistung aus 6 m | zwei Zeilen |
+| `index.html` Schlag-Editor „Vorgewende hinzufügen“ | `<span id="fb-hl-twmiss">Working width missing</span>` | eine Zeile |
+
+Nicht geändert: Hilfslinien und Kartenraster (`drawExtraGuidelinesSk`, Raster) rechnen weiter
+mit `toolWidthM()`. Upstream-Issue dazu: siehe Text im PR von Phase 2c.
+
+Die Profil-Oberfläche selbst (Karten, Assistent) liegt im tablet-ui-Block (`TabletProfiles`,
+`TabletHostText` am Ende von `app.js`, CSS „Phase 2c“) und hängt sich über `lnOpen` /
+`lnCloseAll` ein: `lnOpen('vehtoolhub', …)` öffnet die Karten statt der zwei Listen, die
+alte Auswahl bleibt über „Klassische Ansicht“ erreichbar.

@@ -58,17 +58,18 @@ for (const r of runs) {
 
 out.push('\n### Fahrwerte: kleinste Schrift und Überlappungen\n');
 out.push('Fahrwerte = Werte, die man beim Fahren abliest (Statusleiste, Querabweichung, HUDs, Teilbreiten, Schnellzugriff, Module); Überlappungen = feste Elemente über der Karte, die sich um mehr als 4 px schneiden.\n');
-head(['Lauf', 'kleinste Fahrwert-Schrift (Ansicht, Element)', 'Ansichten mit Überlappung', 'Überlappungen gesamt']);
+head(['Lauf', 'kleinste Fahrwert-Schrift (Ansicht, Element)', 'Ansichten mit Überlappung', 'Überlappungen gesamt', 'abgeschnittene Texte']);
 for (const r of runs) {
   let min = null, at = '';
-  let ovViews = 0, ov = 0;
+  let ovViews = 0, ov = 0, cut = null;
   for (const [name, v] of Object.entries(r.data.views)) {
     if (v.driveFonts && v.driveFonts.min != null && (min === null || v.driveFonts.min < min)) {
       min = v.driveFonts.min; at = `${name}, ${v.driveFonts.minAt.sel} „${v.driveFonts.minAt.t}“`;
     }
     if (v.overlaps && v.overlaps.length) { ovViews++; ov += v.overlaps.length; }
+    if (v.truncated) cut = (cut || 0) + v.truncated.length;
   }
-  out.push(`| ${r.label} | ${min === null ? '–' : min + ' px (' + at + ')'} | ${ovViews} | ${ov} |`);
+  out.push(`| ${r.label} | ${min === null ? '–' : min + ' px (' + at + ')'} | ${ovViews} | ${ov} | ${cut === null ? '–' : cut} |`);
 }
 
 out.push('\n### Je Ansicht: Elemente < 48 px / ≥ 64 px\n');

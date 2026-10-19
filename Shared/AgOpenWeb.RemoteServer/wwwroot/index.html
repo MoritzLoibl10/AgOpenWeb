@@ -1655,6 +1655,261 @@
     .tui-qitem img, .tui-qitem svg { width: 36px; height: 36px; object-fit: contain; flex: none; }
     .tui-qitem .e-grow { font: 700 var(--tui-fs-lbl) system-ui, sans-serif; }
     .tui-seg.tui-seg2 { grid-template-columns: repeat(2, 1fr); }
+
+    /* ===== Phase 2b: polish ======================================================
+       Terminal layout only, unless noted. Camera pad hidden while driving (a map tap shows it
+       for 5 s, html[data-tui-cam]); bottom bar with names, rarely used buttons in the menu;
+       framed on-screen U-turn / track buttons; section bar docked on the bottom bar. */
+    :root { --tui-bn-fs: 11px; --tui-osb: 64px; }
+    :root[data-tui-scale="large"] { --tui-bn-fs: 12px; }
+    :root[data-tui-scale="glove"] { --tui-bn-fs: 14px; --tui-osb: 72px; --tui-osb-wf: 1.5; }
+    :root[data-tui-layout="terminal"] .osb-row { gap: 8px; }
+
+    /* A3: camera pad */
+    :root[data-tui-layout="terminal"][data-tui-mode="drive"]:not([data-tui-cam]) #campad { visibility: hidden; }
+
+    /* A4: bottom bar, names under the icons; moved buttons only in the menu */
+    .tui-bn-lbl { display: none; }
+    :root[data-tui-layout="terminal"] #bottomnav .bn-bar > .bn-btn.tui-bnmove { display: none; }
+    :root[data-tui-band][data-tui-layout="terminal"] {
+      --tui-bnw: min(calc(var(--tui-nav) * 1.6), calc((var(--tui-stack-w) - 16px) / var(--tui-bn-n) - 6px)); }
+    :root[data-tui-layout="terminal"] #bottomnav .bn-bar > .bn-btn {
+      width: var(--tui-bnw, var(--tui-bn)); height: max(var(--tui-bn), 52px); flex-direction: column; gap: 2px; padding: 4px 3px; }
+    :root[data-tui-layout="terminal"] #bottomnav .bn-bar > .bn-btn > :not(.tui-bn-lbl) {
+      flex: 1 1 0; min-height: 0; }
+    /* Up to two lines (e.g. "Spur hier setzen"); the icon above takes what is left. */
+    :root[data-tui-layout="terminal"] .tui-bn-lbl { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+      flex: none; max-width: 100%; overflow: hidden; white-space: normal; text-align: center; overflow-wrap: anywhere;
+      font: 700 var(--tui-bn-fs)/1.2 system-ui, sans-serif; color: var(--text); }
+    :root[data-tui-xte][data-tui-uti-low] #uturn-indicator { top: var(--tui-xte-b); left: auto; right: var(--tui-uti-r, 16px); }
+    :root[data-tui-layout="terminal"] #bottomnav .bn-btn.active .tui-bn-lbl { color: #fff; }
+    /* More field tools in the menu: icon, name and state of the original button */
+    .tui-tile.more { position: relative; }
+    .tui-tile.more .m-ic { height: calc(var(--tui-tile-h) * 0.38); display: flex; align-items: center; justify-content: center; }
+    .tui-tile.more .m-ic img { height: 100%; width: auto; }
+    .tui-tile.more .m-st { position: absolute; top: 6px; right: 8px; font: 900 var(--tui-fs-val) system-ui, sans-serif; }
+    .tui-tile.disabled { opacity: 0.4; }
+
+    /* A5: on-screen U-turn / track shift as framed buttons with a name, at least glove size */
+    :root[data-tui-layout="terminal"] .osb-btn { width: calc(var(--tui-osb) * var(--tui-osb-wf, 1.4)); height: var(--tui-osb);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px;
+      background: var(--tui-card); border: 2px solid var(--tui-card-line); border-radius: 12px; box-sizing: border-box;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.3); filter: none; }
+    :root[data-tui-layout="terminal"] .osb-btn svg { width: auto; height: calc(var(--tui-osb) - var(--tui-bn-fs) * 1.1 - 12px); flex: none; }
+    .tui-osb-lbl { display: none; }
+    :root[data-tui-layout="terminal"] .tui-osb-lbl { display: block; flex: none; white-space: nowrap;
+      font: 800 var(--tui-bn-fs)/1.1 system-ui, sans-serif; color: var(--tui-ink); pointer-events: none; }
+    :root[data-tui-layout="terminal"] .osb-btn:active { background: var(--tui-acc-soft); }
+    :root[data-theme="day"][data-tui-sun][data-tui-layout="terminal"] .osb-btn { border-color: #000; box-shadow: none; }
+    :root[data-theme="day"][data-tui-sun] .osb-btn svg :is(path) { filter: drop-shadow(0 0 1px #000); }
+
+    /* A6: section bar docked on the bottom bar (no gap, one panel); the SIM launcher above its left end */
+    :root[data-tui-layout="terminal"] #bottomstack { gap: 0; }
+    :root[data-tui-layout="terminal"] #simbar { margin-bottom: 6px; }
+    :root[data-tui-layout="terminal"] #sectionbar { border-radius: 10px 10px 0 0; border-bottom: 0; box-shadow: none; padding: 6px 8px 4px; }
+    :root[data-tui-layout="terminal"] #sectionbar.open + #bottomnav.open .bn-bar { border-radius: 0; }
+    :root[data-tui-layout="terminal"] #sim-launch { position: absolute; left: 0; bottom: calc(100% + 6px); } /* bench tool: above the left end */
+
+    /* Longer (German) texts: the rotating status line may take two lines, the menu button keeps its
+       word, action buttons wrap, quick-bar editor rows line up. */
+    @media (min-width: 1200px) { /* narrower screens hide the line (Phase 2) */
+      :root[data-tui-layout="terminal"] #sb-rot.sb-rot { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical; line-height: 1.12; overflow-wrap: anywhere; } }
+    #statusbar #tui-menu-btn { flex: none; white-space: nowrap; }
+    :root[data-tui-layout="terminal"][data-tui-mode="setup"] #sb-rot { display: none; } /* the setup band needs the room */
+    .tui-dk { font: 800 var(--tui-fs-lbl) system-ui, sans-serif; letter-spacing: 0.01em; margin-right: 0.15em; }
+    .as-actbtn { min-width: 0; white-space: normal; text-align: center; line-height: 1.15; }
+    .tui-qitem .e-grow { flex: 1; min-width: 0; }
+
+    /* Dashboard: with the distance line the big number makes room for it (7" and glove). */
+    #tui-dash .d-xte.has-extra .c-v { font-size: calc(var(--tui-xte-fs) * 1.15); }
+    @media (max-height: 720px) { #tui-dash .d-xte.has-extra .c-v { font-size: calc(var(--tui-xte-fs) * 0.9); } }
+
+    /* A7: NTRIP version choice in the same type as the fields around it */
+    #nte-ver { font: 600 14px ui-monospace, monospace; }
+
+    /* ===== Phase 2c: vehicle and tool profiles ===================================
+       Cards (#tui-prof) instead of the two lists, the active pair on top of the menu, and the
+       assistant: steps, a sketch per measurement, unit beside each box, yellow warnings. */
+    :root { --tp-btn-h: max(52px, var(--tui-pg)); --tp-dim: #c25400; --tp-dim-soft: rgba(194,84,0,0.12); }
+    :root[data-theme="day"] { --tp-dim: #a64500; }
+    .tp-scrim { position: fixed; inset: 0; z-index: 34; background: var(--tui-scrim); display: none; }
+    .tp-scrim.open { display: block; }
+    .tp-sheet .tp-body { display: flex; flex-direction: column; gap: 6px; }
+    .tp-foot { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-top: 1px solid var(--border-2); }
+    .tp-foot:empty { display: none; }
+    .tp-grow { flex: 1; }
+    .tp-btn { min-height: var(--tp-btn-h); padding: 0 18px; border-radius: 12px; border: 2px solid var(--border-2); cursor: pointer;
+      background: rgba(var(--ov),0.04); color: var(--text); font: 800 calc(var(--tui-fs-lbl) + 2px) system-ui, sans-serif;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px; white-space: normal; text-align: center; line-height: 1.15; }
+    .tp-btn:active { background: var(--tui-acc-soft); }
+    .tp-btn.pri { background: var(--tui-acc); border-color: var(--tui-acc); color: var(--tui-acc-ink); }
+    .tp-btn.big { min-height: calc(var(--tp-btn-h) + 6px); padding: 0 26px; font-size: calc(var(--tui-fs-lbl) + 4px); }
+    .tp-btn.dan { color: var(--tui-stop); }
+    .tp-btn.pri.dan { background: var(--tui-stop); border-color: var(--tui-stop); color: var(--tui-stop-ink); }
+    .tp-btn.quiet { border-style: dashed; }
+    .tp-btn:disabled { opacity: 0.38; cursor: default; }
+    .tp-sec { margin-bottom: 8px; }
+    .tp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--tui-tile-w) * 1.45), 1fr)); gap: 12px; }
+    .tp-card { position: relative; min-height: calc(var(--tui-tile-h) * 1.15); border: 2px solid var(--border-2); border-radius: 14px; padding: 10px 12px;
+      background: rgba(var(--ov),0.04); color: var(--text); text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 6px; font-family: system-ui, sans-serif; }
+    .tp-card.sel { border: 3px solid var(--tui-acc); box-shadow: 0 0 0 3px var(--tui-acc-soft); padding: 9px 11px; }
+    .tp-c-top { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+    .tp-card .tp-c-ic { flex: none; color: var(--text); }
+    .tp-card .tp-ic { width: 62px; height: 40px; }
+    .tp-ic { width: 80px; height: 52px; display: block; }
+    .tp-badge { flex: none; margin-left: auto; align-self: flex-start; background: var(--tui-acc); color: var(--tui-acc-ink); border-radius: 999px; padding: 3px 10px;
+      font: 800 var(--tui-fs-lbl) system-ui, sans-serif; white-space: nowrap; }
+    .tp-c-n { flex: 1; min-width: 0; font: 800 calc(var(--tui-fs-lbl) + 5px)/1.15 system-ui, sans-serif; overflow-wrap: anywhere; }
+    .tp-c-k { display: grid; grid-template-columns: minmax(0, auto) auto; gap: 2px 10px; font: 600 var(--tui-fs-lbl) system-ui, sans-serif; color: var(--text-muted); }
+    .tp-c-k b { color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+    .tp-card.add { border-style: dashed; align-items: center; justify-content: center; color: var(--tui-acc); font: 800 calc(var(--tui-fs-lbl) + 3px) system-ui, sans-serif; text-align: center; }
+    .tp-card.add .tp-plus { font-size: 46px; line-height: 1; }
+    .tp-card:disabled { opacity: 0.4; cursor: default; }
+    .tp-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .tp-note { font: 600 var(--tui-fs-lbl)/1.3 system-ui, sans-serif; color: var(--text-muted); margin: 6px 0; }
+    .tp-note.warn { color: var(--text); background: rgba(240,180,41,0.16); border: 2px solid var(--tui-warn); border-radius: 10px; padding: 8px 12px; }
+    .tp-note.bad { color: var(--text); background: rgba(229,72,77,0.12); border: 2px solid var(--tui-stop); border-radius: 10px; padding: 8px 12px; }
+    .tp-lock { font: 800 calc(var(--tui-fs-lbl) + 1px)/1.3 system-ui, sans-serif; color: var(--tui-warn-ink); background: var(--tui-warn); border-radius: 10px; padding: 10px 14px; }
+    .tp-lock[hidden] { display: none; }
+    .tp-msg { font: 700 var(--tui-fs-lbl) system-ui, sans-serif; color: var(--tui-acc); }
+    /* question box */
+    .tp-ask { position: absolute; inset: 0; z-index: 2; background: var(--tui-scrim); display: flex; align-items: center; justify-content: center; }
+    .tp-ask[hidden] { display: none; }
+    .tp-ask-box { width: min(560px, calc(100% - 32px)); background: var(--panel); color: var(--text); border: 1px solid var(--border-2); border-radius: 14px;
+      padding: 18px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 10px 34px rgba(0,0,0,0.5); }
+    .tp-ask-t { font: 800 calc(var(--tui-fs-lbl) + 5px) system-ui, sans-serif; }
+    .tp-ask-m { font: 600 calc(var(--tui-fs-lbl) + 1px)/1.35 system-ui, sans-serif; }
+    .tp-ask-e { font: 700 var(--tui-fs-lbl) system-ui, sans-serif; color: var(--tui-stop); min-height: 1.2em; }
+    .tp-ask-b { display: flex; justify-content: flex-end; gap: 10px; }
+    .tp-name { height: var(--tp-btn-h); border: 2px solid var(--border-2); border-radius: 10px; padding: 0 12px; background: var(--input-bg, rgba(var(--ov),0.06)); color: var(--text);
+      font: 700 calc(var(--tui-fs-lbl) + 4px) system-ui, sans-serif; width: 100%; box-sizing: border-box; }
+    .tp-name.big { max-width: 560px; }
+    /* assistant */
+    .tp-steps { display: flex; gap: 6px; flex: none; }
+    .tp-st { flex: 1; min-width: 0; min-height: 46px; border-radius: 10px; border: 0; background: rgba(var(--ov),0.07); color: var(--text-muted); cursor: pointer;
+      font: 800 var(--tui-fs-lbl)/1.15 system-ui, sans-serif; padding: 4px 6px; overflow-wrap: anywhere; }
+    .tp-st.done { background: var(--tui-acc-soft); color: var(--tui-acc); }
+    .tp-st.cur { background: var(--tui-acc); color: var(--tui-acc-ink); }
+    .tp-st:disabled { cursor: default; }
+    .tp-page { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+    .tp-lead { font: 800 calc(var(--tui-fs-lbl) + 3px) system-ui, sans-serif; margin-top: 6px; }
+    .tp-choice { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+    .tp-ch { min-height: calc(var(--tui-tile-h) * 1.25); border: 2px solid var(--border-2); border-radius: 14px; background: rgba(var(--ov),0.04); color: var(--text); cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; font: 800 calc(var(--tui-fs-lbl) + 2px) system-ui, sans-serif; }
+    .tp-ch .tp-ic { width: 96px; height: 62px; }
+    .tp-ch.img img { height: 64px; max-width: 100%; object-fit: contain; background: #fff; border-radius: 8px; padding: 4px; }
+    .tp-ch.on, .tp-sym.on { border: 3px solid var(--tui-acc); box-shadow: 0 0 0 3px var(--tui-acc-soft); background: var(--tui-acc-soft); }
+    .tp-syms { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+    .tp-sym { min-height: 96px; border: 2px solid var(--border-2); border-radius: 12px; background: rgba(var(--ov),0.04); color: var(--text); cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font: 700 var(--tui-fs-lbl)/1.15 system-ui, sans-serif; text-align: center; }
+    .tp-sym .tp-ic { width: 64px; height: 42px; }
+    .tp-meas { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+    .tp-skbox { border: 1px solid var(--border-2); border-radius: 14px; background: rgba(var(--ov),0.03); display: flex; align-items: center; justify-content: center;
+      min-height: 300px; position: sticky; top: 0; padding: 8px; }
+    .tp-sk { width: 100%; height: auto; max-height: 52vh; }
+    .tp-skimg { max-width: 100%; max-height: 44vh; background: #fff; border-radius: 10px; }
+    .tp-sk .sk-b { fill: none; stroke: var(--text); stroke-width: 4; stroke-linejoin: round; stroke-linecap: round; }
+    .tp-sk .sk-g { stroke: var(--text-muted); stroke-width: 2; }
+    .tp-sk .sk-a { fill: var(--tui-acc); }
+    .tp-sk .sk-x { stroke: var(--tp-dim); stroke-width: 2; stroke-dasharray: 6 6; }
+    .tp-sk .sk-d line { stroke: var(--tp-dim); stroke-width: 3; }
+    .tp-sk .sk-d path { fill: var(--tp-dim); }
+    .tp-sk .sk-dl { fill: var(--tp-dim); font: 800 22px system-ui, sans-serif; paint-order: stroke; stroke: var(--panel); stroke-width: 6px; }
+    .tp-sk .sk-sec { fill: var(--tui-acc-soft); stroke: var(--tui-acc); stroke-width: 2; }
+    .tp-sk .sk-sec.alt { fill: rgba(var(--ov),0.12); }
+    .tp-fields { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    .tp-fld { border: 2px solid var(--border-2); border-radius: 12px; padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; }
+    .tp-fld:focus-within { border-color: var(--tui-acc); box-shadow: 0 0 0 3px var(--tui-acc-soft); }
+    .tp-fld.warn { border-color: var(--tui-warn); background: rgba(240,180,41,0.10); }
+    .tp-fld.wide { grid-template-columns: minmax(0, 1fr); }
+    .tp-f-l { font: 800 calc(var(--tui-fs-lbl) + 3px) system-ui, sans-serif; }
+    .tp-f-h { grid-column: 1; font: 600 var(--tui-fs-lbl)/1.3 system-ui, sans-serif; color: var(--text-muted); }
+    .tp-f-in { grid-column: 2; grid-row: 1 / span 2; display: flex; align-items: center; gap: 8px; }
+    .tp-fld.wide .tp-f-in { grid-column: 1; grid-row: auto; }
+    .tp-f-w { grid-column: 1 / -1; font: 700 var(--tui-fs-lbl)/1.3 system-ui, sans-serif; color: var(--text); }
+    .tp-f-w::before { content: "⚠ "; color: var(--tui-warn); }
+    .tp-f-w[hidden] { display: none; }
+    .tp-in { width: 7.5em; height: var(--tp-btn-h); border: 2px solid var(--border-2); border-radius: 10px; padding: 0 12px; text-align: right; box-sizing: border-box;
+      background: var(--input-bg, rgba(var(--ov),0.06)); color: var(--text); font: 700 calc(var(--tui-fs-lbl) + 6px) ui-monospace, monospace; }
+    .tp-in.sm { width: 6em; }
+    .tp-in:disabled { opacity: 0.45; }
+    .tp-f-u { min-width: 2em; font: 800 calc(var(--tui-fs-lbl) + 2px) system-ui, sans-serif; }
+    .tp-sel { height: var(--tp-btn-h); max-width: 18em; border: 2px solid var(--border-2); border-radius: 10px; padding: 0 8px; background: var(--input-bg, rgba(var(--ov),0.06)); color: var(--text);
+      font: 700 var(--tui-fs-lbl) system-ui, sans-serif; }
+    .tp-seg { grid-column: 1 / -1; display: flex; gap: 6px; }
+    .tp-segb { flex: 1; min-height: calc(var(--tp-btn-h) - 4px); border: 2px solid var(--border-2); border-radius: 10px; background: rgba(var(--ov),0.04); color: var(--text); cursor: pointer;
+      font: 800 calc(var(--tui-fs-lbl) + 1px) system-ui, sans-serif; }
+    .tp-segb.on { background: var(--tui-acc); border-color: var(--tui-acc); color: var(--tui-acc-ink); }
+    .tp-adv { border: 2px dashed var(--border-2); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+    .tp-adv summary { cursor: pointer; min-height: 40px; display: flex; align-items: center; gap: 8px; list-style: none; font: 800 calc(var(--tui-fs-lbl) + 1px) system-ui, sans-serif; color: var(--text-muted); }
+    .tp-adv summary::-webkit-details-marker { display: none; }
+    .tp-adv summary::before { content: "▸"; font-size: 1.3em; }
+    .tp-adv[open] summary::before { content: "▾"; }
+    .tp-adv[open] summary { margin-bottom: 8px; }
+    .tp-swgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(7.4em, 1fr)); gap: 8px; }
+    .tp-sw { display: flex; flex-direction: column; gap: 2px; font: 700 var(--tui-fs-lbl) system-ui, sans-serif; color: var(--text-muted); }
+    .tp-sw[hidden] { display: none; }
+    .tp-sw .tp-in { width: 100%; }
+    .tp-same { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .tp-sum { font: 800 calc(var(--tui-fs-lbl) + 2px) system-ui, sans-serif; }
+    .tp-sum2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+    .tp-sumc { border: 1px solid var(--border-2); border-radius: 12px; padding: 12px 14px; min-width: 0; }
+    .tp-sumc h4 { margin: 0 0 8px; font: 800 calc(var(--tui-fs-lbl) + 3px) system-ui, sans-serif; overflow-wrap: anywhere; }
+    .tp-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 12px; padding: 6px 0; border-bottom: 1px solid var(--border-2);
+      font: 600 calc(var(--tui-fs-lbl) + 1px) system-ui, sans-serif; align-items: center; }
+    .tp-row b { font-variant-numeric: tabular-nums; text-align: right; }
+    .tp-row small { grid-column: 1 / -1; font: 600 var(--tui-fs-lbl) system-ui, sans-serif; color: var(--text-muted); text-align: right; }
+    .tp-row.ch b { color: var(--tui-acc); }
+    .tp-row.ch b::before { content: "● "; }
+    .tp-row.warn b { color: var(--text); background: rgba(240,180,41,0.25); border-radius: 6px; padding: 0 6px; }
+    .tp-row-ic .tp-ic { width: 56px; height: 36px; }
+    .tp-list { margin: 0 0 10px; padding-left: 1.2em; font: 600 calc(var(--tui-fs-lbl) + 1px)/1.4 system-ui, sans-serif; }
+    .tp-result { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; font: 800 calc(var(--tui-fs-lbl) + 1px)/1.35 system-ui, sans-serif; }
+    .tp-result:empty { display: none; }
+    .tp-result.ok { color: var(--tui-acc); }
+    .tp-result.bad > div { color: var(--text); }
+    .tp-result.bad { background: rgba(229,72,77,0.10); border: 2px solid var(--tui-stop); border-radius: 10px; padding: 10px 12px; }
+    @media (max-height: 640px) { /* 7": sketch narrower beside the fields, steps lower */
+      .tp-meas { grid-template-columns: minmax(0, 0.8fr) minmax(0, 1fr); gap: 10px; }
+      .tp-skbox { min-height: 0; }
+      .tp-sk { max-height: 60vh; }
+      .tp-skimg { max-height: 50vh; }
+      .tp-st { min-height: 40px; }
+    }
+    @media (max-width: 900px) {
+      .tp-meas, .tp-sum2 { grid-template-columns: minmax(0, 1fr); }
+      .tp-skbox { position: static; min-height: 0; }
+      .tp-sk { max-height: 34vh; }
+      .tp-skimg { max-height: 30vh; }
+    }
+    /* unfinished save: red band in the driving view (first in #bottomstack), and in the cards */
+    .tp-pend { pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer;
+      min-height: var(--tp-btn-h); width: min(720px, calc(100vw - 32px)); box-sizing: border-box; padding: 8px 16px;
+      background: var(--tui-stop); color: var(--tui-stop-ink); border: 3px solid #fff; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+      font: 800 calc(var(--tui-fs-lbl) + 3px)/1.2 system-ui, sans-serif; text-align: center; }
+    .tp-pend[hidden] { display: none; }
+    .tp-pend .tp-pend-s { font: 700 var(--tui-fs-lbl)/1.2 system-ui, sans-serif; }
+    .tp-pend.inline { width: 100%; border-color: transparent; box-shadow: none; }
+    :root[data-tui-band] #bottomstack > .tp-pend { width: min(720px, var(--tui-stack-w)); }
+    :root[data-theme="day"][data-tui-sun] .tp-pend { border-color: #000; }
+    .tp-row.hd { font-weight: 800; color: var(--text-muted); }
+    .tp-row.r3, .tp-row.hd { grid-template-columns: minmax(0, 1fr) auto auto; gap: 0 18px; }
+    .tp-result .tp-btn { align-self: flex-start; }
+    /* menu: active vehicle and tool on top */
+    .tp-now { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--tui-tile-w) * 2), 1fr)); gap: 10px; margin-bottom: 14px; }
+    .tui-tile.tp-nowt { flex-direction: row; justify-content: flex-start; gap: 14px; padding: 0 14px; text-align: left; border-left: 6px solid var(--tui-acc); }
+    .tp-nowt .tp-n-ic { flex: none; color: var(--text); }
+    .tp-nowt .tp-ic { width: 72px; height: 47px; }
+    .tp-nowt .tp-n-tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+    .tp-nowt .l { font: 800 var(--tui-fs-lbl) system-ui, sans-serif; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .tp-nowt .v { font: 800 calc(var(--tui-fs-lbl) + 5px) system-ui, sans-serif; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tp-nowt .s { font: 600 var(--tui-fs-lbl) system-ui, sans-serif; color: var(--text-muted); }
+    .tp-nowt .tp-n-go { flex: none; font: 800 var(--tui-fs-lbl) system-ui, sans-serif; color: var(--tui-acc); max-width: 8em; text-align: right; }
+    .tp-nowt.locked .tp-n-go { color: var(--text-muted); }
+    :root[data-theme="day"][data-tui-sun] :is(.tp-card, .tp-fld, .tp-btn, .tp-ch, .tp-sym, .tp-segb) { border-color: #000; }
+    /* outside the block: Field Builder inset without a working width */
+    .fb-twmiss { font: 700 13px system-ui, sans-serif; color: var(--tui-warn); }
   </style>
 </head>
 <body>
@@ -2804,6 +3059,7 @@
           <option value="0">Custom</option>
         </select>
         <input id="fb-hl-newoff" class="cfg-num" data-unit="m" type="number" step="0.5" min="0.5"><span class="u" data-unit="m"></span>
+        <span id="fb-hl-twmiss" class="fb-twmiss" hidden>Working width missing</span>
       </div>
       <div class="fb-sublbl">Draw on Map — one line per edge; where they cross encloses the headland</div>
       <div class="fb-addrow">

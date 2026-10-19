@@ -27,7 +27,8 @@ const I18n = (() => {
   const PRODUCED_MAX = 2000;
 
   const norm = s => s.replace(/\s+/g, ' ').trim();
-  const lookup = key => (dict && dict[key]) || key;
+  // A key written with doubled spaces ("Done {area}  Left …") is listed normalised in en.json.
+  const lookup = key => (dict && (dict[key] || dict[norm(key)])) || key;
   const fill = (s, params) => s.replace(/\{(\w+)\}/g, (m, name) => (name in params ? String(params[name]) : m));
 
   function t(key, params) {

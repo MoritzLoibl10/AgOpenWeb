@@ -215,7 +215,8 @@ function driveFonts(page) {
 /**
  * Überlappungen zwischen den festen Elementen über der Karte (Leisten, Anzeigen, Module).
  * Zwei Kästen gelten als überlappend, wenn sie sich in beiden Richtungen um mehr als 4 px
- * schneiden. Elemente, die ineinander liegen (z. B. Knopf in Leiste), zählen nicht.
+ * schneiden. Elemente, die ineinander liegen (z. B. Knopf in Leiste), zählen nicht. Ebenso gemeldet:
+ * ein Element, das mehr als 4 px über den Bildschirmrand hinausragt.
  */
 const LAYOUT_BOXES = {
   'Statusleiste': '#statusbar', 'Querabweichung': '#tui-xte', 'Modulspalte': '#tui-col > *', 'Dashboard': '#tui-dash',
@@ -241,6 +242,11 @@ function overlaps(page) {
       for (const el of document.querySelectorAll(sel)) { const r = vis(el); if (r) items.push({ name: name + (i++ ? ' ' + i : ''), el, r }); }
     }
     const out = [];
+    for (const it of items) { // also: sticks out of the screen (the roll gauge's empty right margin does, on purpose)
+      if (it.name.startsWith('Rollwinkel')) continue;
+      const o = Math.max(-it.r.left, -it.r.top, it.r.right - innerWidth, it.r.bottom - innerHeight);
+      if (o > 4) out.push(it.name + ` × Bildschirmrand (${Math.round(o)} px draußen)`);
+    }
     for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
       const a = items[i], b = items[j];
       if (a.el.contains(b.el) || b.el.contains(a.el)) continue;
@@ -250,6 +256,51 @@ function overlaps(page) {
     }
     return out;
   }, LAYOUT_BOXES);
+}
+
+/**
+ * Abgeschnittene Texte: sichtbarer Text, dessen Zeilen über den Kasten hinausragen, der ihn
+ * beschneidet (overflow hidden/clip bis 12 Ebenen hoch, bis zum ersten Scrollbereich), über einen Knopf hinausstehen oder per
+ * text-overflow mit „…“ gekürzt werden. Scrollbereiche (auto/scroll) zählen nicht.
+ */
+function truncated(page) {
+  return page.evaluate(() => {
+    const out = [];
+    const shown = el => {
+      for (let e = el; e; e = e.parentElement) {
+        const c = getComputedStyle(e);
+        if (c.display === 'none' || c.visibility === 'hidden' || +c.opacity === 0 || e.hidden) return false;
+      }
+      return true;
+    };
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const range = document.createRange();
+    const seen = new Set();
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const txt = n.textContent.trim();
+      if (!txt || !/\p{L}/u.test(txt)) continue;
+      const el = n.parentElement;
+      if (!el || seen.has(el) || el.closest('script, style, option, select, #simbar, #sb-diag')) continue;
+      range.selectNodeContents(n);
+      const tr = range.getBoundingClientRect();
+      if (tr.width < 1 || tr.height < 1 || tr.bottom < 0 || tr.top > innerHeight || tr.right < 0 || tr.left > innerWidth) continue;
+      if (!shown(el)) continue;
+      let why = '';
+      const cs = getComputedStyle(el);
+      if (cs.textOverflow === 'ellipsis' && el.scrollWidth > el.clientWidth + 1) why = '„…“';
+      for (let e = el, i = 0; !why && e && i < 12; e = e.parentElement, i++) {
+        const c = getComputedStyle(e);
+        if (/auto|scroll/.test(c.overflowX + c.overflowY)) break; // scroll area: the rest is reachable
+        const clips = /hidden|clip/.test(c.overflowX + c.overflowY);
+        if (!clips && e.tagName !== 'BUTTON') continue;
+        const r = e.getBoundingClientRect();
+        if (tr.right > r.right + 1.5 || tr.left < r.left - 1.5 || (clips && (tr.bottom > r.bottom + 1.5 || tr.top < r.top - 1.5)))
+          why = (e.tagName === 'BUTTON' && !clips ? 'ragt aus Knopf ' : 'beschnitten von ') + (e.id ? '#' + e.id : e.tagName.toLowerCase() + (e.className && typeof e.className === 'string' ? '.' + e.className.split(' ')[0] : ''));
+      }
+      if (why) { seen.add(el); out.push(`„${txt.slice(0, 40)}“ ${why}`); }
+    }
+    return out;
+  });
 }
 
 /** Kennzahlen einer Ansicht. */
@@ -275,4 +326,4 @@ function contrastByRegion(list) {
   return out;
 }
 
-module.exports = { launch, openPage, measure, contrast, guidelineContrast, summarize, contrastByRegion, driveFonts, overlaps };
+module.exports = { launch, openPage, measure, contrast, guidelineContrast, summarize, contrastByRegion, driveFonts, overlaps, truncated };
