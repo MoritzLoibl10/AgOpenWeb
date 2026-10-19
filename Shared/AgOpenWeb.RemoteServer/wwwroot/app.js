@@ -6403,10 +6403,13 @@ const TabletTerminal = (() => {
   const MOD_NAME = { map: tr('Map'), xte: tr('Cross-track'), speed: tr('Speed'), width: tr('Working width'), sections: tr('Sections') };
   const DEFAULT_PAGES = [['map', 'xte', 'speed', 'width'], ['map', 'xte', 'sections', 'speed'], ['xte', 'speed', 'width', 'sections']];
   const MAX_PAGES = 5;
+  // A page without the map keeps the cross-track module: its card is where the headland and
+  // U-turn distances go when the map's HUDs are hidden.
+  const withXte = p => p.includes('map') || p.includes('xte') ? p : MODS.filter(x => x === 'xte' || p.includes(x));
   const cleanPages = v => {
     if (!Array.isArray(v)) return null;
     const out = v.filter(Array.isArray).slice(0, MAX_PAGES)
-      .map(p => MODS.filter(m => p.includes(m) || (m === 'width' && p.includes('steer')))).filter(p => p.length);
+      .map(p => MODS.filter(m => p.includes(m) || (m === 'width' && p.includes('steer')))).filter(p => p.length).map(withXte);
     return out.length ? out : null;
   };
   let layout = lsGet('aow.ui.layout', 'terminal') === 'classic' ? 'classic' : 'terminal';
@@ -6912,10 +6915,13 @@ const TabletTerminal = (() => {
       for (const m of MODS) {
         const c = el('button', 'tui-chip' + (p.includes(m) ? ' on' : ''));
         c.textContent = MOD_NAME[m];
+        const fixed = m === 'xte' && !p.includes('map'); // see withXte
+        if (fixed) c.classList.add('lock');
         onTap(c, () => {
+          if (fixed) return;
           const has = p.includes(m);
           if (has && p.length === 1) return; // a page keeps at least one module
-          pages[i] = has ? p.filter(x => x !== m) : MODS.filter(x => x === m || p.includes(x));
+          pages[i] = withXte(has ? p.filter(x => x !== m) : MODS.filter(x => x === m || p.includes(x)));
           savePages(); built = ''; buildPage(); renderPagesEditor();
         });
         row.appendChild(c);
