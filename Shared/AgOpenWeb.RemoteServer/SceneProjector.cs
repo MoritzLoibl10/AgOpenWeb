@@ -44,6 +44,10 @@ public sealed class SceneProjector
     // GPS source (#157): the incoming sentence ("PANDA"/"PAOGI"/"SIM", "" before any fix)
     // and whether Dual GPS is on without a dual-antenna heading. Host-supplied.
     public System.Func<(string Sentence, bool DualHeadingMissing)>? GpsSourceProvider { get; set; }
+    // ISOBUS task controller heartbeat (#312). Host-supplied; null while none is heard.
+    public System.Func<IsobusDto?>? IsobusProvider { get; set; }
+    // Field data card (#321). Host-supplied; null with no field open.
+    public System.Func<FieldDataDto?>? FieldDataProvider { get; set; }
     // System Data card (Network IO → GPS): attitude, heading sources, sentence rate and the
     // latest raw sentences. Host-supplied; null before any GPS data.
     public System.Func<SystemDataDto?>? SystemDataProvider { get; set; }
@@ -427,7 +431,11 @@ public sealed class SceneProjector
             gpsSource.DualHeadingMissing,
             BuildNtripRtcm(),
             SystemDataProvider?.Invoke(),
-            _state.Connections.IsGpsLost);
+            _state.Connections.IsGpsLost,
+            IsobusProvider?.Invoke(),
+            FieldDataProvider?.Invoke(),
+            cfg.SendCorrectedPosition,
+            c.ScanReplySubnet ?? "");
     }
 
     // Read live for every status frame, so "seconds since the last one" keeps counting

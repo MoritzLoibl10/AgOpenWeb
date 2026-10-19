@@ -131,6 +131,15 @@ public class CoverageMapService : ICoverageMapService
 
     public double TotalWorkedArea => _totalWorkedArea;
     public double TotalWorkedAreaUser => _totalWorkedAreaUser;
+
+    // Cells of the detection grid covered at least once, all zones. Kept beside
+    // _cellCountPerZone as one number another thread can read.
+    private long _coveredCells;
+
+    /// <summary>Ground covered at least once, m²: the covered cells of the detection grid,
+    /// so overlap counts once (AgOpenGPS actualAreaCovered) (#321).</summary>
+    public double ActualAreaCovered =>
+        System.Threading.Interlocked.Read(ref _coveredCells) * BITMAP_CELL_SIZE * BITMAP_CELL_SIZE;
     public int PatchCount => (int)GetTotalCellCount(); // Total covered cells across all zones
     public bool IsAnyZoneMapping => _activeSections.Count > 0;
     public int ActiveSectionCount => _activeSections.Count;
@@ -194,6 +203,7 @@ public class CoverageMapService : ICoverageMapService
     private int _edgePointCount;
     private const double EDGE_GATE = 2.0;          // metres between committed edge vertex pairs
     private const int EDGE_MAX_POINTS = 200_000;   // safety cap on total accumulated points
+    private const double EDGE_STROKE_WIDTH = 0.6;  // metres; the stroke in app.js drawCoverageEdgeSk
 
     private void ClearEdges()
     {
@@ -410,7 +420,16 @@ public class CoverageMapService : ICoverageMapService
             double len = Math.Sqrt(ox * ox + oy * oy);
             bool perim = len > 1e-6 &&
                 !IsPointCovered(edge[i].Easting + ox / len * 0.2, edge[i].Northing + oy / len * 0.2);
-            if (perim) { (cur ??= new List<Vec2>()).Add(edge[i]); }
+            if (perim)
+            {
+                // The client strokes this line EDGE_STROKE_WIDTH wide, centred on it. Move it
+                // in by half that, so the stroke ends at the swept edge instead of painting
+                // past the end of the tool (#325). A section narrower than the stroke keeps
+                // its line in the middle.
+                double inset = Math.Min(EDGE_STROKE_WIDTH * 0.5, len * 0.5);
+                (cur ??= new List<Vec2>()).Add(new Vec2(
+                    edge[i].Easting - ox / len * inset, edge[i].Northing - oy / len * inset));
+            }
             else if (cur != null) { if (cur.Count >= 2) result.Add(cur); cur = null; }
         }
         if (cur != null && cur.Count >= 2) result.Add(cur);
@@ -712,6 +731,7 @@ public class CoverageMapService : ICoverageMapService
         if (!_cellCountPerZone.TryGetValue(zone, out long count))
             count = 0;
         _cellCountPerZone[zone] = count + 1;
+        System.Threading.Interlocked.Increment(ref _coveredCells);
 
         return true;
     }
@@ -1138,6 +1158,7 @@ public class CoverageMapService : ICoverageMapService
             if (_detectionBits != null)
                 Array.Clear(_detectionBits, 0, _detectionBits.Length);
             _cellCountPerZone.Clear();
+            System.Threading.Interlocked.Exchange(ref _coveredCells, 0);
 
             // Reset bounds
             _minCellE = int.MaxValue;
@@ -1368,6 +1389,73 @@ public class CoverageMapService : ICoverageMapService
         }
     }
 
+    /// <summary>
+    /// Paint every display pixel that is empty although a detection cell under it is covered.
+    /// Like <see cref="RepaintDisplayFromDetection"/> it paints zone 0 (detection carries no
+    /// zone), but it leaves painted pixels and their colours alone. Returns the number of
+    /// pixels filled. Both layers are scanned a run at a time, so a job whose layers agree
+    /// costs two vectorised passes, not a test per cell. Caller holds _coverageLock.
+    /// </summary>
+    private int FillDisplayGapsFromDetection()
+    {
+        if (_detectionBits == null || _displayPixels == null || _displayWidth <= 0 || _displayHeight <= 0)
+            return 0;
+
+        // Display column of each detection column (the mapping in PaintDisplayPixel), and the
+        // detection columns [first, end) under each display column.
+        var columnOf = new int[_bitmapWidth];
+        var firstUnder = new int[_displayWidth];
+        var endUnder = new int[_displayWidth];
+        for (int i = 0; i < columnOf.Length; i++)
+        {
+            int dx = (int)Math.Floor((_bitmapOriginE + i + 0.5) * BITMAP_CELL_SIZE / _displayCellSize) - _displayOriginX;
+            columnOf[i] = dx;
+            if (dx < 0 || dx >= _displayWidth) continue;
+            if (endUnder[dx] == 0) firstUnder[dx] = i;
+            endUnder[dx] = i + 1;
+        }
+
+        int stride = _bitmapWidth / 8, filled = 0;
+        for (int row = 0; row < _bitmapHeight; row++)
+        {
+            int dy = (int)Math.Floor((_bitmapOriginN + row + 0.5) * BITMAP_CELL_SIZE / _displayCellSize) - _displayOriginY;
+            if (dy < 0 || dy >= _displayHeight) continue;
+            var bits = _detectionBits.AsSpan(row * stride, stride);
+            var pixels = _displayPixels.AsSpan(dy * _displayWidth, _displayWidth);
+            int b = 0;
+            while (b < stride)
+            {
+                // The next run of bytes with worked cells, and its first and last worked cell.
+                int skip = bits.Slice(b).IndexOfAnyExcept((byte)0);
+                if (skip < 0) break;
+                int b0 = b + skip;
+                int length = bits.Slice(b0).IndexOf((byte)0);
+                int b1 = length < 0 ? stride : b0 + length;
+                b = b1;
+                int i0 = b0 * 8 + System.Numerics.BitOperations.TrailingZeroCount(bits[b0]);
+                int i1 = (b1 - 1) * 8 + System.Numerics.BitOperations.Log2(bits[b1 - 1]);
+                int dx0 = Math.Max(columnOf[i0], 0), dx1 = Math.Min(columnOf[i1], _displayWidth - 1);
+
+                // Empty pixels within the run: fill those with a worked cell under them (the
+                // rest are gaps narrower than a byte of cells).
+                for (int dx = dx0; dx <= dx1; dx++)
+                {
+                    int empty = pixels.Slice(dx, dx1 - dx + 1).IndexOf((ushort)0);
+                    if (empty < 0) break;
+                    dx += empty;
+                    for (int i = Math.Max(firstUnder[dx], i0); i < endUnder[dx] && i <= i1; i++)
+                    {
+                        if ((bits[i >> 3] & (1 << (i & 7))) == 0) continue;
+                        PaintDisplayPixel(_bitmapOriginE + i, _bitmapOriginN + row, 0);
+                        filled++;
+                        break;
+                    }
+                }
+            }
+        }
+        return filled;
+    }
+
     private const double EXPAND_MARGIN = 50.0; // Expand when within 50m of edge
     private const double EXPAND_AMOUNT = 250.0; // Add 250m in the needed direction
 
@@ -1512,6 +1600,7 @@ public class CoverageMapService : ICoverageMapService
         _displayWidth = 0;
         _displayHeight = 0;
         _cellCountPerZone.Clear();
+        System.Threading.Interlocked.Exchange(ref _coveredCells, 0);
         // Keep _detectionBits and _displayPixels alive — SetFieldBounds
         // reuses them when LongLength matches (the reuse fix at lines
         // 981-996). Nulling here silently defeats the reuse on every
@@ -1829,6 +1918,18 @@ public class CoverageMapService : ICoverageMapService
             _displayFullSave = !fromTiles || regridded || !hasSectionDisplay;
             _savedDirectory = fromTiles ? dir : null;
             _legacyFilesDirectory = fromOldFiles ? dir : null;
+
+            // The display layer can lag the detection layer (a lost or stale display tile, a job
+            // saved by an older build). Ground the detection grid counts as worked must show as
+            // worked: sections switch off over it, and the live stream only sends cells that are
+            // new to detection, so driving over it again never filled it in (#325). Done after
+            // the dirty sets are cleared, so the repaired tiles are written by the next save.
+            if (hasDetectionBits && hasSectionDisplay)
+            {
+                int filled = FillDisplayGapsFromDetection();
+                if (filled > 0)
+                    Console.WriteLine($"[Coverage] Display layer was missing {filled:N0} worked pixels; filled from detection");
+            }
         }
 
         // A tiled job with no coverage yet still replaces whatever the map showed before.
@@ -1959,6 +2060,7 @@ public class CoverageMapService : ICoverageMapService
             _totalWorkedAreaUser = area;
             _cellCountPerZone.Clear();
             _cellCountPerZone[0] = setBits;
+            System.Threading.Interlocked.Exchange(ref _coveredCells, setBits);
             _boundsValid = setBits > 0;
             if (_boundsValid)
             {
@@ -2297,6 +2399,7 @@ public class CoverageMapService : ICoverageMapService
             _totalWorkedArea = area;
             _totalWorkedAreaUser = area;
             _cellCountPerZone[0] = setBits;
+            System.Threading.Interlocked.Exchange(ref _coveredCells, setBits);
             _boundsValid = setBits > 0;
 
             if (_boundsValid)

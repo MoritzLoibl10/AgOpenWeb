@@ -14,6 +14,7 @@ public static partial class RemoteServerWiring
     {
         "track.drawStraight", "track.drawCurve", "track.drawPoint", "track.drawFinish",
         "track.drawUndo", "track.drawCancel", "track.aPlus", "track.driveAB",
+        "track.latLonHeading", "track.latLonAB", "track.refSide",
         "track.recordCurve", "track.finishCurve", "track.setABGps",
         "track.createFromBoundary", "track.boundaryCurve", "track.boundaryCurveSeg", "track.allEdges",
         "track.setVisible", "track.toggleRecPaths", "track.editSave",
@@ -81,6 +82,7 @@ public static partial class RemoteServerWiring
             case "conn.agShareApiKey": con.AgShareApiKey = val; cfg.SaveAppSettings(); return;
             case "conn.agShareEnabled": con.AgShareEnabled = B(); cfg.SaveAppSettings(); return;
             case "conn.rtcmBroadcast": con.RtcmBroadcast = B(); cfg.SaveAppSettings(); return;
+            case "conn.sendCorrectedPosition": con.SendCorrectedPosition = B(); cfg.SaveAppSettings(); return;
             case "conn.ntripEnabled": con.NtripEnabled = B(); cfg.SaveAppSettings(); return; // the VM connects / disconnects
             // --- Vehicle config (Phase 9b). Live effect; persisted by a profile.save. ---
             case "vehicle.type":
@@ -163,13 +165,13 @@ public static partial class RemoteServerWiring
             case "tool.zoneEnd": if (IDX(out var zei, out var zev) && int.TryParse(zev, out var zen)) tool.SetZoneEndSection(zei, zen); return;
             case "tool.sectionColor": if (IDX(out var sci, out var sch) && uint.TryParse(sch, System.Globalization.NumberStyles.HexNumber, inv, out var scc)) tool.SetSectionColor(sci, scc); return;
             case "tool.singleCoverageColor": if (uint.TryParse(val, System.Globalization.NumberStyles.HexNumber, inv, out var scov)) tool.SingleCoverageColor = scov; return;
-            // --- U-Turn (ConfigStore.Guidance) ---
+            // --- U-Turn (ConfigStore.Guidance; saved with the tool profile, #330) ---
             case "uturn.style": if (I(out var u1)) gd.UTurnStyle = u1; return;
             case "uturn.extension": if (D(out var u2)) gd.UTurnExtension = u2; return;
             case "uturn.smoothing": if (I(out var u3)) gd.UTurnSmoothing = u3; return;
             case "uturn.radius": if (D(out var u4)) gd.UTurnRadius = u4; return;
             case "uturn.distanceFromBoundary": if (D(out var u5)) gd.UTurnDistanceFromBoundary = u5; return;
-            // --- Tram (ConfigStore.Guidance) ---
+            // --- Tram (ConfigStore.Guidance + Tram.TramWidth; saved with the tool profile, #330) ---
             case "tram.passes": if (I(out var tp)) gd.TramPasses = tp; return;
             case "tram.display": gd.TramDisplay = B(); return;
             case "tram.line": if (I(out var tl)) gd.TramLine = tl; return;

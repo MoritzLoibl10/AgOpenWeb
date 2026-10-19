@@ -9,16 +9,14 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using AgOpenWeb.Models;
 using AgOpenWeb.Models.Configuration;
-using AgOpenWeb.Models.State;
 using AgOpenWeb.Services.Storage;
 
 namespace AgOpenWeb.Services.Profile;
 
 /// <summary>
-/// v2 vehicle profile serializer. Persists Vehicle config + Guidance +
-/// YouTurn + General. Tool config + Sections live in the parallel
-/// <see cref="ToolProfileJsonService"/> per the AgOpenGPS 6.8.2-style
-/// vehicle/tool split (#346).
+/// v2 vehicle profile serializer. Persists Vehicle config + Guidance + GPS +
+/// roll. Tool config, Sections, Machine, U-Turn and Tram live in the parallel
+/// <see cref="ToolProfileJsonService"/> (#346, #330).
 /// </summary>
 public static class VehicleProfileJsonService
 {
@@ -130,22 +128,6 @@ public static class VehicleProfileJsonService
             UTurnCompensation = store.Guidance.UTurnCompensation,
             MinLookAheadDistance = store.Guidance.MinLookAheadDistance,
             StanleyIntegralDistanceAwayTriggerAB = store.Guidance.StanleyIntegralDistanceAwayTriggerAB,
-            DeadZoneHeading = store.Guidance.DeadZoneHeading,
-            DeadZoneDelay = store.Guidance.DeadZoneDelay,
-            TramPasses = store.Guidance.TramPasses,
-            TramDisplay = store.Guidance.TramDisplay,
-            TramLine = store.Guidance.TramLine,
-            HydLiftLookAheadDistanceLeft = store.Guidance.HydLiftLookAheadDistanceLeft,
-            HydLiftLookAheadDistanceRight = store.Guidance.HydLiftLookAheadDistanceRight,
-        },
-        YouTurn = new YouTurnDto
-        {
-            TurnRadius = store.Guidance.UTurnRadius,
-            ExtensionLength = store.Guidance.UTurnExtension,
-            DistanceFromBoundary = store.Guidance.UTurnDistanceFromBoundary,
-            SkipWidth = store.Guidance.UTurnSkipWidth,
-            Style = store.Guidance.UTurnStyle,
-            Smoothing = store.Guidance.UTurnSmoothing,
         },
         Gps = new GpsDto
         {
@@ -173,11 +155,6 @@ public static class VehicleProfileJsonService
             // in AppSettings now. Kept as a nullable field on the DTO so
             // pre-migration profiles still parse; new writes elide it.
             IsMetric = null,
-            IsSimulatorOn = store.Simulator.Enabled,
-            // Sim position is device STATE (PersistentAppState); these DTO
-            // fields are vestigial but kept populated for back-compat.
-            SimLatitude = PersistentAppState.Instance.SimulatorLatitude,
-            SimLongitude = PersistentAppState.Instance.SimulatorLongitude,
         },
     };
 
@@ -212,21 +189,6 @@ public static class VehicleProfileJsonService
         store.Guidance.UTurnCompensation = dto.Guidance?.UTurnCompensation ?? 1.0;
         store.Guidance.MinLookAheadDistance = dto.Guidance?.MinLookAheadDistance ?? 2.0;
         store.Guidance.StanleyIntegralDistanceAwayTriggerAB = dto.Guidance?.StanleyIntegralDistanceAwayTriggerAB ?? 0.3;
-        store.Guidance.DeadZoneHeading = dto.Guidance?.DeadZoneHeading ?? 0.5;
-        store.Guidance.DeadZoneDelay = dto.Guidance?.DeadZoneDelay ?? 10;
-        store.Guidance.TramPasses = dto.Guidance?.TramPasses ?? 3;
-        store.Guidance.TramDisplay = dto.Guidance?.TramDisplay ?? true;
-        store.Guidance.TramLine = dto.Guidance?.TramLine ?? 1;
-        store.Guidance.HydLiftLookAheadDistanceLeft = dto.Guidance?.HydLiftLookAheadDistanceLeft ?? 1.0;
-        store.Guidance.HydLiftLookAheadDistanceRight = dto.Guidance?.HydLiftLookAheadDistanceRight ?? 1.0;
-
-        // YouTurn (mirrored onto Guidance.UTurn* fields per current store layout)
-        store.Guidance.UTurnRadius = dto.YouTurn?.TurnRadius ?? 8.0;
-        store.Guidance.UTurnExtension = dto.YouTurn?.ExtensionLength ?? 20.0;
-        store.Guidance.UTurnDistanceFromBoundary = dto.YouTurn?.DistanceFromBoundary ?? 2.0;
-        store.Guidance.UTurnSkipWidth = dto.YouTurn?.SkipWidth ?? 1;
-        store.Guidance.UTurnStyle = dto.YouTurn?.Style ?? (int)Models.YouTurn.YouTurnType.SagittaStyle;
-        store.Guidance.UTurnSmoothing = dto.YouTurn?.Smoothing ?? 14;
 
         // GPS / heading (AgOpenGPS keeps these per vehicle). Missing in profiles saved
         // before #112, when they weren't saved at all → defaults.
@@ -271,7 +233,6 @@ public static class VehicleProfileJsonService
         public int FormatVersion { get; set; }
         public VehicleDto? Vehicle { get; set; }
         public GuidanceDto? Guidance { get; set; }
-        public YouTurnDto? YouTurn { get; set; }
         public GpsDto? Gps { get; set; }
         public AhrsDto? Ahrs { get; set; }
         public GeneralDto? General { get; set; }
@@ -306,23 +267,6 @@ public static class VehicleProfileJsonService
         public double UTurnCompensation { get; set; }
         public double? MinLookAheadDistance { get; set; }
         public double? StanleyIntegralDistanceAwayTriggerAB { get; set; }
-        public double? DeadZoneHeading { get; set; }
-        public int? DeadZoneDelay { get; set; }
-        public int? TramPasses { get; set; }
-        public bool? TramDisplay { get; set; }
-        public int? TramLine { get; set; }
-        public double? HydLiftLookAheadDistanceLeft { get; set; }
-        public double? HydLiftLookAheadDistanceRight { get; set; }
-    }
-
-    internal class YouTurnDto
-    {
-        public double TurnRadius { get; set; }
-        public double ExtensionLength { get; set; }
-        public double DistanceFromBoundary { get; set; }
-        public int SkipWidth { get; set; }
-        public int Style { get; set; }
-        public int Smoothing { get; set; }
     }
 
     internal class GpsDto
@@ -357,8 +301,5 @@ public static class VehicleProfileJsonService
         /// <see cref="IConfigurationService.ReconcileIsMetricAfterProfileLoad"/>.
         /// </summary>
         public bool? IsMetric { get; set; }
-        public bool IsSimulatorOn { get; set; }
-        public double SimLatitude { get; set; }
-        public double SimLongitude { get; set; }
     }
 }

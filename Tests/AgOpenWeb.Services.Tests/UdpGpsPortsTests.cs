@@ -75,6 +75,69 @@ public class UdpGpsPortsTests
         }
     }
 
+    /// <summary>A program listening where AgIO does (GPS_Out) receives PGN 100 (#337).</summary>
+    [Test]
+    public async Task SendToLoopback_reaches_a_listener_on_AgIOs_port()
+    {
+        using var listener = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+        listener.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+        try { listener.Bind(new IPEndPoint(IPAddress.Any, 17777)); }
+        catch (SocketException) { Assert.Ignore("port 17777 is held by another process on this machine"); }
+        listener.ReceiveTimeout = 2000;
+
+        var udp = new UdpCommunicationService(new Loopback());
+        await udp.StartAsync();
+        try
+        {
+            var pgn = PgnBuilder.BuildCorrectedPositionPgn(43.7128, -74.006, 90);
+            udp.SendToLoopback(pgn);
+
+            var buffer = new byte[64];
+            int n = listener.Receive(buffer);
+            Assert.That(buffer[..n], Is.EqualTo(pgn));
+        }
+        finally
+        {
+            await udp.StopAsync();
+            udp.Dispose();
+        }
+    }
+
+    /// <summary>The module's subnet comes from its IP; bytes 9–11 are where the scan came from (#334).</summary>
+    [Test]
+    public async Task ScanReply_ModuleSubnetFromIp_ScanSubnetFromBytes9To11()
+    {
+        try
+        {
+            using var probe = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            probe.Bind(new IPEndPoint(IPAddress.Any, UdpCommunicationService.ModulePort));
+        }
+        catch (SocketException)
+        {
+            Assert.Ignore("port 9999 is held by another process on this machine");
+        }
+
+        var udp = new UdpCommunicationService(new Loopback());
+        await udp.StartAsync();
+        try
+        {
+            var reply = new byte[] { 0x80, 0x81, 126, 203, 7, 192, 168, 5, 126, 192, 168, 43, 0 };
+            using var sender = new UdpClient();
+            for (int attempt = 0; attempt < 20 && udp.GetScanReplySubnet() == null; attempt++)
+            {
+                sender.Send(reply, reply.Length, new IPEndPoint(IPAddress.Loopback, UdpCommunicationService.ModulePort));
+                for (int wait = 0; wait < 20 && udp.GetScanReplySubnet() == null; wait++) await Task.Delay(25);
+            }
+            Assert.That(udp.GetModuleSubnet(), Is.EqualTo("192.168.5"));
+            Assert.That(udp.GetScanReplySubnet(), Is.EqualTo("192.168.43"));
+        }
+        finally
+        {
+            await udp.StopAsync();
+            udp.Dispose();
+        }
+    }
+
     [TestCase(UdpCommunicationService.Gps1Port, GpsSource.Gps1)]
     [TestCase(UdpCommunicationService.Gps2Port, GpsSource.Gps2)]
     [TestCase(UdpCommunicationService.ModulePort, GpsSource.ModulePort)]

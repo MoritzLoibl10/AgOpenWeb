@@ -284,8 +284,9 @@ public record StatusDto(
     bool DevOverlay,
     double GpsToPgnLatencyMs,
     // GPS source (#157): the incoming sentence ("PANDA", "PAOGI", "SIM"; "" before any
-    // fix) for the GPS detail card, and DualHeadingMissing — Dual GPS is on but the
-    // receiver sends $PANDA (no antenna heading), so the single-antenna heading is used.
+    // fix) for the GPS detail card, and DualHeadingMissing — Dual GPS is on and the
+    // receiver has a position but no antenna heading, so the single-antenna heading is
+    // used. Not raised while the receiver is starting up (#313).
     string GpsSentence,
     bool DualHeadingMissing,
     // What the NTRIP caster is sending, for the Network IO panel (RTCM plan, Phase 5);
@@ -295,7 +296,25 @@ public record StatusDto(
     SystemDataDto? SystemData = null,
     // No position sentences for a couple of seconds: the host has switched autosteer and
     // the sections off, and the client shows the warning over the map until data is back.
-    bool GpsLost = false);
+    bool GpsLost = false,
+    // ISOBUS task controller (#312); null while none is heard.
+    IsobusDto? Isobus = null,
+    // Field data card (#321); null with no field open.
+    FieldDataDto? FieldData = null,
+    // Network IO: PGN 100 (corrected position) is sent (#337).
+    bool SendCorrectedPosition = false,
+    // Bytes 9–11 of the last scan reply: the subnet the scan came from (#334); "" = none.
+    string ScanReplySubnet = "");
+
+/// <summary>What the field data card shows beyond the worked area the status frame already
+/// carries: the boundary area less inner boundaries (0 = no boundary), the ground covered
+/// at least once (overlap counted once), and the trip area and distance. m² and m.</summary>
+public record FieldDataDto(double BoundaryAreaSqM, double ActualAreaSqM, double TripAreaSqM, double TripDistanceM);
+
+/// <summary>The ISOBUS task controller's heartbeat (PGN 240): whether section control is
+/// enabled on the implement, the implement's section count (0 = no implement), how many
+/// implements are connected, and the implement's own section states (section 1 in bit 0).</summary>
+public record IsobusDto(bool SectionControl, int Sections, int Clients, ulong Reported);
 
 /// <summary>GPS values for the System Data card that ride no other frame: attitude, the
 /// heading sources before fusion, the sentence rate and counters, and the latest raw

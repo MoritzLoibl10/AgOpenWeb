@@ -787,6 +787,7 @@ public sealed class GpsPipelineService : IGpsPipelineService
         double fusedHeading = _headingFusion.FuseHeading(
             pos.Heading, data.ImuHeading, data.ImuValid,
             pos.Speed, posEasting, posNorthing, data.HasDualHeading);
+        _headingFusion.UpdateDualHeadingWarning(data.FixQuality);
         pos = pos with { Heading = fusedHeading };
         // Reverse (#125): guidance, U-turn and hydraulic lift need to know, and the
         // heading above already faces the way the vehicle points.
@@ -1245,7 +1246,8 @@ public sealed class GpsPipelineService : IGpsPipelineService
         // path (MainViewModel.UpdateToolPositionProperties). Moved here so
         // SetMachineState's three fields (section bits, U-turn state,
         // hyd-lift state) are all written by the cycle, before the PGN
-        // build in (9) reads them.
+        // build in (9) reads them. Between cycles the control loop keeps the
+        // section bits current itself (SetSectionBits, #311).
         byte hydLiftState = ComputeHydLiftState(toolPos, toolHeading, pos.Speed, headlandLine, boundary, headlandOn);
         _autoSteerService.SetMachineState(
             _sectionControlService.GetSectionBits64(),
@@ -1258,6 +1260,18 @@ public sealed class GpsPipelineService : IGpsPipelineService
             pos.Heading, pos.Speed, data.FixQuality,
             data.SatellitesInUse, data.Hdop,
             driftedEasting, driftedNorthing);
+
+        // ── (9b) PGN 100 corrected position ─────────────────────────────
+        // AgOpenGPS sends pn.fix: the antenna with antenna offset, roll and drift applied
+        // but not moved back to the pivot. Undo the fore/aft step of the transform above.
+        // Off unless ticked on the Network IO card.
+        if (_configStore.Connections.SendCorrectedPosition && headingPlane != null && data.FixQuality > 0)
+        {
+            double fixE = driftedEasting + Math.Sin(headingRad) * _configStore.Vehicle.AntennaPivot;
+            double fixN = driftedNorthing + Math.Cos(headingRad) * _configStore.Vehicle.AntennaPivot;
+            var fix = headingPlane.ConvertGeoCoordToWgs84(new GeoCoord(fixN, fixE));
+            _autoSteerService.SendCorrectedPosition(fix.Latitude, fix.Longitude, pos.Heading);
+        }
 
         // ── (10) Headland proximity ─────────────────────────────────────
         double? headlandDist = null;

@@ -180,3 +180,34 @@ Ein schneller Test: `node --check app.js`, dann die Seite laden und auf `pageerr
 Upstream-Knöpfe, die der Block über ihre ID anspricht (Schnellleiste, „Mehr“-Kacheln):
 siehe `QPOOL` in `TabletTerminal`. Upstream entfernt `#bn-autotrack` und fügt `rn-cycle`,
 `rn-cycleback`, `rn-autotrack`, `rn-isobus` hinzu (siehe `docs/Offene-Punkte.md`).
+
+## 6. Upstream-Merge bis #357 und einmalige U-Turn-/Fahrgassen-Migration (Oktober 2026)
+
+Upstream `develop` (bis #357, 28 PRs seit dem Fork-Punkt) ist per **Merge** übernommen, nicht per
+Rebase. Konflikte gab es nur in `build-and-release.yml` (Kommentar), `en.json` (neu erzeugt) und
+`de.json` (Fork-Fassung, 40 neue Texte übersetzt). In Lenk-, Regel- und Sicherheitslogik gab es
+keinen Konflikt; dort gilt unverändert upstream.
+
+Anpassungen im Block wegen upstream: Schnellleiste kennt `rn-autotrack`, `rn-cycle`,
+`rn-cycleback`, `rn-isobus` (#339, #318; `#bn-autotrack` gibt es nicht mehr); „Report on
+GitHub“ (#349) ist ausgeblendet; die Gerätekarte zeigt die Arbeitsbreite auch für inaktive
+Geräte (#350).
+
+**Ausnahme genehmigt: einmalige Host-Migration** wegen #330/#331 (U-Turn- und Fahrgassen-Tab
+gehören jetzt zum Geräteprofil; ein Geräteprofil ohne diese Abschnitte lädt Standardwerte):
+
+| Datei | Änderung | Rebase-Hinweis |
+|---|---|---|
+| `Shared/AgOpenWeb.Services/Profile/ToolUTurnTramMigration.cs` | **neu**: kopiert beim ersten Start die alten Werte aus dem Fahrzeugprofil (`youTurn`: Radius, Verlängerung, Abstand zur Grenze, Stil, Glättung; `guidance`: Fahrgassen-Durchgänge, -Anzeige, erste Spur) in jedes Geräteprofil ohne `youTurn`/`tram`. Quelle: zuletzt benutztes Fahrzeug, sonst das einzige, sonst keines (kein Raten). Fahrgassen-Breite aus den `TramConfig.json` der Felder, nur wenn alle denselben Wert haben. Vorher Kopie von `Vehicles/` und `Tools/` nach `Backups/profiles-before-uturn-tram-migration-<Zeit>/`; Merker `.fork-migrations/uturn-tram-to-tool.done`, damit es einmal läuft. Geräteprofile mit eigenen Abschnitten bleiben unberührt. | keine Konflikte möglich; kann entfallen, sobald keine alten Profile mehr im Umlauf sind |
+| `Shared/AgOpenWeb.ViewModels/MainViewModel.cs` | `LoadDefaultVehicleProfile`: Aufruf direkt nach der v1-Migration, vor dem Laden der Profile; Fehler werden geloggt, dann laden die Geräte ihre Standardwerte | ein Block nach `MigrateV1ProfilesIfNeeded` |
+
+Tests: `Tests/AgOpenWeb.Services.Tests/ToolUTurnTramMigrationTests.cs` (altes Profil:
+Werte laden identisch; Sicherung; einmalig; eigene Abschnitte bleiben; kein Raten bei mehreren
+Fahrzeugen; Fahrgassen-Breite nur bei Einigkeit; neues Format: nichts zu tun). Zusätzlich von
+Hand: Profile mit dem Build vor dem Merge angelegt (U-Turn 6,5 m / 15,5 m / 1,25 m / Stil 1 /
+Glättung 9, Fahrgassen 4 / aus / 2), dann der neue Build auf denselben Daten: identische
+Werte für beide Geräte. Ohne Migration: Standardwerte (8 m / 20 m / 2 m).
+
+Nicht übernommen wird die Startspur aus `TramConfig.json` des Feldes (Feldzustand, gehört
+nicht zum Gerät).
+

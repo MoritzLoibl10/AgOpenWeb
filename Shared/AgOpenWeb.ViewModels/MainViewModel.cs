@@ -631,7 +631,8 @@ public partial class MainViewModel : ObservableObject
     /// <summary>
     /// Host control loop tick handler (#313). Runs at 100 Hz on the loop's
     /// own thread. Reads the latest GPS-anchored pose from the estimator,
-    /// updates tool position + section state machine, then sends PGN 254 +
+    /// updates tool position + section state machine, hands the section bits
+    /// to the sender, then sends PGN 254 +
     /// PGN 239 so the firmware autosteer task — which also runs at 100 Hz
     /// — sees fresh data every cycle.
     /// </summary>
@@ -654,6 +655,10 @@ public partial class MainViewModel : ObservableObject
                 p.Heading,
                 p.SpeedMps);
         }
+        // Hand this tick's section bits to the sender (#311). The GPS cycle writes them
+        // too, but only once per fix; an edge decided here, or a section button tapped
+        // between fixes, must not wait for the next one.
+        _autoSteerService.SetSectionBits(_sectionControlService.GetSectionBits64());
         _autoSteerService.SendPgnsForControlTick();
     }
 
@@ -878,6 +883,19 @@ public partial class MainViewModel : ObservableObject
                 _logger.LogInformation("Migrated v1 vehicle profiles to v2 (split vehicle/tool)");
             }
 
+            // Fork, one time: U-Turn/Tram values from the vehicle into the tool profiles
+            // (upstream #330 moved them; see ToolUTurnTramMigration, docs/Host-Aenderungen.md).
+            try
+            {
+                AgOpenWeb.Services.Profile.ToolUTurnTramMigration.Run(AppDataRoot.Documents,
+                    _configurationService.ProfilesDirectory, _configurationService.ToolsDirectory,
+                    _settingsService.Settings.FieldsDirectory, _settingsService.Settings.LastUsedVehicleProfile, _logger);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "U-Turn/Tram migration to tool profiles failed; the tools load their defaults");
+            }
+
             var profiles = _configurationService.GetAvailableProfiles();
             if (profiles.Count == 0)
             {
@@ -996,6 +1014,7 @@ public partial class MainViewModel : ObservableObject
                 // The subnet is only known after a scan reply.
                 State.Connections.GpsIpAddress = _udpService.GetModuleIpAddress(ModuleType.GPS);
                 State.Connections.ModuleSubnet = _udpService.GetModuleSubnet();
+                State.Connections.ScanReplySubnet = _udpService.GetScanReplySubnet();
 
                 // Legacy property updates (for existing bindings - will be removed in Phase 5)
                 IsAutoSteerDataOk = steerOk;
@@ -4059,6 +4078,7 @@ public partial class MainViewModel : ObservableObject
                 // CanExecute when the field is opened or closed.
                 DeleteAppliedAreaCommand?.NotifyCanExecuteChanged();
                 OnPropertyChanged(nameof(IsSectionBarVisible));
+                if (value) RestartTripDistance(); // a field's trip distance starts at its opening (#321)
             }
         }
     }
@@ -4240,6 +4260,7 @@ public partial class MainViewModel : ObservableObject
     public ICommand? StartCurveRecordingCommand { get; private set; }
     public ICommand? FinishCurveRecordingCommand { get; private set; }
     public ICommand? CycleABLinesCommand { get; private set; }
+    public ICommand? CycleABLinesBackCommand { get; private set; }
     public ICommand? SmoothABLineCommand { get; private set; }
     public ICommand? NudgeLeftCommand { get; private set; }
     public ICommand? NudgeRightCommand { get; private set; }

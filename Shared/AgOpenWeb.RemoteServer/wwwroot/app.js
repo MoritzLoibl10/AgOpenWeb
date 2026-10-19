@@ -507,11 +507,12 @@ function showHardwareMessage(text, seconds, warning) {
   clearTimeout(hwMsgTimer);
   if (seconds > 0) hwMsgTimer = setTimeout(() => el.classList.remove('show'), seconds * 1000);
 }
-// Dual GPS on, but the receiver sends $PANDA (single antenna + IMU) — no antenna heading,
-// so the host uses the single-antenna heading (#157). Toast once each time it starts;
-// take it down if a $PAOGI fix clears it while still showing.
+// Dual GPS on, but the receiver sends no antenna heading ($PANDA, $GNTHS void, HPR
+// quality 0), so the host uses the single-antenna heading (#157). The host holds the flag
+// back while the receiver starts up (#313). Toast once each time it starts; take it down
+// if a fix with a heading clears it while still showing.
 const DUAL_HEADING_MISSING_MSG =
-  tr("Dual GPS is on, but the receiver isn't sending a dual-antenna heading ($PANDA). Using single-antenna heading.");
+  tr("Dual GPS is on, but the receiver isn't sending a dual-antenna heading. Using single-antenna heading.");
 let dualHeadingMissingShown = false;
 function syncDualHeadingWarning(s) {
   const missing = !!s.dualHeadingMissing;
@@ -1240,6 +1241,53 @@ function openSimCoords() {
   dlgLat.focus();
 }
 document.getElementById('dlg-cancel').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); closeDialog(); });
+// Coordinates line (#335, AgOpenGPS Build Tracks "Lat/Lon + Heading" / "Lat/Lon"): A is
+// pre-filled with the vehicle's position, as AgOpenGPS does; the host converts through the
+// field's local plane and reports anything it refuses.
+let llMode = 'latLonHeading';
+const llEl = id => document.getElementById(id);
+function llFill(pt) {
+  if (!statusBar || statusBar.lat == null || (!statusBar.lat && !statusBar.lon)) return;
+  llEl('ll-lat-' + pt).value = statusBar.lat.toFixed(8);
+  llEl('ll-lon-' + pt).value = statusBar.lon.toFixed(8);
+}
+function openLatLonLine(mode) {
+  llMode = mode;
+  const ab = mode === 'latLonAB';
+  llEl('ll-title').textContent = ab ? tr('AB Line from Two Points') : tr('AB Line from Point and Heading');
+  llEl('ll-heading-row').hidden = ab;
+  llEl('ll-b-row').hidden = !ab;
+  for (const id of ['ll-lat-a', 'll-lon-a', 'll-heading', 'll-lat-b', 'll-lon-b']) llEl(id).value = '';
+  llEl('ll-err').textContent = '';
+  llFill('a');
+  openDialog('dlg-latlonab');
+}
+document.querySelectorAll('[data-ll-fill]').forEach(b => b.addEventListener('pointerdown', e => {
+  e.preventDefault(); e.stopPropagation(); llFill(b.dataset.llFill);
+}));
+llEl('ll-cancel').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); closeDialog(); });
+llEl('ll-ok').addEventListener('pointerdown', e => {
+  e.preventDefault(); e.stopPropagation();
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); // commit the edit
+  const num = id => { const v = llEl(id).value.trim(); return v === '' ? NaN : +v; };
+  const okLat = v => Number.isFinite(v) && Math.abs(v) <= 90, okLon = v => Number.isFinite(v) && Math.abs(v) <= 180;
+  const latA = num('ll-lat-a'), lonA = num('ll-lon-a');
+  let err = !okLat(latA) || !okLon(lonA) ? tr('Point A needs a latitude (−90 to 90) and longitude (−180 to 180)') : '';
+  let cmd = '';
+  if (!err && llMode === 'latLonAB') {
+    const latB = num('ll-lat-b'), lonB = num('ll-lon-b');
+    if (!okLat(latB) || !okLon(lonB)) err = tr('Point B needs a latitude (−90 to 90) and longitude (−180 to 180)');
+    else cmd = 'track.latLonAB|' + [latA, lonA, latB, lonB].join(',');
+  } else if (!err) {
+    const h = num('ll-heading');
+    if (!Number.isFinite(h)) err = tr('Enter a heading in degrees');
+    else cmd = 'track.latLonHeading|' + [latA, lonA, h].join(',');
+  }
+  if (err) { llEl('ll-err').textContent = err; return; }
+  closeDialog();
+  transport.send(cmd);
+});
+
 document.getElementById('dlg-ok').addEventListener('pointerdown', e => {
   e.preventDefault(); e.stopPropagation();
   // Commit any in-progress field edit before reading: type=text inputs can hold uncommitted
@@ -1795,20 +1843,48 @@ document.getElementById('maptap-cancel').addEventListener('pointerdown', e => { 
 // ---- AB flyout launchers → the three creation/management dialogs ----
 function abFlyoutClose() { bnAb.classList.remove('open'); document.getElementById('bn-abmenu').classList.remove('menuopen'); }
 document.getElementById('bn-tracks').addEventListener('pointerdown', e => { e.stopPropagation(); abFlyoutClose(); openTracksManager(); });
-document.getElementById('bn-quickab').addEventListener('pointerdown', e => { e.stopPropagation(); abFlyoutClose(); openDialog('dlg-quickab'); });
+document.getElementById('bn-quickab').addEventListener('pointerdown', e => { e.stopPropagation(); abFlyoutClose(); qabHeadingReset(); qabSetSide('right'); openDialog('dlg-quickab'); });
+// A+ heading box (#335): empty each time the dialog opens, the vehicle's heading as its
+// placeholder (refreshed on focus); a typed value goes with track.aPlus.
+const qabHeading = document.getElementById('qab-aplus-heading');
+function vehicleHeadingDeg() {
+  const h = tick && tick.pose && tick.pose.heading;
+  return typeof h === 'number' ? ((h * 180 / Math.PI) % 360 + 360) % 360 : null;
+}
+function qabHeadingReset() {
+  qabHeading.value = '';
+  const d = vehicleHeadingDeg();
+  qabHeading.placeholder = d === null ? '' : d.toFixed(1);
+}
+qabHeading.addEventListener('focus', () => { const d = vehicleHeadingDeg(); if (d !== null) qabHeading.placeholder = d.toFixed(1); });
+// First-pass side for the driven modes (#345): Right each time the dialog opens, like
+// AgOpenGPS; sent just before A+ / Drive AB / Curve so the host moves the line to that side.
+const qabRefSide = document.getElementById('qab-refside');
+let qabSide = 'right';
+function qabSetSide(s) {
+  qabSide = s;
+  for (const b of qabRefSide.children) b.classList.toggle('active', b.dataset.side === s);
+}
+for (const b of qabRefSide.children)
+  b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); qabSetSide(b.dataset.side); });
 // Quick-AB selector buttons.
 // Quick AB — the single creation hub: GPS-driven, from-boundary, and draw-on-map modes.
 document.getElementById('dlg-quickab').querySelectorAll('[data-qab]').forEach(b => b.addEventListener('pointerdown', e => {
   e.preventDefault(); e.stopPropagation(); closeDialog();
   const m = b.dataset.qab;
+  if (m === 'aPlus' || m === 'driveAB' || m === 'recordCurve') transport.send('track.refSide|' + qabSide);
   if (m === 'aPlus') {
     // A+ builds an AB line from the vehicle's current position + heading. It needs a GPS
     // fix; the host bails silently without one, so give feedback here (StatusMessage isn't
     // on the wire). flashHint after a tick so it isn't cleared by the dialog close.
     const p = tick && tick.pose;
     if (!p || (!p.e && !p.n)) setTimeout(() => flashHint(tr('A+ needs a GPS position — start the simulator or GPS')), 0);
-    else transport.send('track.aPlus');
+    else {
+      const v = qabHeading.value.trim();
+      transport.send('track.aPlus' + (v !== '' && isFinite(+v) ? '|' + (+v) : ''));
+    }
   }
+  else if (m === 'latLonHeading' || m === 'latLonAB') openLatLonLine(m);
   else if (m === 'driveAB') startDriveAB();
   else if (m === 'recordCurve') startRecordCurve();
   else if (m === 'boundaryEdge') transport.send('track.createFromBoundary');
@@ -2110,7 +2186,7 @@ for (const b of document.querySelectorAll('#fb-addtrack .fb-addbtn'))
     showFbTab('tracks');
     if (m === 'ab') startDrawTrack('straight');        // map-tap draw (FB stays open, NO_SCRIM)
     else if (m === 'curve') startDrawTrack('curve');
-    else if (m === 'aplus') transport.send('track.aPlus');
+    else if (m === 'aplus') { transport.send('track.refSide|right'); transport.send('track.aPlus'); }
     else if (m === 'bedge') transport.send('track.createFromBoundary');
     else if (m === 'bcurve') transport.send('track.boundaryCurve');
     else if (m === 'ball') transport.send('track.allEdges');
@@ -2770,9 +2846,28 @@ function renderNetworkIo() {
   setMod('nio-imu-cfg', 'nio-imu-dot', 'nio-imu-ip', s.imuConf, s.imuOk, s.imuIp);
   // Seed the subnet octets from the detected /24 when it changes (a PGN 203 reply),
   // unless the operator is editing that box — mirrors the native ModuleSubnet binding.
-  if (s.moduleSubnet && s.moduleSubnet !== _lastModuleSubnet) {
-    _lastModuleSubnet = s.moduleSubnet;
-    const p = s.moduleSubnet.split('.');
+  // A module on a subnet this device isn't on (a phone hotspot, #334) can answer a scan
+  // but its data never arrives. Offer the subnet to move it to, as AgIO's Auto Set does:
+  // the scan reply's bytes 9–11, the subnet the scan came from (AgOpenGPS firmware). AiO
+  // v26 repeats the module's own subnet there; then, with this device on exactly one
+  // network, offer that network's /24.
+  const usable = n => /^\d+\.\d+\.\d+$/.test(n || '') && !n.startsWith('127.') && !n.startsWith('169.254.') && !n.startsWith('0.');
+  const hostNets = [...new Set((s.hostIps || '').split('\n')
+    .filter(ip => /^\d+\.\d+\.\d+\.\d+$/.test(ip))
+    .map(ip => ip.split('.').slice(0, 3).join('.')).filter(usable))];
+  const fromScan = usable(s.scanReplySubnet) && s.scanReplySubnet !== s.moduleSubnet ? s.scanReplySubnet : '';
+  const offer = fromScan || (hostNets.length === 1 && s.moduleSubnet && hostNets[0] !== s.moduleSubnet ? hostNets[0] : '');
+  const elsewhere = !!s.moduleSubnet && (!!offer || (hostNets.length > 0 && !hostNets.includes(s.moduleSubnet)));
+  const seed = offer || s.moduleSubnet;
+  const mismatch = document.getElementById('nio-subnet-mismatch');
+  mismatch.hidden = !elsewhere;
+  if (elsewhere) mismatch.textContent = offer
+    ? tr('The modules are on {m}.x, this device is on {h}.x. Send moves the modules to {h}.x.', { m: s.moduleSubnet, h: offer })
+    : tr('The modules are on {m}.x, which isn\'t one of this device\'s networks.', { m: s.moduleSubnet });
+  const seedKey = (s.moduleSubnet || '') + '|' + (seed || '');
+  if (s.moduleSubnet && seedKey !== _lastModuleSubnet) {
+    _lastModuleSubnet = seedKey;
+    const p = seed.split('.');
     if (p.length === 3) {
       if (document.activeElement !== nioO1) nioO1.value = p[0];
       if (document.activeElement !== nioO2) nioO2.value = p[1];
@@ -2794,6 +2889,8 @@ function renderNetworkIo() {
   if (document.activeElement !== bc) bc.checked = !!s.rtcmBroadcast;
   const nen = document.getElementById('nio-ntrip-on');
   if (document.activeElement !== nen) nen.checked = !!s.ntripEnabled;
+  const p100 = document.getElementById('nio-pgn100');
+  if (document.activeElement !== p100) p100.checked = !!s.sendCorrectedPosition;
   renderNtripRtcm(s);
   nioSubnetBtn.classList.toggle('disabled', !iHoldControl);
 }
@@ -3481,11 +3578,24 @@ function renderBugReport() {
   document.getElementById('br-status').textContent = s;
   const m = /(bugreport_[^\/\\]+\.zip)$/.exec(s);
   brFile = m ? m[1] : null;
-  document.getElementById('br-download').style.display = brFile ? '' : 'none';
+  for (const id of ['br-download', 'br-github', 'br-github-hint'])
+    document.getElementById(id).style.display = brFile ? '' : 'none';
 }
 document.getElementById('br-download').addEventListener('pointerdown', e => {
   e.stopPropagation();
   if (brFile) openExternal(location.origin + '/bugreports/' + encodeURIComponent(brFile));
+});
+// GitHub's bug form, prefilled through its field ids (.github/ISSUE_TEMPLATE/bug_report.yml).
+// A URL can't carry the zip, so the user drags in the one Download saved.
+document.getElementById('br-github').addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  const q = new URLSearchParams({ template: 'bug_report.yml' });
+  const title = document.getElementById('br-title').value.trim();
+  const desc = document.getElementById('br-desc').value.trim();
+  if (title) q.set('title', title);
+  if (desc) q.set('description', desc.slice(0, 3000)); // keep the URL within browser limits
+  if (appInfo && appInfo.version) q.set('version', appInfo.version + (appInfo.gitHash ? ' · ' + appInfo.gitHash : ''));
+  openExternal('https://github.com/AgOpenGPS-Official/AgOpenWeb/issues/new?' + q);
 });
 document.getElementById('br-submit').addEventListener('pointerdown', e => {
   e.stopPropagation();
@@ -3877,6 +3987,7 @@ function rnSend(cmd) { if (iHoldControl) transport.send(cmd); }
 // NB: use a direct lookup here, not the RN object — RN is a `const` defined later
 // in the render section, so referencing it here would hit the temporal dead zone
 // and throw at load (stuck "connecting…").
+let rnCycleAt = 0, rnLastTrack = null; // last cycle tap (ms), track name seen then
 const rnRoot = document.getElementById('rightnav');
 if (rnRoot) {
   rnRoot.addEventListener('pointerdown', e => e.stopPropagation()); // don't pan the map
@@ -3885,8 +3996,15 @@ if (rnRoot) {
   const wireRn = (id, cmd) => { const el = document.getElementById(id); if (el) el.addEventListener('pointerdown', e => { e.preventDefault(); rnSend(cmd); }); };
   wireRn('rn-contour', 'contour.toggle');
   wireRn('rn-contourlock', 'contour.lock'); // #110
+  // Track picking (#336). After a cycle tap, renderRightNav flashes the new track's name.
+  wireRn('rn-cycle', 'track.cycle');
+  wireRn('rn-cycleback', 'track.cycleBack');
+  for (const id of ['rn-cycle', 'rn-cycleback'])
+    document.getElementById(id).addEventListener('pointerdown', () => { if (iHoldControl) rnCycleAt = Date.now(); });
+  wireRn('rn-autotrack', 'track.autoTrack');
   wireRn('rn-manual', 'section.manual');
   wireRn('rn-auto', 'section.master');
+  wireRn('rn-isobus', 'isobus.sectionControl'); // #312
   wireRn('rn-youturn', 'youturn.toggle');
   wireRn('rn-steer', 'autosteer.toggle');
 }
@@ -4406,11 +4524,13 @@ SB.fixBtn.addEventListener('pointerdown', e => {
   e.stopPropagation();
   const show = SB.gpsCard.style.display !== 'block';
   SB.gpsCard.style.display = show ? 'block' : 'none';
+  if (show) document.getElementById('sb-fieldcard').style.display = 'none'; // one card at a time
   if (show) SB.modPop.style.display = 'none';
 });
 addEventListener('pointerdown', () => {
   if (SB.modPop) SB.modPop.style.display = 'none';
   if (SB.gpsCard) SB.gpsCard.style.display = 'none';
+  document.getElementById('sb-fieldcard').style.display = 'none';
   // Close bottom-nav flyouts on any outside click (clicks inside #bottomnav
   // stopPropagation, so they don't reach here).
   const ff = document.getElementById('bn-flyout-flags'), af = document.getElementById('bn-flyout-ab');
@@ -4422,6 +4542,58 @@ addEventListener('pointerdown', () => {
   // not this global handler — so a panel dismiss no longer also pans the map.
 });
 
+// Field data card (#321), after AgOpenGPS FormFieldData: tap the rotating field line under
+// the fix readout. Total / Remaining / Time left / Actual remaining need a boundary.
+// Worked counts every pass (overlap included); Actual is the ground covered at least once.
+const FC = {
+  card: document.getElementById('sb-fieldcard'), reset: document.getElementById('fc-reset'),
+  name: document.getElementById('fc-name'), total: document.getElementById('fc-total'),
+  worked: document.getElementById('fc-worked'), remain: document.getElementById('fc-remain'),
+  time: document.getElementById('fc-time'), overlap: document.getElementById('fc-overlap'),
+  actual: document.getElementById('fc-actual'), actRemain: document.getElementById('fc-actremain'),
+  rate: document.getElementById('fc-rate'), tripArea: document.getElementById('fc-triparea'),
+  tripDist: document.getElementById('fc-tripdist'),
+};
+SB.rot.addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  if (!scene || !scene.hasField) return;
+  const show = FC.card.style.display !== 'block';
+  FC.card.style.display = show ? 'block' : 'none';
+  if (show) { SB.gpsCard.style.display = 'none'; renderFieldCard(); }
+});
+FC.card.addEventListener('pointerdown', e => e.stopPropagation());
+FC.reset.addEventListener('pointerdown', e => { e.preventDefault(); transport.send('fielddata.resetTrip'); });
+function renderFieldCard() {
+  if (FC.card.style.display !== 'block') return;
+  const s = statusBar, fd = s && s.fieldData;
+  if (!fd || !scene || !scene.hasField) { FC.card.style.display = 'none'; return; }
+  const total = fd.boundaryAreaSqM, worked = s.workedAreaSqM || 0;
+  // A cell on the tool's edge can count as covered a little before the strip area
+  // catches up, so keep Actual within Worked.
+  const actual = Math.min(fd.actualAreaSqM, worked);
+  const speedKmh = (lastTick ? lastTick.speed : 0) * 3.6;
+  const haPerHr = speedKmh * toolWidthM() / 10;
+  for (const r of FC.card.querySelectorAll('.fc-bnd')) r.classList.toggle('fc-hide', !(total > 0));
+  FC.name.textContent = scene.fieldName + (s.jobName ? '  ·  ' + s.jobName : '');
+  FC.worked.textContent = fmtArea(worked);
+  FC.overlap.textContent = (worked > 0 ? (1 - actual / worked) * 100 : 0).toFixed(1) + '%';
+  FC.actual.textContent = fmtArea(actual);
+  FC.rate.textContent = fmtRate(haPerHr);
+  FC.tripArea.textContent = fmtArea(fd.tripAreaSqM);
+  FC.tripDist.textContent = fmtUnit(fd.tripDistanceM, 'm', 0);
+  if (total > 0) {
+    const left = Math.max(0, total - worked);
+    FC.total.textContent = fmtArea(total);
+    FC.remain.textContent = fmtArea(left) + '  (' + (left * 100 / total).toFixed(1) + '%)';
+    FC.actRemain.textContent = fmtArea(Math.max(0, total - actual));
+    // AgOpenGPS: no estimate below 2 km/h.
+    if (speedKmh > 2 && haPerHr > 0) {
+      const mins = Math.round(left / 10000 / haPerHr * 60);
+      FC.time.textContent = Math.floor(mins / 60) + ':' + String(mins % 60).padStart(2, '0');
+    } else FC.time.textContent = '∞';
+  }
+}
+
 function renderStatusBar() {
   const s = statusBar;
   if (!s) { SB.bar.style.display = 'none'; if (SB.diagRow) SB.diagRow.style.display = 'none'; return; }
@@ -4432,6 +4604,7 @@ function renderStatusBar() {
   SB.fix.textContent = s.fixText || '—';
   SB.age.textContent = tr('Age {age}', { age: Number.isFinite(s.age) ? s.age.toFixed(1) : '—' }); // NaN: the sentence has no age ($KSXT)
   SB.rot.textContent = rotatingLineText();
+  renderFieldCard();
   // Speed from the live tick (m/s), formatted per the host's unit preference.
   const mps = lastTick ? lastTick.speed : 0;
   SB.speed.textContent = toDisplayUnit(mps * 3.6, 'kmh').toFixed(1);
@@ -4571,6 +4744,31 @@ function renderSectionBar() {
   for (const b of sectionBar.querySelectorAll('button[data-zone]')) // zone colour = its last section
     b.style.background = SECTION_COLORS[secs[+b.dataset.last]] || SECTION_COLORS[0];
   sectionBar.classList.toggle('locked', !iHoldControl); // dim when we can't actuate
+  renderIsobusSections();
+}
+// Under the section buttons: what the ISOBUS implement reports for its own sections
+// (PGN 240), so a section that didn't follow its command shows (#312). One cell per
+// implement section, which need not be the app's section count.
+function renderIsobusSections() {
+  const iso = statusBar && statusBar.isobus;
+  let row = sectionBar.querySelector('.sec-iso');
+  if (!iso || !iso.sections) { if (row) row.remove(); return; }
+  if (!row || +row.dataset.n !== iso.reported.length) {
+    if (row) row.remove();
+    row = document.createElement('div');
+    row.className = 'sec-iso'; row.dataset.n = iso.reported.length;
+    const label = document.createElement('span');
+    label.className = 'sec-iso-label'; label.textContent = 'ISOBUS';
+    const cells = document.createElement('div');
+    cells.className = 'sec-iso-cells';
+    for (let i = 0; i < iso.reported.length; i++) {
+      const c = document.createElement('div'); c.className = 'sec-iso-cell'; cells.appendChild(c);
+    }
+    row.appendChild(label); row.appendChild(cells);
+    sectionBar.appendChild(row);
+  }
+  const cells = row.querySelectorAll('.sec-iso-cell');
+  for (let i = 0; i < cells.length; i++) cells[i].classList.toggle('on', !!iso.reported[i]);
 }
 // Bottom nav (Phase 8). Swap icons only on change; reflect Tick toggle state.
 function bnIcon(img, name) { const p = '/icons/' + name; if (img && !img.src.endsWith(p)) img.src = p; }
@@ -4598,7 +4796,6 @@ function renderBottomNav() {
   bnIcon(document.getElementById('bn-secheadland-ic'), t.sectionInHeadland ? 'HeadlandSectionOff.png' : 'HeadlandSectionOn.png');
   bnIcon(document.getElementById('bn-headland-ic'), t.headlandOn ? 'HeadlandOn.png' : 'HeadlandOff.png');
   bnIcon(document.getElementById('bn-tram-ic'), TRAM_ICONS[t.tramMode || 0]);
-  document.getElementById('bn-autotrack').classList.toggle('active', !!t.autoTrack);
   bottomNav.classList.toggle('locked', !iHoldControl);
 }
 
@@ -4609,6 +4806,9 @@ const RN = {
   contourI: document.getElementById('rn-contour-i'), manualI: document.getElementById('rn-manual-i'),
   contourLock: document.getElementById('rn-contourlock'), contourLockI: document.getElementById('rn-contourlock-i'),
   autoI: document.getElementById('rn-auto-i'), youturnI: document.getElementById('rn-youturn-i'),
+  isobus: document.getElementById('rn-isobus'), isobusI: document.getElementById('rn-isobus-i'),
+  cycle: document.getElementById('rn-cycle'), cycleBack: document.getElementById('rn-cycleback'),
+  autoTrack: document.getElementById('rn-autotrack'), autoTrackI: document.getElementById('rn-autotrack-i'),
   steerI: document.getElementById('rn-steer-i'), readonly: document.getElementById('rn-readonly'),
 };
 // Swap an icon only when it actually changes (no per-frame churn).
@@ -4627,9 +4827,36 @@ function renderRightNav() {
   RN.contourLock.style.display = op.contour ? '' : 'none';
   rnIcon(RN.contourLockI, scene.contourLocked ? 'ColorLocked.png' : 'ColorUnlocked.png');
   RN.youturnI.parentElement.style.display = op.contour ? 'none' : '';
+  // Track picking (#336), AgOpenGPS's rule: two or more visible tracks, one active, no contour.
+  const tl = scene.trackList || [];
+  const visible = tl.filter(t => t.visible);
+  const activeName = tick.activeTrackName || '';
+  const showPick = visible.length > 1 && !!activeName && !op.contour;
+  for (const b of [RN.cycle, RN.cycleBack, RN.autoTrack]) b.style.display = showPick ? '' : 'none';
+  rnIcon(RN.autoTrackI, tick.tools && tick.tools.autoTrack ? 'AutoTrack.png' : 'AutoTrackOff.png');
+  // Name and "n/total" after a cycle tap, like AgOpenGPS's guidance-line label.
+  if (activeName !== rnLastTrack) {
+    if (rnLastTrack !== null && Date.now() - rnCycleAt < 2000) {
+      const n = visible.findIndex(t => t.name === activeName) + 1;
+      flashHint(n > 0 ? activeName + '  ' + n + '/' + visible.length : activeName);
+    }
+    rnLastTrack = activeName;
+  }
   rnIcon(RN.manualI, op.sectionManual ? 'ManualOn.png' : 'ManualOff.png');
   rnIcon(RN.autoI, op.sectionAuto ? 'SectionMasterOn.png' : 'SectionMasterOff.png');
   rnIcon(RN.youturnI, op.youturn ? 'YouTurnYes.png' : 'YouTurnNo.png');
+  // ISOBUS task controller (#312): the button is there while its heartbeat is heard, like
+  // AgOpenGPS. Idle = no implement with sections; otherwise section control on / off.
+  const iso = statusBar && statusBar.isobus;
+  RN.isobus.style.display = iso ? '' : 'none';
+  if (iso) {
+    rnIcon(RN.isobusI, !iso.sections ? 'IsobusSectionControlIdle.png'
+      : iso.sectionControl ? 'IsobusSectionControlOn.png' : 'IsobusSectionControlOff.png');
+    const tip = !iso.sections ? tr('ISOBUS: no implement')
+      : iso.sectionControl ? tr('ISOBUS section control on ({n} sections)', { n: iso.sections })
+      : tr('ISOBUS section control off ({n} sections)', { n: iso.sections });
+    if (RN.isobus.title !== tip) RN.isobus.title = tip;
+  }
   // U-turn direction + distance-to-trigger now render on-screen (see renderUTurnIndicator).
   // AutoSteer 3-state icon: grey (no track) / off-ready / on-engaged.
   rnIcon(RN.steerI, !op.autoSteerAvail ? 'AutoSteerGray.png' : op.autoSteer ? 'AutoSteerOn.png' : 'AutoSteerOff.png');
@@ -5772,20 +5999,53 @@ function satZoom() {
   const z = Math.log2(156543.03392 * Math.cos(originLat * Math.PI / 180) * pxPerM);
   return Math.max(2, Math.min(20, Math.round(z)));
 }
-const satTiles = new Map(); // "z/x/y" → { img, skImg }
+// Bing has no tiles past its coverage (rural areas often stop at z19 or below); the host
+// answers 404 for those and the tile is drawn from its nearest ancestor instead. A failed
+// fetch (502, no network) is asked again after SAT_RETRY_MS.
+const SAT_FILL_LEVELS = 6, SAT_RETRY_MS = 15000;
+const satTiles = new Map(); // "z/x/y" → { img, url, skImg, none, retryAt }
+function loadSatTile(t, x, y, z) {
+  const retry = () => { t.retryAt = performance.now() + SAT_RETRY_MS; };
+  t.retryAt = 0;
+  fetch('/sattile/' + tileQuadkey(x, y, z))
+    .then(r => {
+      if (r.status === 404) { t.none = true; return null; }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.blob();
+    })
+    .then(b => {
+      if (!b) return;
+      const im = new Image();
+      im.onload = () => { t.img = im; };
+      im.onerror = () => { URL.revokeObjectURL(im.src); retry(); };
+      im.src = t.url = URL.createObjectURL(b);
+    })
+    .catch(retry);
+}
 function getSatTile(x, y, z) {
   const key = z + '/' + x + '/' + y;
   let t = satTiles.get(key);
   if (!t) {
-    t = { img: null, skImg: null };
+    t = { img: null, url: null, skImg: null, none: false, retryAt: 0 };
     satTiles.set(key, t);
-    const im = new Image();
-    im.onload = () => { t.img = im; };
-    im.src = '/sattile/' + tileQuadkey(x, y, z);
-    if (satTiles.size > 500) { const k = satTiles.keys().next().value; const ev = satTiles.get(k); if (ev && ev.skImg) ev.skImg.delete(); satTiles.delete(k); }
+    loadSatTile(t, x, y, z);
+    if (satTiles.size > 500) {
+      const k = satTiles.keys().next().value, ev = satTiles.get(k);
+      if (ev.skImg) ev.skImg.delete();
+      if (ev.url) URL.revokeObjectURL(ev.url);
+      satTiles.delete(k);
+    }
+  } else if (t.retryAt && performance.now() >= t.retryAt) loadSatTile(t, x, y, z);
+  if (t.img && !t.skImg) {
+    t.skImg = CK.MakeImageFromCanvasImageSource(t.img);
+    URL.revokeObjectURL(t.url); t.url = null; t.img = null;
   }
-  if (t.img && !t.skImg) t.skImg = CK.MakeImageFromCanvasImageSource(t.img);
   return t;
+}
+function drawSatTileSk(canvas, img, tx, ty, z) {
+  const eW = lonToE(tileXToLon(tx, z)), eE = lonToE(tileXToLon(tx + 1, z));
+  const nN = latToN(tileYToLat(ty, z)), nS = latToN(tileYToLat(ty + 1, z));
+  drawImageWorldSk(canvas, img, eW, nS, eE, nN, CK.FilterMode.Linear);
 }
 function drawSatelliteSk(canvas) {
   if (!satEnabled || (!originLat && !originLon)) return;
@@ -5799,13 +6059,23 @@ function drawSatelliteSk(canvas) {
   const xMin = lonToTileX(lonW, z), xMax = lonToTileX(lonE, z);
   const yMin = latToTileY(latN, z), yMax = latToTileY(latS, z); // y grows southward
   if ((xMax - xMin) > 40 || (yMax - yMin) > 40 || xMax < xMin || yMax < yMin) return; // sanity
+  // A tile not drawn yet shows its nearest loaded ancestor, each drawn once and under
+  // the loaded tiles. Ancestors are only fetched for a tile Bing has none of; while a
+  // tile loads, whatever is already cached stands in.
+  const fill = new Map(), ready = [];
   for (let tx = xMin; tx <= xMax; tx++) for (let ty = yMin; ty <= yMax; ty++) {
     const t = getSatTile(tx, ty, z);
-    if (!t.skImg) continue;
-    const eW = lonToE(tileXToLon(tx, z)), eE = lonToE(tileXToLon(tx + 1, z));
-    const nN = latToN(tileYToLat(ty, z)), nS = latToN(tileYToLat(ty + 1, z));
-    drawImageWorldSk(canvas, t.skImg, eW, nS, eE, nN, CK.FilterMode.Linear);
+    if (t.skImg) { ready.push([t.skImg, tx, ty]); continue; }
+    for (let up = 1; up <= SAT_FILL_LEVELS && z - up >= 1; up++) {
+      const px = tx >> up, py = ty >> up, pz = z - up, key = pz + '/' + px + '/' + py;
+      const p = t.none ? getSatTile(px, py, pz) : satTiles.get(key);
+      if (p && p.skImg) { fill.set(key, [p.skImg, px, py, pz]); break; }
+      if (t.none && !p.none) break; // still loading
+    }
   }
+  [...fill.values()].sort((a, b) => a[3] - b[3])
+    .forEach(([img, px, py, pz]) => drawSatTileSk(canvas, img, px, py, pz));
+  for (const [img, tx, ty] of ready) drawSatTileSk(canvas, img, tx, ty, z);
 }
 // Coverage offscreen → SkImage, re-snapshotted only when the cell grid changed
 // (cov.dirty). The world blit uses Linear (bilinear) sampling so the cell-grid edge
@@ -5962,13 +6232,16 @@ function drawCoverageSk(canvas) {
 // Crisp worked-area edge — the server-fed vector perimeter (only segments that don't adjoin
 // another pass), stroked in the coverage colour over the raster so the soft alpha-AA feather
 // is replaced by a sharp boundary. Bounded by perimeter length, so cost is ~flat regardless
-// of field size. Stroke width ≈ 0.6 m (covers the feather). Polylines are broken at the near
-// plane per vertex (see below). Reloaded fields have no perimeter (graceful fall back to feather).
+// of field size. Stroke width 0.6 m (covers the feather): the host sends the line 0.3 m inside
+// the swept edge (EDGE_STROKE_WIDTH in CoverageMapService), so the stroke ends at the edge of the
+// tool, and the caps are butt so it doesn't run past the ends of a pass either (#325). Polylines
+// are broken at the near plane per vertex (see below). Reloaded fields have no perimeter
+// (graceful fall back to feather).
 function drawCoverageEdgeSk(canvas) {
   if (EDGE_OFF || !coverageEdges || !coverageEdges.length) return;
   const p = SKP.covEdge || (SKP.covEdge = (() => {
     const q = new CK.Paint(); q.setStyle(CK.PaintStyle.Stroke); q.setAntiAlias(true);
-    q.setStrokeCap(CK.StrokeCap.Round); q.setStrokeJoin(CK.StrokeJoin.Round); return q;
+    q.setStrokeCap(CK.StrokeCap.Butt); q.setStrokeJoin(CK.StrokeJoin.Round); return q;
   })());
   const c = covEdgeRgb;
   p.setColor(CK.Color((c >> 16) & 0xFF, (c >> 8) & 0xFF, c & 0xFF, 1));
@@ -6217,6 +6490,7 @@ const TabletUi = (() => {
   const RN_LABELS = [
     ['rn-contour', tr('Contour')], ['rn-contourlock', tr('Lock')], ['rn-manual', tr('Manual')],
     ['rn-auto', tr('Auto')], ['rn-youturn', tr('U-Turn')], ['rn-steer', tr('Steer')],
+    ['rn-autotrack', tr('Auto track')], ['rn-cycle', tr('Next track')], ['rn-cycleback', tr('Previous track')], ['rn-isobus', 'ISOBUS'],
   ];
   const rnState = {};
   for (const [id, label] of RN_LABELS) {
@@ -6241,6 +6515,10 @@ const TabletUi = (() => {
     rnSet('rn-manual', !!op.sectionManual, onOff(op.sectionManual));
     rnSet('rn-auto', !!op.sectionAuto, onOff(op.sectionAuto));
     rnSet('rn-youturn', !!op.youturn, onOff(op.youturn));
+    const at = !!(tick.tools && tick.tools.autoTrack);
+    rnSet('rn-autotrack', at, onOff(at));
+    const iso = statusBar && statusBar.isobus;
+    if (iso) rnSet('rn-isobus', !!iso.sectionControl, !iso.sections ? '—' : onOff(iso.sectionControl));
     rnSet('rn-steer', !!op.autoSteer && !op.moduleNotSteering,
       !op.autoSteerAvail ? tr('No line') : !op.autoSteer ? tr('Off') : op.moduleNotSteering ? tr('Not steering') : tr('On'));
   }
@@ -6707,15 +6985,20 @@ const TabletTerminal = (() => {
     { id: 'headland', src: '#bn-headland', label: tr('Headland'), on: t => t.tools && t.tools.headlandOn },
     { id: 'hlsections', src: '#bn-secheadland', label: tr('Sections in headland'), on: t => t.tools && !t.tools.sectionInHeadland },
     { id: 'tram', src: '#bn-tram', label: tr('Tram lines'), on: t => t.tools && t.tools.tramMode > 0 },
-    { id: 'autotrack', src: '#bn-autotrack', label: tr('Auto track'), on: t => t.tools && t.tools.autoTrack },
+    // Upstream's own track picking (#339): shown by upstream only with two or more visible tracks.
+    { id: 'autotrack', rn: 'rn-autotrack' }, { id: 'cycle', rn: 'rn-cycle' }, { id: 'cycleback', rn: 'rn-cycleback' },
     { id: 'uturnL', src: '#osb-uturn [data-cmd="youturn.manualLeft"]', label: tr('U-turn left') },
     { id: 'uturnR', src: '#osb-uturn [data-cmd="youturn.manualRight"]', label: tr('U-turn right') },
     { id: 'shiftL', src: '#osb-lateral [data-cmd="track.snapLeft"]', label: tr('Shift left') },
     { id: 'shiftR', src: '#osb-lateral [data-cmd="track.snapRight"]', label: tr('Shift right') },
+    // ISOBUS section control (#318): always in the bar while upstream shows it (a task
+    // controller heartbeat is heard), so it is never out of reach; outside the slot budget.
+    { id: 'isobus', rn: 'rn-isobus', auto: true },
     { id: 'steer', rn: 'rn-steer', fixed: true },
   ];
   const QBY = Object.fromEntries(QPOOL.map(q => [q.id, q]));
-  const RN_LABEL = { contour: tr('Contour'), manual: tr('Manual'), auto: tr('Auto'), youturn: tr('U-Turn'), steer: tr('Steer') };
+  const RN_LABEL = { contour: tr('Contour'), manual: tr('Manual'), auto: tr('Auto'), youturn: tr('U-Turn'), steer: tr('Steer'),
+    autotrack: tr('Auto track'), cycle: tr('Next track'), cycleback: tr('Previous track'), isobus: 'ISOBUS' };
   const qLabel = q => q.label || RN_LABEL[q.id] || q.id;
   const DEFAULT_QUICK = ['contour', 'manual', 'auto', 'youturn'];
   const MAX_SLOTS = 6; // with steer; contour counts twice (its lock button). Keeps glove ≥ 64 px at 600 px height.
@@ -6723,7 +7006,7 @@ const TabletTerminal = (() => {
   const cleanQuick = v => {
     if (!Array.isArray(v)) return null;
     const out = [];
-    for (const id of v) if (QBY[id] && !QBY[id].fixed && !out.includes(id) && slotCost(out.concat(id)) <= MAX_SLOTS) out.push(id);
+    for (const id of v) if (QBY[id] && !QBY[id].fixed && !QBY[id].auto && !out.includes(id) && slotCost(out.concat(id)) <= MAX_SLOTS) out.push(id);
     return out;
   };
   let quick = cleanQuick(lsJson('aow.ui.quick', null)) || DEFAULT_QUICK.slice();
@@ -6780,9 +7063,9 @@ const TabletTerminal = (() => {
       const node = q.rn ? $(q.rn) : proxies[q.id] && proxies[q.id].b;
       if (!node) continue;
       const i = quick.indexOf(q.id);
-      const shown = q.fixed || i >= 0;
+      const shown = q.fixed || q.auto || i >= 0;
       node.classList.toggle('tui-qhide', t && !shown);
-      node.style.order = t ? String(q.fixed ? 90 : i * 2) : '';
+      node.style.order = t ? String(q.fixed ? 90 : q.auto ? 80 : i * 2) : '';
       if (q.id === 'contour') {
         const lock = $('rn-contourlock');
         if (lock) { lock.classList.toggle('tui-qhide', t && !shown); lock.style.order = t ? String(i * 2 + 1) : ''; }
@@ -6959,13 +7242,14 @@ const TabletTerminal = (() => {
   }
   function renderQuickEditor() {
     quickBody.innerHTML = '<div class="tui-hint">' + esc(tr('Pick the buttons for the bar on the right edge and their order. Steer always stays at the bottom. Up to {n} buttons (Contour brings its lock button). Saved on this device.', { n: MAX_SLOTS })) + '</div>';
-    const ordered = quick.map(id => QBY[id]).concat(QPOOL.filter(q => !q.fixed && !quick.includes(q.id))).concat([QBY.steer]);
+    const ordered = quick.map(id => QBY[id]).concat(QPOOL.filter(q => !q.fixed && !q.auto && !quick.includes(q.id)))
+      .concat(QPOOL.filter(q => q.auto), [QBY.steer]);
     for (const q of ordered) {
       const row = el('div', 'tui-qitem', qIcon(q) + '<span class="e-grow"></span>');
       row.querySelector('.e-grow').textContent = qLabel(q);
       const i = quick.indexOf(q.id);
-      if (q.fixed) {
-        row.appendChild(Object.assign(el('span', 'tui-chip lock on'), { textContent: tr('Always') }));
+      if (q.fixed || q.auto) {
+        row.appendChild(Object.assign(el('span', 'tui-chip lock on'), { textContent: q.fixed ? tr('Always') : tr('When connected') }));
       } else {
         const chip = el('button', 'tui-chip' + (i >= 0 ? ' on' : ''));
         chip.textContent = i >= 0 ? tr('In the bar') : tr('Add');
@@ -7305,8 +7589,8 @@ const TabletProfiles = (() => {
     return a && !l.some(p => p.name === a) ? [{ name: a, preview: '' }].concat(l) : l;
   };
   const sameName = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
-  // Working width = sum of the sections, as the host computes it (ActualToolWidth); only the
-  // active tool's is known here. Same format as the width card on the work pages.
+  // Working width = sum of the sections, as the host computes it (ActualToolWidth); for the
+  // active tool from the config, same format as the width card on the work pages.
   function activeWidth() {
     const wm = config && config.tool ? +config.tool.totalWidth || 0 : 0;
     return wm > 0 ? tuiNum(toDisplayUnit(wm, 'm'), 2) + ' ' + unitLabel('m') : '—';
@@ -7409,7 +7693,8 @@ const TabletProfiles = (() => {
     } else {
       ic = ICON[toolSymbol(p.name)];
       rows = [];
-      if (active) rows.push([tr('Working width'), activeWidth()]); // inactive: no width (the preview's "Width" is not the working width)
+      // Inactive: the preview's "Width", which is the sum of the sections since upstream #350.
+      rows.push([tr('Working width'), active ? activeWidth() : hostVal(m['Width'])]);
       rows.push([tr('Sections'), hostVal(m['Sections'])], [tr('Attach'), m['Attach'] && m['Attach'] !== '—' ? T(m['Attach']) : '—']);
     }
     return '<span class="tp-c-top"><span class="tp-c-ic">' + ic + '</span><span class="tp-c-n" translate="no"></span>' +
@@ -8184,11 +8469,41 @@ const TabletProfiles = (() => {
     : !listOf(rec.kind).some(p => sameName(p.name, rec.name)) && activeName(rec.kind) !== rec.src);
   function startJob(rec, cmds, isRevert) {
     for (const c of cmds) transport.send(c);
-    job = { rec, state: 'sending', t0: performance.now(), okAt: 0, revert: !!isRevert, expect: isRevert ? revertList(rec) : rec.ch };
+    const tries = job && job.rec === rec ? (job.tries || 0) + 1 : 0; // attempts after the first, for deadEnd
+    job = { rec, state: 'sending', t0: performance.now(), okAt: 0, revert: !!isRevert, expect: isRevert ? revertList(rec) : rec.ch, tries };
     setPending(rec); // stays until the host confirms
     refreshJob(true);
   }
   function canAct() { return !!job && connState === 'connected' && !lockReason() && !wrongActive(job.rec); }
+  // Dead ends: cases no button here can repair. Only then is "Discard" offered, after a question
+  // listing what is lost; otherwise the band stays until the save is confirmed or reverted.
+  function deadEnd(j) {
+    const rec = j.rec;
+    if (!profiles || !config || connState !== 'connected') return '';
+    const has = n => listOf(rec.kind).some(p => sameName(p.name, n));
+    if (rec.mode === 'edit' && !has(rec.name))
+      return tr('The profile "{name}" no longer exists on this guidance computer (deleted or renamed).', { name: rec.name });
+    if (rec.mode === 'new' && !has(rec.name) && !has(rec.src))
+      return tr('Neither "{name}" nor its template "{src}" exists on this guidance computer.', { name: rec.name, src: rec.src });
+    // Not one value is the old or the new one: the note is not about this computer's data
+    // (another guidance computer at the same address, or the profile was changed elsewhere).
+    if (activeName(rec.kind) === rec.name && rec.ch.length
+      && rec.ch.every(c => c.from !== undefined && !valueOk(c) && !valueOk(Object.assign({}, c, { val: c.from }))))
+      return tr('None of the values on the guidance computer is the old or the new one. The note probably comes from another guidance computer, or the profile was changed elsewhere.');
+    if ((j.tries || 0) >= 2 && j.state !== 'sending' && !matches(rec, rec.ch))
+      return tr('The guidance computer did not take the values after two more attempts.');
+    return '';
+  }
+  function askDiscard(rec) {
+    const lines = rec.ch.map(c => '• ' + (c.label ? T(c.label) : c.key) + ': ' + (c.from !== undefined ? fmtChange(c, c.from) + ' → ' : '') + fmtChange(c, c.val));
+    const text = (rec.mode === 'new' ? tr('The new profile "{name}" is not made complete. These values are not saved:', { name: rec.name })
+      : tr('These values for "{name}" are not saved:', { name: rec.name })) + '\n' + (lines.length ? lines.join('\n') : '—') + '\n\n'
+      + T(tr('The guidance computer keeps the values it has now. They are not saved there until a profile is loaded or saved.'));
+    confirmAsk(T(tr('Discard the unfinished save?')), text, T(tr('Discard')), () => {
+      setPending(null); job = null; msg = ''; close(); syncBand();
+    }, true);
+    const m = ask.querySelector('.tp-ask-m'); if (m) m.style.whiteSpace = 'pre-line';
+  }
   function retryJob() { if (canAct()) startJob(job.rec, planCmds(job.rec, true), false); }
   function revertJob() {
     if (!canAct() || job.rec.mode !== 'edit') return;
@@ -8234,6 +8549,13 @@ const TabletProfiles = (() => {
         : j.state === 'lost' ? T(tr('The connection broke while saving. It is not certain that everything was saved.'))
         : T(tr('The guidance computer did not confirm all values.')), 'bad');
       if (connState !== 'connected') { line(T(tr('Waiting for the connection…')), 'bad'); return; }
+      const dead = deadEnd(j);
+      if (dead) {
+        line(T(dead), 'bad');
+        const b = btn(T(tr('Discard (do not save)')), () => askDiscard(rec), 'dan');
+        b.disabled = false; // sends nothing, so no lock applies
+        if (!canAct()) return; // nothing else would work
+      }
       if (wrongActive(rec)) {
         line(rec.mode === 'edit' ? tr('"{name}" is not active. Load it first, then send again or put the old values back.', { name: rec.name })
           : tr('The new profile is made as a copy of "{name}", which is not active. Load it first, then send again.', { name: rec.src }), 'bad');

@@ -104,6 +104,12 @@ public interface IAutoSteerService
         double easting, double northing);
 
     /// <summary>
+    /// Send PGN 100 (corrected position) to the module subnet and to AgIO's loopback
+    /// port, once per fix, as AgOpenGPS does. Seed monitors and rate controllers use it.
+    /// </summary>
+    void SendCorrectedPosition(double latitude, double longitude, double headingDegrees);
+
+    /// <summary>
     /// Update guidance results from external calculation (e.g. ViewModel guidance).
     /// Used so chart data reflects the actual steering behavior.
     /// </summary>
@@ -199,6 +205,13 @@ public interface IAutoSteerService
     /// Called by ViewModel after section control updates.
     /// </summary>
     void SetMachineState(ulong sectionBits, bool isInUTurn, byte hydLiftState = 0);
+
+    /// <summary>
+    /// Update only the section bits carried by PGN 254, 239 and 229. Called by the
+    /// host control loop on every tick, right after section control ran, so a section
+    /// edge decided between two GPS fixes goes out with that tick's PGNs (#311).
+    /// </summary>
+    void SetSectionBits(ulong sectionBits);
 
     // ═══════════════════════════════════════════════════════════════════════
     // Module Feedback (PGN 253, 250)

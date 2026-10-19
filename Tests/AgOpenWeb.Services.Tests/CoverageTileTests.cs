@@ -150,6 +150,38 @@ public class CoverageTileTests
     }
 
     [Test]
+    public void Worked_ground_with_no_display_tile_is_filled_from_detection_on_load()
+    {
+        var svc = new CoverageMapService(_store);
+        svc.SetFieldBounds(-100, 100, -100, 100);
+        PaintStrip(svc, 10, 16, 10, 20);          // display tile (0,0)
+        PaintStrip(svc, -90, -84, -90, -80);      // another display tile, so the layer isn't empty
+        svc.SaveToFile(_jobDir);
+
+        // Detection keeps the first strip; the display layer loses it (#325).
+        var displayDir = Directory.GetDirectories(CoverageDir, "s*").Single();
+        File.Delete(Path.Combine(displayDir, "0_0.tile"));
+        Assert.That(Directory.GetFiles(displayDir), Is.Not.Empty);
+
+        var reopened = Reopen();
+        Assert.That(reopened.IsPointCovered(13, 15), Is.True);
+        Assert.That(IsDisplayed(reopened, 13, 15), Is.True, "worked ground is drawn as worked");
+        Assert.That(IsDisplayed(reopened, -87, -85), Is.True, "the intact tile still loads");
+        Assert.That(IsDisplayed(reopened, 50, 50), Is.False);
+
+        reopened.SaveToFile(_jobDir);
+        Assert.That(File.Exists(Path.Combine(displayDir, "0_0.tile")), Is.True, "the repaired tile is saved");
+    }
+
+    private static bool IsDisplayed(CoverageMapService svc, double easting, double northing)
+    {
+        var (_, _, cell) = svc.DisplayDimensions!.Value;
+        var bounds = svc.DisplayBoundsWorld!.Value;
+        int x = (int)Math.Floor((easting - bounds.MinE) / cell), y = (int)Math.Floor((northing - bounds.MinN) / cell);
+        return svc.GetPaintedDisplayCells().Any(c => c.X == x && c.Y == y);
+    }
+
+    [Test]
     public void A_flipped_payload_byte_fails_the_crc()
     {
         var svc = new CoverageMapService(_store);
@@ -336,5 +368,43 @@ public class CoverageTileTests
             w.Write(bits[i]);
             i += run;
         }
+    }
+
+    // #321: the field data card's Actual area is the ground covered at least once.
+    [Test]
+    public void ActualAreaCovered_CountsAnOverlappedPassOnce()
+    {
+        var svc = new CoverageMapService(_store);
+        svc.SetFieldBounds(-100, 100, -100, 100);
+
+        PaintStrip(svc, 10, 16, 10, 30);          // 6 m x 20 m
+        double once = svc.ActualAreaCovered;
+        Assert.That(once, Is.EqualTo(120).Within(4), "about the strip; cell edges cost a little");
+        Assert.That(svc.TotalWorkedArea, Is.EqualTo(120).Within(1e-6));
+
+        PaintStrip(svc, 10, 16, 10, 30);          // the same ground again
+        Assert.That(svc.TotalWorkedArea, Is.EqualTo(240).Within(1e-6), "worked counts every pass");
+        Assert.That(svc.ActualAreaCovered, Is.EqualTo(once), "actual doesn't");
+
+        PaintStrip(svc, 13, 19, 10, 30);          // half over the first pass
+        Assert.That(svc.ActualAreaCovered, Is.EqualTo(180).Within(5));
+    }
+
+    [Test]
+    public void ActualAreaCovered_SurvivesSaveAndReopen_AndIsClearedWithTheCoverage()
+    {
+        var svc = new CoverageMapService(_store);
+        svc.SetFieldBounds(-100, 100, -100, 100);
+        PaintStrip(svc, 10, 16, 10, 30);
+        PaintStrip(svc, 10, 16, 10, 30);
+        double actual = svc.ActualAreaCovered;
+        svc.SaveToFile(_jobDir);
+
+        var reopened = Reopen();
+        Assert.That(reopened.ActualAreaCovered, Is.EqualTo(actual));
+        Assert.That(reopened.TotalWorkedArea, Is.EqualTo(240).Within(1e-6));
+
+        reopened.ClearAll();
+        Assert.That(reopened.ActualAreaCovered, Is.Zero);
     }
 }
