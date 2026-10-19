@@ -1927,6 +1927,10 @@
     .tp-result .tp-btn { align-self: flex-start; }
     /* ===== Phase 4a: product look, help, diagnosis =============================
        Accent colours come from BRAND in app.js (<style id="tb-style">, html[data-tb]). */
+    /* Upstream's "Report on GitHub" (#349) opens an issue in the upstream repository. This build
+       is the fork, so its bugs don't belong there: the button and its hint stay hidden. The
+       ZIP (Download) and the fork's diagnosis remain. */
+    :is(#br-github, #br-github-hint) { display: none !important; }
     .tb-sheet .tui-sh-body { display: flex; flex-direction: column; gap: 10px; }
     .tb-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
     .tb-link { flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; }
