@@ -7145,14 +7145,15 @@ const TabletPolish = (() => {
   // with the existing language command. Picking a language in the language panel ends that.
   // Only the device holding control does it, so an observer tablet never flips the host.
   const LANG_KEY = 'aow.ui.langChosen';
+  let langDone = false; // also in memory: with storage blocked it would switch back every second
   setInterval(() => {
-    if (!appInfo || !iHoldControl || lsGet(LANG_KEY, '')) return;
+    if (langDone || !appInfo || !iHoldControl || lsGet(LANG_KEY, '')) return;
     const de = (appInfo.languages || []).some(l => l.code === 'de');
     if (de && (appInfo.currentLanguage || 'en') === 'en') transport.send('app.setLanguage|de');
-    lsSet(LANG_KEY, 'auto');
+    lsSet(LANG_KEY, 'auto'); langDone = true;
   }, 1000);
   const langList = $('lang-list');
-  if (langList) langList.addEventListener('pointerdown', () => lsSet(LANG_KEY, 'user'), true);
+  if (langList) langList.addEventListener('pointerdown', () => { lsSet(LANG_KEY, 'user'); langDone = true; }, true);
 
   // --- Distances with a label ---------------------------------------------------------------
   // The name in the label size, the value as before: "Vorgewende 319,0 m". The upstream
