@@ -8398,7 +8398,8 @@ const TabletProfiles = (() => {
 // anything unknown stays English. Exact texts are keys (the page translates them itself);
 // texts with a variable part are rewritten on the elements that show them.
 const TabletHostText = (() => {
-  [tr('No Fix'), tr('GPS Fix'), tr('DGPS Fix'), tr('RTK Fixed'), tr('RTK Float'), tr('Connected'), tr('Caster sent an invalid reply')];
+  [tr('No Fix'), tr('GPS Fix'), tr('DGPS Fix'), tr('RTK Fixed'), tr('RTK Float'), tr('Connected'), tr('Caster sent an invalid reply'),
+   tr('Success: Connected to caster and mount point')];
   const FIX = /\b(No Fix|GPS Fix|DGPS Fix|RTK Fixed|RTK Float)\b/g;
   const PAT = [
     [/^Connecting to (.+)…$/s, x => tr('Connecting to {x}…', { x })],
@@ -8428,8 +8429,8 @@ const TabletHostText = (() => {
       }
     }
   });
-  // Where the host's texts are shown: status bar, GPS popup, Network IO, System Data.
-  const IDS = ['sb-fix', 'sb-gps-d', 'gc-fix', 'nio-ntrip-status', 'nio-ntrip-rx', 'sd-fix'];
+  // Where the host's texts are shown: status bar, GPS popup, Network IO, System Data, NTRIP test.
+  const IDS = ['sb-fix', 'sb-gps-d', 'gc-fix', 'nio-ntrip-status', 'nio-ntrip-rx', 'sd-fix', 'nte-teststatus'];
   for (const id of IDS) { const e = document.getElementById(id); if (e) obs.observe(e, { subtree: true, childList: true, characterData: true }); }
   return { de };
 })();
