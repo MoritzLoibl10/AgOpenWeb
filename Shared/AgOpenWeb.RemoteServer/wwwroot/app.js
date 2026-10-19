@@ -6469,6 +6469,7 @@ const TabletTerminal = (() => {
     u: xteBox.querySelector('.x-unit'), c: xteBox.querySelector('.x-cap') };
   // Cross-track error → { val, unit, dir: -1 steer left · 0 on line · 1 steer right, cap }.
   // Sign as the light bar: + = right of the line, so the way to steer is left.
+  const steerBar = () => !!(config && config.autosteer && config.autosteer.steerBarEnabled);
   function xteInfo() {
     const xte = tick.crossTrackError || 0, a = Math.abs(xte);
     let raw, unit;
@@ -6478,6 +6479,12 @@ const TabletTerminal = (() => {
     const dir = a < 0.05 ? 0 : xte > 0 ? -1 : 1;
     const val = tuiDec(raw);
     const pass = tick.op && !tick.op.contour ? tr('Pass {n}', { n: Math.abs((tick.op.passNumber | 0)) + 1 }) : '';
+    // Steer-bar style: the light bar and #lb show the steer-angle error, which can point the
+    // other way; the readout then only gives the distance, without a steering direction.
+    if (steerBar()) {
+      const w = I18n.text(tr('Cross-track'));
+      return { val, unit, dir: null, cap: pass ? w + ' · ' + pass : w };
+    }
     // Translated here: the caption is joined from two strings, so the page translator can't match it.
     const word = I18n.text(dir < 0 ? tr('Steer left') : dir > 0 ? tr('Steer right') : tr('On line'));
     return { val, unit, dir, cap: pass ? word + ' · ' + pass : word };
@@ -6490,6 +6497,10 @@ const TabletTerminal = (() => {
       xteBox.classList.toggle('show', want);
       if (want) root.setAttribute('data-tui-xte', ''); else root.removeAttribute('data-tui-xte');
       stackNow = true; // re-stack the light bar and HUDs this frame
+    }
+    if (steerBar() !== root.hasAttribute('data-tui-steerbar')) {
+      if (steerBar()) root.setAttribute('data-tui-steerbar', ''); else root.removeAttribute('data-tui-steerbar');
+      stackNow = true;
     }
     if (!want) { xteLast = ''; return; }
     const i = tuiLive() ? xteInfo() : { val: '—', unit: '', dir: null, cap: I18n.text(tr('No data')) };
@@ -6518,7 +6529,7 @@ const TabletTerminal = (() => {
     tuiBarDy = y - 54; // lightbarSk draws at y = 54
     if (bar) y += 16 + 6;
     const lbY = y;
-    if (lbEl && lbEl.style.display !== 'none' && !root.hasAttribute('data-tui-xte')) y += lbEl.offsetHeight + 4;
+    if (lbEl && lbEl.style.display !== 'none' && (!root.hasAttribute('data-tui-xte') || root.hasAttribute('data-tui-steerbar'))) y += lbEl.offsetHeight + 4;
     const key = lbY + ',' + y + ',' + xb + ',' + xr;
     if (key === yKey) return;
     yKey = key;

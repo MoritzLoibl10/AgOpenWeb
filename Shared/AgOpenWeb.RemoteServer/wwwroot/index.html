@@ -1431,7 +1431,8 @@
     #lb { top: var(--tui-y-lb, calc(74px + var(--tui-dy) + var(--sat))); }
     #headland-hud, #reverse-badge { top: var(--tui-y-hud, calc(120px + var(--tui-dy) + var(--sat))); }
 
-    :root[data-tui-xte] #lb { display: none !important; }
+    /* In steer-bar style #lb carries the steer-angle error (degrees), which the readout does not show. */
+    :root[data-tui-xte]:not([data-tui-steerbar]) #lb { display: none !important; }
     #onscreenbtns, #uturn-indicator { top: max(calc(96px + var(--tui-dy) + var(--sat)), var(--tui-xte-b, 0px)); }
     /* With the cross-track readout shown, the U-turn indicator sits to its right, on the same line. */
     :root[data-tui-xte] #uturn-indicator { top: var(--tui-xte-t); left: var(--tui-xte-r); right: auto; }
