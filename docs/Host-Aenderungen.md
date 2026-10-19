@@ -28,7 +28,7 @@ Fix-Qualität 1–8 und plausible Koordinaten.
 |---|---|---|
 | `Shared/AgOpenWeb.Services/NtripClientService.cs` | GGA-Auswahl (`TryBuildGga`, `UsableGgaFix`, letzte Position mit Fix, keine Ersatzposition); erste GGA sofort nach der Annahme (NTRIP 1 auch direkt nach der Anfrage), dann im Intervall (`StartGgaTimer`); Anfrage über `NtripRequest`; Caster-Antwort und GGA-Zustand in Status und Log (`DescribeCasterReply`, `DescribeGgaState`, `KeepEarlyBody`); Grad/Minuten ohne „60.0000“ (`ToDegreesMinutes`) | Upstream ändert diese Datei oft (RTCM-Weiterleitung). Konflikte erwartet in `ConnectCoreAsync`, `SendNtripRequestAsync`, `ReceiveLoop` (Annahme-, Ablehnungs- und FIN-Zweig), `GgaTimerCallback`. RTCM-Queue, Pacing und Watchdog sind unverändert; dort upstream übernehmen. |
 | `Shared/AgOpenWeb.Services/NtripRequest.cs` | **neu**: Anfrage für NTRIP 1 und 2 | keine Konflikte möglich |
-| `Shared/AgOpenWeb.Services/NtripResponse.cs` | `Preview()` (erste Zeilen der Antwort); NTRIP 2 „200 OK“ + `Content-Type: gnss/sourcetable` = Mountpoint unbekannt | kleine Ergänzungen, leicht nachzuziehen |
+| `Shared/AgOpenWeb.Services/NtripResponse.cs` | `Preview()` (erste Zeilen der Antwort, `Authorization`-Wert als `***`); NTRIP 2 „200 OK“ + `Content-Type: gnss/sourcetable` = Mountpoint unbekannt; „ICY 401“ = Anmeldung abgelehnt | kleine Ergänzungen, leicht nachzuziehen |
 | `Shared/AgOpenWeb.Services/NtripConnectionTester.cs` | nutzt `NtripRequest` und die Profilversion; zeigt die rohe Antwort bei Fehlern | Parameter `ntripVersion` (Standard 1) |
 | `Shared/AgOpenWeb.Services/Interfaces/INtripClientService.cs` | `NtripConfiguration.HttpVersion` (war ungenutzt) ersetzt durch `int NtripVersion` (Standard 1) | falls upstream `HttpVersion` zu nutzen beginnt: zusammenlegen |
 | `Shared/AgOpenWeb.Models/Ntrip/NtripProfile.cs` | `int NtripVersion` (Standard 1, alte Profil-JSON ohne Feld = 1) | Feld anhängen |
@@ -44,8 +44,20 @@ Web-Client (gehört zur normalen Regel, steht hier wegen des Wire-Formats):
 „NTRIP version“ (`#nte-ver`) und hängen sie an `ntrip.save` und `ntrip.test` an; `en.json`
 hat drei neue Texte.
 
+Nachträge aus der Gesamtprüfung (gleiche Dateien, je ein Commit):
+- Die letzte Position mit Fix ersetzt eine fehlende höchstens 5 Minuten
+  (`MaxLastFixAgeSeconds`); danach geht keine GGA mehr raus. `GgaFix` ist eine Klasse
+  (kein zerrissenes Lesen zwischen Timer und Verbindungsaufbau).
+- Eine NTRIP-1-Ablehnung ohne Leerzeile („ERROR - Bad Password“ und Schließen, „ICY 401“)
+  beendet den Versuch wie ein HTTP 401 (`StopOnRefusal`), statt alle 15 s neu zu verbinden;
+  auch wenn das Schließen als Reset ankommt.
+- Der GGA-Timer entsteht im Session-Lock vor der Anfrage (vorher konnte eine sehr schnelle
+  Annahme ihn noch nicht finden; dann ging in der Sitzung keine GGA raus).
+- Eine abgebrochene Reconnect-Schleife verbindet nicht mehr mit der alten Konfiguration.
+- Die Logzeile zur ersten GGA nennt nur Fix-Qualität und Satelliten, nicht die Position.
+
 Tests: `Tests/AgOpenWeb.Services.Tests/NtripVrsTests.cs` (Anfrageformat, Antworten, GGA,
-simulierter VRS-Caster). Doku: Abschnitt „NTRIP Connection Format“ in `CLAUDE.md`.
+Altersgrenze, NTRIP-1-Ablehnung, geschwärzte Anmeldung, simulierter VRS-Caster). Doku: Abschnitt „NTRIP Connection Format“ in `CLAUDE.md`.
 
 ### Verhalten, das sich für Nutzer ändert
 
@@ -54,6 +66,17 @@ simulierter VRS-Caster). Doku: Abschnitt „NTRIP Connection Format“ in `CLAUD
 - Ohne GPS-Fix wird keine GGA gesendet. Vorher ging die Ersatzposition in Kansas raus.
 - Die manuelle GGA-Position (`UseManualPosition`, in der UI derzeit nicht einstellbar)
   meldet Fix-Qualität 1 statt 4.
+- Ohne Fix ersetzt die letzte Position mit Fix eine fehlende nur noch 5 Minuten lang.
+- Eine NTRIP-1-Ablehnung („ERROR …“, „ICY 401“) stoppt mit „Rejected: …“ statt endlos neu
+  zu verbinden. Nach Ändern des Profils wird neu verbunden.
+- Die Anfrage schickt `Connection: close` statt `keep-alive`; NTRIP 1 schickt keinen `Host`
+  mehr, NTRIP 2 den `Host` mit Port (außer Port 80).
+- Benutzer und Passwort werden als UTF-8 kodiert (vorher ASCII): Bei Umlauten ergibt das
+  eine andere Base64-Zeichenkette als vorher.
+- Der Verbindungstest nutzt den User-Agent `NTRIP AgOpenWeb/1.0` (vorher `/Test`), schickt
+  `Authorization` auch, wenn nur ein Passwort gesetzt ist, und nutzt die Version des Profils
+  (Standard 1; vorher immer NTRIP 2).
+- Scheitert bei NTRIP 1 das Senden der frühen GGA direkt nach der Anfrage, wird neu verbunden.
 - Nicht auf echter Hardware und nicht gegen den echten APOS-Caster getestet; nur gegen
   einen simulierten Caster.
 
@@ -79,9 +102,11 @@ tablet-ui-Blocks betrifft:
 | `Tools/i18n-extract.py` | `--check` schlägt fehl, wenn `de.json` einen englischen Schlüssel nicht abdeckt (`REQUIRED = ("de",)`); veraltete Schlüssel werden nur gemeldet | kleiner Block vor `main()` |
 
 Deutsch als Standard: Der Client schickt einmal je Gerät den vorhandenen Befehl
-`app.setLanguage|de`, wenn der Host noch Englisch spricht (`aow.ui.langChosen` im localStorage).
-Meldungen, die der Host als fertigen Text schickt (z. B. „RTK Fixed“, NTRIP-Status), bleiben
-englisch.
+`app.setLanguage|de`, wenn der Host noch Englisch spricht (`aow.ui.langChosen` im localStorage;
+zusätzlich ein Merker im Speicher, damit es bei gesperrtem localStorage nicht jede Sekunde
+wieder umstellt). Meldungen, die der Host als fertigen Text schickt, übersetzt seit Phase 2c
+`TabletHostText` teilweise (Fix-Texte, NTRIP-Status, NTRIP-Verbindungstest); Toasts aus
+`ReportFailure` bleiben englisch (siehe `docs/Offene-Punkte.md`).
 
 ## 3. Phase 2c: Arbeitsbreite ohne Ersatzwert (Oktober 2026)
 
@@ -130,3 +155,28 @@ Web-Client (gehört zur normalen Regel): Abschnitt „Phase 4a“ in `app.js` (`
 `brand-512.png`. Upstream-Teile werden nur aus dem Block heraus verändert: `renderAbout` ist
 umhüllt (Info-Seite), `#about` bekommt eigenen Inhalt, das Hilfe-Panel einen Knopf
 „Kurzanleitung“.
+
+## 5. Ergänzungen aus der Gesamtprüfung (Oktober 2026)
+
+Keine neue Host-Ausnahme außer den NTRIP-Nachträgen in §1. Für Rebases außerdem wichtig:
+
+| Datei / Stelle | Was | Rebase-Hinweis |
+|---|---|---|
+| `.github/workflows/fork-prerelease.yml` | **neu** (Phase 4a): Testversionen als Pre-Release; Fußtext mit Lizenz und Quellcode-Commit; Warnung, solange der Produktname `[PRODUKTNAME]` ist | Fork-Datei, keine Konflikte möglich; Signaturprüfung und Secrets unverändert |
+| `app.js` NTRIP-Editor (upstream-Teil) | `#nte-ver` lesen und schreiben, Version an `ntrip.save`/`ntrip.test` anhängen (siehe §1) | nicht mit `fork:` kommentiert: bei Konflikten in `openNtripEditor`/Speichern/Test nach `nte-ver` suchen |
+| `index.html` NTRIP-Editor | `<select id="nte-ver">` | eine Zeile |
+| `index.html` upstream-`<style>` | Regel `.fb-twmiss` (letzte Zeilen, nutzt `var(--tui-warn)` aus dem Block) | eine Regel |
+| `index.html` Start | `document.title` und der Manifest-Link werden zur Laufzeit aus `BRAND` gesetzt (eigenes `data:`-Manifest) | upstream-`manifest.json` bleibt; ob die PWA-Installation mit dem `data:`-Manifest funktioniert, ist nicht geprüft |
+| `Tools/ui-audit/restart-host.sh` | leert nur Ordner unter `/tmp` oder mit `.ui-audit` | Fork-Werkzeug |
+
+Der tablet-ui-Block **umhüllt** diese upstream-Funktionen (Neuzuweisung der globalen
+Funktion). Benennt upstream eine davon um oder ändert ihre Signatur, wirft die Umhüllung beim
+Laden einen Fehler; nach jedem Rebase prüfen:
+`lnOpen`, `lnCloseAll`, `renderAbout`, `updateLineWidths`, `drawGroundTextureSk`,
+`lightbarSk`, `fmtUnit`, `unitLabel`, `fmtRate`, `updateHeadlandHud`, `renderUTurnIndicator`.
+Ein schneller Test: `node --check app.js`, dann die Seite laden und auf `pageerror` achten
+(die Flows unter `Tools/ui-audit` tun das).
+
+Upstream-Knöpfe, die der Block über ihre ID anspricht (Schnellleiste, „Mehr“-Kacheln):
+siehe `QPOOL` in `TabletTerminal`. Upstream entfernt `#bn-autotrack` und fügt `rn-cycle`,
+`rn-cycleback`, `rn-autotrack`, `rn-isobus` hinzu (siehe `docs/Offene-Punkte.md`).
