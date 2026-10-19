@@ -91,6 +91,8 @@ public static class NtripResponse
             return (NtripReply.Rejected, "Mount point not found (the caster sent its source table)");
         if (first.StartsWith("ICY 200", StringComparison.Ordinal))
             return (NtripReply.Accepted, "");
+        if (first.StartsWith("ICY 401", StringComparison.Ordinal)) // NTRIP 1 casters that answer in ICY form
+            return (NtripReply.Rejected, "Authentication failed (check username and password)");
         if (first.StartsWith("ERROR", StringComparison.OrdinalIgnoreCase))
             return (NtripReply.Rejected, first); // NTRIP 1, e.g. "ERROR - Bad Password"
 

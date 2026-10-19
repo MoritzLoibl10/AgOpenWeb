@@ -69,6 +69,8 @@ public class NtripVrsTests
     [TestCase("ICY 200 OK", NtripReply.Accepted)]
     [TestCase("HTTP/1.1 200 OK\r\nNtrip-Version: Ntrip/2.0\r\nContent-Type: gnss/data", NtripReply.Accepted)]
     [TestCase("HTTP/1.1 200 OK\r\nNtrip-Version: Ntrip/2.0\r\nContent-Type: gnss/sourcetable", NtripReply.Rejected)]
+    [TestCase("ICY 401 Unauthorized", NtripReply.Rejected)]
+    [TestCase("ERROR - Bad Password", NtripReply.Rejected)]
     public void Classify_Ntrip1And2(string header, NtripReply expected) =>
         Assert.That(NtripResponse.Classify(header).Reply, Is.EqualTo(expected));
 
@@ -349,6 +351,27 @@ public class NtripVrsTests
         string msg = events.Last().Message!;
         Assert.That(msg, Does.Contain("Authentication failed"));
         Assert.That(msg, Does.Contain("HTTP/1.1 401 Unauthorized | WWW-Authenticate: Basic realm=\"/APOS_Standard\""));
+        svc.Dispose();
+    }
+
+    // NTRIP 1 casters often refuse with one line and a close, no blank line: that is still a
+    // refusal, not a reason to reconnect every 15 s.
+    [TestCase("ERROR - Bad Password\r\n")]
+    [TestCase("ICY 401 Unauthorized\r\n\r\n")]
+    public async Task Ntrip1Rejection_StopsRetrying(string reply)
+    {
+        using var caster = new FakeCaster(async (s, c) =>
+        {
+            // As a caster does: read the request (and the GGA after it), answer, close.
+            WaitFor(() => c.Ggas.Length > 0, 1000);
+            await Send(s, reply);
+        });
+        var svc = Client(Gps(Fix(1)), out var events);
+        await svc.ConnectAsync(Config(caster.Port, 1));
+        Assert.That(WaitFor(() => events.Any(e => e.Message?.StartsWith("Rejected") == true), 3000), Is.True,
+            string.Join(" / ", events.Select(e => e.Message)));
+        Thread.Sleep(2500); // the first backoff step is 1 s
+        Assert.That(caster.Accepted, Is.EqualTo(1), string.Join(" / ", events.Select(e => e.Message)));
         svc.Dispose();
     }
 

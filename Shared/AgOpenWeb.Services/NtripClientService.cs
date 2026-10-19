@@ -501,9 +501,13 @@ public class NtripClientService : INtripClientService, IDisposable
                     if (!headerReceived)
                     {
                         _replyPreview = NtripResponse.Preview(_headerBuffer.ToArray());
-                        reason = _headerBuffer.Count > 0
-                            ? $"{NtripResponse.Classify(Encoding.ASCII.GetString(_headerBuffer.ToArray())).Reason}. {DescribeCasterReply()}"
-                            : $"Caster closed the connection without answering; {DescribeGgaState()}";
+                        if (_headerBuffer.Count > 0)
+                        {
+                            if (StopOnRefusal(gen, out string said)) return;
+                            reason = said;
+                        }
+                        else
+                            reason = $"Caster closed the connection without answering; {DescribeGgaState()}";
                     }
                     else if (!_rtcmSeen)
                         reason = "Caster closed the connection before sending corrections (mount point or account rejected?). "
@@ -523,11 +527,33 @@ public class NtripClientService : INtripClientService, IDisposable
             {
                 // A socket closed by Disconnect/Teardown lands here too — not a failure.
                 if (cancellationToken.IsCancellationRequested) break;
+                // A refusal followed by a reset (our GGA hit the closed socket) is a refusal too.
+                if (!headerReceived && _headerBuffer.Count > 0)
+                {
+                    _replyPreview = NtripResponse.Preview(_headerBuffer.ToArray());
+                    if (StopOnRefusal(gen, out _)) break;
+                }
                 _logger.LogError(ex, "Receive error");
                 TriggerReconnect($"receive error: {ex.Message}");
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// A reply that ended without its blank line (the caster closed or reset the connection):
+    /// an NTRIP 1 refusal ("ERROR - Bad Password", "ICY 401") often looks like that. A refusal
+    /// stops the client, as a complete one does; anything else gives the reason for a retry.
+    /// </summary>
+    private bool StopOnRefusal(int gen, out string said)
+    {
+        var (reply, why) = NtripResponse.Classify(Encoding.ASCII.GetString(_headerBuffer.ToArray()));
+        said = why.Contains(_replyPreview, StringComparison.Ordinal) ? why : $"{why}. {DescribeCasterReply()}";
+        if (reply != NtripReply.Rejected) return false;
+        _logger.LogWarning("NTRIP caster rejected the request: {Response}",
+            NtripResponse.Preview(_headerBuffer.ToArray(), maxLines: 12, maxChars: 1000));
+        Teardown("Rejected: " + said, gen);
+        return true;
     }
 
     /// <summary>Keep the first bytes after the reply until RTCM shows up, to show them if the
