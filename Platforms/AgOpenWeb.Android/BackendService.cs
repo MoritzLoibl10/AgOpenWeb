@@ -186,7 +186,7 @@ internal sealed class BackendService : Service
         var builder = OperatingSystem.IsAndroidVersionAtLeast(26)
             ? new Notification.Builder(this, ChannelId)
             : new Notification.Builder(this);
-        builder.SetContentTitle("AgOpenWeb")
+        builder.SetContentTitle(Brand.ProductName)
             .SetContentText("Guidance host running — open the app or browse to this device on :5174")
             .SetSmallIcon(Resource.Drawable.ic_start_agopenweb)
             .SetCategory(Notification.CategoryService)
@@ -201,7 +201,7 @@ internal sealed class BackendService : Service
         if (manager == null) return;
         // Drop the old badged channel so it doesn't linger in the app's notification settings.
         manager.DeleteNotificationChannel(OldChannelId);
-        var channel = new NotificationChannel(ChannelId, "AgOpenWeb host", NotificationImportance.Low)
+        var channel = new NotificationChannel(ChannelId, Brand.ProductName, NotificationImportance.Low)
         {
             Description = "Keeps the guidance host running in the background.",
         };
