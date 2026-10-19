@@ -83,6 +83,16 @@ public class NtripVrsTests
         Assert.That(NtripResponse.Preview(Array.Empty<byte>()), Is.EqualTo(""));
     }
 
+    [Test]
+    public void Preview_HidesCredentials()
+    {
+        var echo = Encoding.ASCII.GetBytes("GET /M HTTP/1.0\r\nAuthorization: Basic dXNlcjpwYXNz\r\nUser-Agent: x\r\n\r\n");
+        string p = NtripResponse.Preview(echo);
+        Assert.That(p, Does.Not.Contain("dXNlcjpwYXNz"));
+        Assert.That(p, Is.EqualTo("GET /M HTTP/1.0 | Authorization: Basic *** | User-Agent: x"));
+        Assert.That(NtripResponse.Preview(echo, maxChars: 30), Does.Not.Contain("dXNl"));
+    }
+
     // ── GGA ──────────────────────────────────────────────────────────────
 
     private static GpsData Fix(int quality, double lat = 48.2082, double lon = 16.3738, int sats = 9) => new()
