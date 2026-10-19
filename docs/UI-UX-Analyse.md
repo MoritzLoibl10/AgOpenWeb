@@ -447,7 +447,8 @@ Neue Texte laufen über `tr('…')` und `Tools/i18n-extract.py` (siehe `Docs/TRA
   Maß, Einheit an jedem Feld, Erweitertes eingeklappt, gelben Warnungen (nie Korrektur).
   Der Assistent sendet erst beim Speichern, alles in einem Zug, und prüft danach, ob der Host
   alle Werte zeigt; reißt die Verbindung ab, sagt er das und bietet „Erneut senden“ bzw.
-  „Alte Werte wiederherstellen“. Ändern nur im Stand und bei Lenkung AUS. Bekannte Host-Texte
+  „Alte Werte wiederherstellen“; bis eins davon bestätigt ist, zeigt das Fahrbild ein rotes Band
+  (auch nach Neuladen). Ändern nur im Stand und bei Lenkung AUS. Bekannte Host-Texte
   (Fix, NTRIP-Status) auf Deutsch. Arbeitsbreite ohne 6-m-Ersatzwert im Schlag-Editor und in
   der Leistung.
 - Offen: U6–U8, U13 (nur nach Abstimmung), U14–U17.

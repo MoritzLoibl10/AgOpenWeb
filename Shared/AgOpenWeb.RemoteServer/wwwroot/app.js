@@ -7322,9 +7322,10 @@ const TabletProfiles = (() => {
   function close() { sheet.classList.remove('open'); scrim.classList.remove('open'); hideAsk(); view = 'pick'; W = null; }
   function tryClose() {
     if (view !== 'wiz' || !W) { close(); return; }
-    if (W.save && W.save.state === 'sending') return; // wait for the result
-    if (W.save && W.save.state === 'done') { close(); return; }
-    confirmAsk(tr('Leave the assistant?'), W.save ? tr('The saving was not confirmed. Check the values in the profile.') :
+    const wj = wjob();
+    if (wj && wj.state === 'sending') return; // wait for the result
+    if (wj && (wj.state === 'done' || wj.state === 'reverted')) { close(); return; }
+    confirmAsk(tr('Leave the assistant?'), wj ? tr('The saving was not confirmed. Check the values in the profile.') :
       tr('Nothing has been sent; the profile stays as it was.'), tr('Leave'), () => { close(); });
   }
 
@@ -7426,6 +7427,13 @@ const TabletProfiles = (() => {
     const lock = lockReason();
     if (!profiles) { body.textContent = T(tr('Waiting for the profiles…')); foot.innerHTML = ''; return; }
     if (lock) body.appendChild(Object.assign(el('div', 'tp-lock'), { textContent: T(lock) }));
+    if (pending) {
+      const pb = el('button', 'tp-pend inline', '<span class="tp-pend-t"></span><span class="tp-pend-s"></span>');
+      pb.querySelector('.tp-pend-t').textContent = T(tr('Profile not completely saved – check the values'));
+      pb.querySelector('.tp-pend-s').textContent = pending.kind === 'vehicle' ? tr('Vehicle "{name}"', { name: pending.name }) : tr('Tool "{name}"', { name: pending.name });
+      onTap(pb, () => openRecover());
+      body.appendChild(pb);
+    }
     body.append(section('vehicle'), section('tool'));
     if (msg) body.appendChild(Object.assign(el('div', 'tp-msg'), { textContent: msg }));
     foot.innerHTML = '';
@@ -7594,6 +7602,7 @@ const TabletProfiles = (() => {
 
   function startWizard(kind, mode) {
     if (lockReason() || !config || !config.vehicle || !config.tool || !profiles) return;
+    if (pending) { openRecover(); return; } // an unfinished save comes first
     const src = activeName(kind);
     const v = config.vehicle, t = config.tool;
     W = { kind, mode, src, name: mode === 'edit' ? src : '', step: 0, focus: '', save: null, sym: null,
@@ -7734,7 +7743,7 @@ const TabletProfiles = (() => {
     W.steps.forEach((s, i) => {
       const b = el('button', 'tp-st' + (i < W.step ? ' done' : i === W.step ? ' cur' : ''));
       b.textContent = (i + 1) + ' ' + stepTitle(s) + (i < W.step ? ' ✓' : '');
-      b.disabled = i > W.step || !!(W.save && W.save.state === 'sending');
+      b.disabled = i > W.step || !!wjob();
       onTap(b, () => { W.step = i; renderWizard(); });
       steps.appendChild(b);
     });
@@ -7756,9 +7765,9 @@ const TabletProfiles = (() => {
   }
   function renderWizFoot() {
     foot.innerHTML = '';
-    const s = W.steps[W.step], sending = W.save && W.save.state === 'sending';
+    const s = W.steps[W.step], wj = wjob(), sending = wj && wj.state === 'sending';
     const back = el('button', 'tp-btn'); back.textContent = '← ' + T(W.step === 0 ? tr('Cancel') : tr('Back'));
-    back.disabled = !!sending || (W.save && W.save.state === 'done');
+    back.disabled = !!wj;
     onTap(back, () => { if (W.step === 0) tryClose(); else { W.step--; renderWizard(); } });
     foot.append(back, el('span', 'tp-grow'));
     if (s !== 'check') {
@@ -7766,9 +7775,9 @@ const TabletProfiles = (() => {
       next.dataset.role = 'next';
       onTap(next, () => { if (stepOk()) { W.step++; renderWizard(); } });
       foot.appendChild(next);
-    } else if (W.save && (W.save.state === 'lost' || W.save.state === 'unconfirmed')) {
+    } else if (wj && wj.state !== 'done' && wj.state !== 'reverted') {
       // the result box offers "send again" / "put the old values back"
-    } else if (!W.save || W.save.state !== 'done') {
+    } else if (!wj) {
       const save = el('button', 'tp-btn pri big'); save.dataset.role = 'save';
       save.textContent = '✓ ' + T(tr('Save'));
       onTap(save, () => doSave());
@@ -7970,7 +7979,7 @@ const TabletProfiles = (() => {
   function syncSaveBtn() {
     const b = foot.querySelector('[data-role="save"]');
     if (!b || !W) return;
-    const lock = lockReason(), sending = W.save && W.save.state === 'sending';
+    const lock = lockReason(), sending = !!wjob();
     b.disabled = !!lock || !!sending || problems().length > 0;
     const li = body.querySelector('.tp-lockline');
     if (li) { li.hidden = !lock; li.textContent = lock ? T(lock) : ''; }
@@ -8061,121 +8070,232 @@ const TabletProfiles = (() => {
   // and the connection stayed up a moment longer (profile.save is the last command). If the
   // connection drops on the way, this says so and offers to send the same commands again
   // (they set absolute values) or, when editing, to put the old values back.
-  function plan(retry) {
-    const ch = changes(), cmds = [], isV = W.kind === 'vehicle';
-    if (W.mode === 'new') {
-      const exists = listOf(W.kind).some(p => sameName(p.name, W.name));
-      if (!exists || !retry) cmds.push('profile.new|' + W.kind + '\t' + W.name);          // copy of the active profile
-      cmds.push((isV ? 'profile.configureVehicle|' : 'profile.configureTool|') + W.name); // make the copy active
+  // From sending until the host confirms, the save is kept on this device
+  // (aow.ui.profilePending), so a red band in the driving view shows an unfinished save, also
+  // after a reload, until "send again" or "put the old values back" has been confirmed.
+  const PEND_KEY = 'aow.ui.profilePending';
+  let pending = null, job = null; // job: { rec, state, t0, okAt, revert, expect, k }
+  try { const r = JSON.parse(lsGet(PEND_KEY, '') || 'null'); if (r && r.v === 1 && Array.isArray(r.ch) && r.name) pending = r; } catch (_) { /* unreadable: none */ }
+  if (pending) job = { rec: pending, state: 'lost', reloaded: true };
+  function setPending(r) { pending = r; lsSet(PEND_KEY, r ? JSON.stringify(r) : null); syncBand(); }
+  const wjob = () => (job && W && W.rec && job.rec === W.rec ? job : null); // this assistant's save
+
+  function makeRec() {
+    const t = W.kind === 'tool';
+    return { v: 1, kind: W.kind, mode: W.mode, name: W.mode === 'new' ? W.name : W.src, src: W.src, ch: changes(),
+      baseToolType: W.baseToolType, nSecBase: t ? W.nSec.base : 0, baseWidths: t ? W.baseWidths.slice(0, 64) : [], t: Date.now() };
+  }
+  function planCmds(rec, retry) {
+    const cmds = [], isV = rec.kind === 'vehicle';
+    if (rec.mode === 'new') {
+      const exists = listOf(rec.kind).some(p => sameName(p.name, rec.name));
+      if (!(retry && exists)) cmds.push('profile.new|' + rec.kind + '\t' + rec.name);        // copy of the active profile
+      cmds.push((isV ? 'profile.configureVehicle|' : 'profile.configureTool|') + rec.name); // make the copy active
     }
-    for (const c of ch) cmds.push('config.set|' + c.key + ':' + c.send);
+    for (const c of rec.ch) cmds.push('config.set|' + c.key + ':' + c.send);
     cmds.push('profile.save');
-    return { cmds, ch };
+    return cmds;
   }
-  function expectOk(ch) {
-    if (!config || !profiles) return false;
-    if (activeName(W.kind) !== (W.mode === 'new' ? W.name : W.src)) return false;
-    const near = (a, b) => Number.isFinite(+a) && Math.abs(+a - +b) <= 1e-6 * Math.max(1, Math.abs(+b));
-    for (const c of ch) {
-      const [sec, f] = c.key.split('.');
-      let got;
-      if (c.key === 'tool.type') { // a harvester takes front fixed whatever is sent (host, #111)
-        const want = (config.vehicle.type | 0) === 1 ? 'front' : c.val;
-        if (config.tool.type !== (TOOL_TYPES.find(x => x[0] === want) || [])[1]) return false;
-        continue;
-      }
-      if (c.key === 'tool.sectionWidth') got = (config.tool.sectionWidths || [])[c.idx];
-      else got = config[sec] && config[sec][f];
-      if (!near(got, c.val)) return false;
+  // Edit only: the values from before, exactly as the host had sent them.
+  function revertList(rec) {
+    const ex = [];
+    for (const c of rec.ch) {
+      if (c.key === 'tool.sectionWidth') { if (c.idx < rec.nSecBase) ex.push({ key: c.key, idx: c.idx, val: rec.baseWidths[c.idx] }); continue; }
+      if (c.key === 'tool.numSections') { ex.push({ key: c.key, val: rec.nSecBase }); continue; }
+      ex.push({ key: c.key, val: c.from });
     }
-    return true;
+    // A harvester forces the tool to front fixed: put the tool's attach back too.
+    if (rec.kind === 'vehicle' && rec.ch.some(c => c.key === 'vehicle.type')) {
+      const tt = TOOL_TYPES.find(x => x[1] === rec.baseToolType); if (tt) ex.push({ key: 'tool.type', val: tt[0] });
+    }
+    if (rec.kind === 'tool' && rec.ch.some(c => c.key === 'tool.numSections'))
+      for (let i = 0; i < rec.nSecBase; i++) if (!ex.some(e => e.idx === i)) ex.push({ key: 'tool.sectionWidth', idx: i, val: rec.baseWidths[i] });
+    return ex;
   }
-  function doSave(retry) {
+  function hostVal2(c) {
+    if (!config) return undefined;
+    if (c.key === 'tool.sectionWidth') return (config.tool.sectionWidths || [])[c.idx];
+    if (c.key === 'tool.type') return (TOOL_TYPES.find(x => x[1] === config.tool.type) || [])[0];
+    const [sec, f] = c.key.split('.'); return config[sec] && config[sec][f];
+  }
+  function valueOk(c) {
+    const got = hostVal2(c);
+    if (c.key === 'tool.type') return got === ((config.vehicle.type | 0) === 1 ? 'front' : c.val); // harvester: front (host, #111)
+    return Number.isFinite(+got) && got !== undefined && Math.abs(+got - +c.val) <= 1e-6 * Math.max(1, Math.abs(+c.val));
+  }
+  function matches(rec, list) {
+    if (!config || !profiles || activeName(rec.kind) !== rec.name) return false;
+    return list.every(valueOk);
+  }
+  const wrongActive = rec => rec.mode === 'edit' && profiles && activeName(rec.kind) !== rec.name;
+  function startJob(rec, cmds, isRevert) {
+    for (const c of cmds) transport.send(c);
+    job = { rec, state: 'sending', t0: performance.now(), okAt: 0, revert: !!isRevert, expect: isRevert ? revertList(rec) : rec.ch };
+    setPending(rec); // stays until the host confirms
+    refreshJob(true);
+  }
+  function canAct() { return !!job && connState === 'connected' && !lockReason() && !wrongActive(job.rec); }
+  function retryJob() { if (canAct()) startJob(job.rec, planCmds(job.rec, true), false); }
+  function revertJob() {
+    if (!canAct() || job.rec.mode !== 'edit') return;
+    const ex = revertList(job.rec);
+    startJob(job.rec, ex.map(e => 'config.set|' + e.key + ':' + (e.idx != null ? e.idx + ',' : '') + e.val).concat(['profile.save']), true);
+  }
+  // Edit, other profile active (e.g. after a reload): load the one the save was for.
+  function loadTarget() {
+    if (!job || connState !== 'connected' || lockReason()) return;
+    const r = job.rec;
+    transport.send('profile.load|' + (r.kind === 'vehicle' ? r.name + '\t' + profiles.activeTool : profiles.activeVehicle + '\t' + r.name));
+  }
+  function doSave() {
     if (!W || lockReason() || problems().length) return;
-    if (W.mode === 'new' && !retry) {
+    if (pending && !wjob()) { openRecover(); return; } // an unfinished save comes first
+    if (W.mode === 'new') {
       const p = nameProblem(W.kind, W.name);
       if (p) { W.step = W.steps.indexOf('name'); renderWizard(); W.nameErr && (W.nameErr.textContent = p); return; }
     }
-    if (W.mode === 'edit' && activeName(W.kind) !== W.src) { W.save = { state: 'stale' }; renderResult(); return; }
-    const { cmds, ch } = plan(retry);
-    if (connState !== 'connected') { W.save = { state: 'offline', ch }; renderResult(); return; }
-    for (const c of cmds) transport.send(c);
-    if (W.kind === 'tool') { const nm = W.mode === 'new' ? W.name : W.src; if ((W.sym || '') !== (W.symBase || '') || W.mode === 'new') lsSet(iconKey(nm), W.sym || null); }
-    W.save = { state: 'sending', ch, t0: performance.now(), okAt: 0, wasDown: false };
-    renderWizard();
+    if (W.mode === 'edit' && activeName(W.kind) !== W.src) { W.err = 'stale'; renderResult(); return; }
+    if (connState !== 'connected') { W.err = 'offline'; renderResult(); return; }
+    W.err = '';
+    const rec = makeRec();
+    W.rec = rec;
+    if (W.kind === 'tool') { const nm = rec.name; if ((W.sym || '') !== (W.symBase || '') || W.mode === 'new') lsSet(iconKey(nm), W.sym || null); }
+    startJob(rec, planCmds(rec, false), false);
   }
-  function revert() {
-    // Edit only: the values from before, exactly as the host sent them, then save.
-    if (!W || W.mode !== 'edit' || connState !== 'connected' || lockReason()) return;
-    const cmds = [];
-    for (const c of W.save.ch) {
-      if (c.key === 'tool.sectionWidth') { if (c.idx < W.nSec.base) cmds.push('config.set|tool.sectionWidth:' + c.idx + ',' + W.baseWidths[c.idx]); continue; }
-      if (c.key === 'tool.numSections') { cmds.push('config.set|tool.numSections:' + W.nSec.base); continue; }
-      cmds.push('config.set|' + c.key + ':' + c.from);
+  // Result lines and buttons (assistant's check page and the recovery view).
+  function fillResult(r, j) {
+    r.innerHTML = '';
+    r.className = 'tp-result';
+    if (!j) return;
+    const rec = j.rec;
+    const line = (t, cls) => { r.className = 'tp-result ' + (cls || ''); r.appendChild(Object.assign(el('div'), { textContent: t })); };
+    const btn = (t, fn, cls) => { const b = el('button', 'tp-btn' + (cls ? ' ' + cls : '')); b.textContent = t; b.disabled = !canAct(); onTap(b, fn); r.appendChild(b); return b; };
+    if (j.state === 'sending') line(T(tr('Saving…')));
+    else if (j.state === 'done') line('✓ ' + T(tr('Saved. The guidance computer shows the new values.')), 'ok');
+    else if (j.state === 'reverted') line('✓ ' + T(tr('The old values were sent back and saved.')), 'ok');
+    else {
+      line(j.reloaded ? T(tr('Saving was interrupted (connection lost or page reloaded). It is not certain that everything was saved.'))
+        : j.state === 'lost' ? T(tr('The connection broke while saving. It is not certain that everything was saved.'))
+        : T(tr('The guidance computer did not confirm all values.')), 'bad');
+      if (connState !== 'connected') { line(T(tr('Waiting for the connection…')), 'bad'); return; }
+      if (wrongActive(rec)) {
+        line(tr('"{name}" is not active. Load it first, then send again or put the old values back.', { name: rec.name }), 'bad');
+        const b = btn(tr('Load "{name}"', { name: rec.name }), loadTarget); b.disabled = !!lockReason();
+        return;
+      }
+      line(matches(rec, rec.ch) ? T(tr('The values are there now. Save again to be sure.')) : T(tr('Some values are missing.')), 'bad');
+      btn(T(tr('Send again and save')), retryJob, 'pri');
+      if (rec.mode === 'edit') btn(T(tr('Put the old values back')), revertJob);
+      else r.appendChild(Object.assign(el('div'), { textContent: tr('"{src}" was not changed.', { src: rec.src }) }));
+      const lock = lockReason(); if (lock) line(T(lock), 'bad');
     }
-    // A harvester forces the tool to front fixed: put the tool's attach back too.
-    if (W.kind === 'vehicle' && W.save.ch.some(c => c.key === 'vehicle.type')) {
-      const tt = TOOL_TYPES.find(x => x[1] === W.baseToolType); if (tt) cmds.push('config.set|tool.type:' + tt[0]);
-    }
-    if (W.kind === 'tool' && W.save.ch.some(c => c.key === 'tool.numSections'))
-      for (let i = 0; i < W.nSec.base; i++) cmds.push('config.set|tool.sectionWidth:' + i + ',' + W.baseWidths[i]);
-    cmds.push('profile.save');
-    for (const c of cmds) transport.send(c);
-    W.save = { state: 'reverted' };
-    renderWizard();
   }
   function renderResult() {
     const r = W && W.resEl;
     if (!r || !r.isConnected) return;
-    const s = W.save;
-    r.innerHTML = '';
-    r.className = 'tp-result';
-    if (!s) return;
-    const line = (t, cls) => { r.className = 'tp-result ' + (cls || ''); r.appendChild(Object.assign(el('div'), { textContent: t })); };
-    const btn = (t, fn) => { const b = el('button', 'tp-btn'); b.textContent = t; b.disabled = connState !== 'connected' || !!lockReason(); onTap(b, fn); r.appendChild(b); };
-    if (s.state === 'sending') line(T(tr('Saving…')));
-    else if (s.state === 'done') line('✓ ' + T(tr('Saved. The guidance computer shows the new values.')), 'ok');
-    else if (s.state === 'offline') line(T(tr('No connection: nothing was sent.')), 'bad');
-    else if (s.state === 'stale') line(T(tr('The active profile changed in the meantime. Nothing was sent; please start again.')), 'bad');
-    else if (s.state === 'reverted') line(T(tr('The old values were sent back and saved.')), 'ok');
-    else {
-      line(s.state === 'lost' ? T(tr('The connection broke while saving. It is not certain that everything was saved.'))
-        : T(tr('The guidance computer did not confirm all values.')), 'bad');
-      if (connState === 'connected') {
-        line(expectOk(s.ch) ? T(tr('The values are there now. Save again to be sure.')) : T(tr('Some values are missing.')), 'bad');
-        btn(T(tr('Send again and save')), () => doSave(true));
-        if (W.mode === 'edit') btn(T(tr('Put the old values back')), revert);
-        else r.appendChild(Object.assign(el('div'), { textContent: tr('"{src}" was not changed.', { src: W.src }) }));
-      } else line(T(tr('Waiting for the connection…')), 'bad');
+    if (W.err && !wjob()) {
+      r.innerHTML = ''; r.className = 'tp-result bad';
+      r.appendChild(Object.assign(el('div'), { textContent: W.err === 'offline' ? T(tr('No connection: nothing was sent.'))
+        : T(tr('The active profile changed in the meantime. Nothing was sent; please start again.')) }));
+      return;
     }
+    fillResult(r, wjob());
   }
-  function watchSave() {
-    const s = W && W.save;
-    if (!s) return;
-    if (s.state === 'sending') {
-      if (connState !== 'connected') { s.state = 'lost'; s.wasDown = true; renderWizard(); return; }
-      if (expectOk(s.ch)) {
-        if (!s.okAt) s.okAt = performance.now();
-        else if (performance.now() - s.okAt > 1000) { s.state = 'done'; renderWizard(); return; }
-      } else s.okAt = 0;
-      if (performance.now() - s.t0 > 8000) { s.state = 'unconfirmed'; renderWizard(); }
-    } else if (s.state === 'lost' || s.state === 'unconfirmed') {
-      const k = connState + '|' + expectOk(s.ch) + '|' + !!lockReason();
-      if (k !== s.k) { s.k = k; renderResult(); }
+
+  // Recovery view: what was being saved, what the host shows now, and the two ways out.
+  function openRecover() {
+    if (!job) return;
+    if (lnCloseAllOrig) lnCloseAllOrig();
+    view = 'recover'; W = null; hideAsk();
+    sheet.classList.add('open'); scrim.classList.add('open');
+    renderRecover();
+  }
+  function renderRecover() {
+    const j = job, rec = j && j.rec;
+    hdrT.removeAttribute('translate');
+    hdrT.textContent = T(tr('Profile not completely saved'));
+    body.innerHTML = ''; foot.innerHTML = '';
+    if (!rec) return;
+    const lead = el('div', 'tp-lead');
+    lead.textContent = rec.kind === 'vehicle' ? tr('Vehicle "{name}": these values were being saved.', { name: rec.name })
+      : tr('Tool "{name}": these values were being saved.', { name: rec.name });
+    body.appendChild(lead);
+    const card = el('div', 'tp-sumc');
+    const hd = el('div', 'tp-row hd', '<span></span><b></b><b></b>');
+    hd.children[0].textContent = T(tr('Value')); hd.children[1].textContent = T(tr('To save')); hd.children[2].textContent = T(tr('Host now'));
+    card.appendChild(hd);
+    const list = j.revert || j.state === 'reverted' ? revertList(rec).map(e => Object.assign({}, rec.ch.find(c => c.key === e.key && c.idx === e.idx) || {}, e)) : rec.ch;
+    for (const c of list) {
+      const ok = connState === 'connected' && activeName(rec.kind) === rec.name && valueOk(c);
+      const r = el('div', 'tp-row r3' + (ok ? '' : ' warn'), '<span></span><b translate="no"></b><b translate="no"></b>');
+      r.children[0].textContent = c.label ? T(c.label) : c.key;
+      r.children[1].textContent = fmtChange(c, c.val);
+      const got = hostVal2(c);
+      r.children[2].textContent = (got === undefined ? '—' : fmtChange(c, got)) + (ok ? ' ✓' : '');
+      card.appendChild(r);
+    }
+    if (!list.length) card.appendChild(Object.assign(el('div', 'tp-note'), { textContent: T(tr('No values; only the profile itself was being saved.')) }));
+    body.appendChild(card);
+    const res = el('div', 'tp-result');
+    body.appendChild(res);
+    fillResult(res, j);
+    const done = j.state === 'done' || j.state === 'reverted';
+    const cl = el('button', 'tp-btn' + (done ? ' pri big' : '')); cl.textContent = T(done ? tr('Done') : tr('Close'));
+    onTap(cl, () => { if (done) job = null; close(); syncBand(); });
+    foot.append(el('span', 'tp-grow'), cl);
+  }
+
+  // Red band in the driving view (first in the bottom stack, so it sits above the section bar).
+  const band = el('button', 'tp-pend', '<span class="tp-pend-t"></span><span class="tp-pend-s"></span>');
+  band.id = 'tp-pend';
+  band.hidden = true;
+  { const bs = $('bottomstack'); if (bs) bs.prepend(band); else document.body.appendChild(band); }
+  onTap(band, () => openRecover());
+  function syncBand() {
+    const show = !!pending && !(job && job.state === 'sending');
+    if (band.hidden === !show && band.dataset.mode === (pending ? pending.mode : '')) return;
+    band.hidden = !show;
+    band.dataset.mode = pending ? pending.mode : '';
+    band.querySelector('.tp-pend-t').textContent = T(tr('Profile not completely saved – check the values'));
+    band.querySelector('.tp-pend-s').textContent = T(pending && pending.mode === 'edit' ? tr('Tap: send again or restore') : tr('Tap: send again'));
+  }
+  syncBand();
+  function refreshJob(full) {
+    syncBand();
+    if (!isOpen()) return;
+    if (view === 'recover') renderRecover();
+    else if (view === 'wiz' && W && wjob()) { if (full) renderWizard(); else renderResult(); }
+  }
+  function watchJob() {
+    const j = job;
+    if (!j) return;
+    if (j.state === 'sending') {
+      if (connState !== 'connected') { j.state = 'lost'; refreshJob(true); return; }
+      if (matches(j.rec, j.expect)) {
+        if (!j.okAt) j.okAt = performance.now();
+        else if (performance.now() - j.okAt > 1000) { j.state = j.revert ? 'reverted' : 'done'; j.reloaded = false; setPending(null); refreshJob(true); return; }
+      } else j.okAt = 0;
+      if (performance.now() - j.t0 > 8000) { j.state = 'unconfirmed'; refreshJob(true); }
+    } else if (j.state === 'lost' || j.state === 'unconfirmed') {
+      const k = [connState, matches(j.rec, j.rec.ch), lockReason(), profiles && activeName(j.rec.kind), JSON.stringify(config && config[j.rec.kind])].join('|');
+      if (k !== j.k) { j.k = k; refreshJob(false); }
     }
   }
 
   // --- Refresh -------------------------------------------------------------------------------
   function render() {
     if (!isOpen()) return;
-    if (view === 'pick') { hdrT.removeAttribute('translate'); renderPick(); } else if (W) renderWizard();
+    if (view === 'pick') { hdrT.removeAttribute('translate'); renderPick(); }
+    else if (view === 'recover') renderRecover();
+    else if (W) renderWizard();
   }
   setInterval(() => {
+    watchJob();
     if (!isOpen()) return;
     if (view === 'pick') {
-      const k = JSON.stringify([profiles, sel, msg, lockReason(), config && config.tool && config.tool.totalWidth, config && config.vehicle && config.vehicle.type, I18n.language]);
+      const k = JSON.stringify([profiles, sel, msg, lockReason(), config && config.tool && config.tool.totalWidth, config && config.vehicle && config.vehicle.type, I18n.language, !!pending]);
       if (k !== pickKey) { pickKey = k; renderPick(); }
-    } else { watchSave(); syncSaveBtn(); }
+    } else if (view === 'wiz') syncSaveBtn();
   }, 250);
 
   // --- Hooks: the Vehicle & Tool button (left bar, menu tile, hotkey) opens the cards ---------

@@ -1883,6 +1883,19 @@
       .tp-sk { max-height: 34vh; }
       .tp-skimg { max-height: 30vh; }
     }
+    /* unfinished save: red band in the driving view (first in #bottomstack), and in the cards */
+    .tp-pend { pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer;
+      min-height: var(--tp-btn-h); width: min(720px, calc(100vw - 32px)); box-sizing: border-box; padding: 8px 16px;
+      background: var(--tui-stop); color: var(--tui-stop-ink); border: 3px solid #fff; border-radius: 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.45);
+      font: 800 calc(var(--tui-fs-lbl) + 3px)/1.2 system-ui, sans-serif; text-align: center; }
+    .tp-pend[hidden] { display: none; }
+    .tp-pend .tp-pend-s { font: 700 var(--tui-fs-lbl)/1.2 system-ui, sans-serif; }
+    .tp-pend.inline { width: 100%; border-color: transparent; box-shadow: none; }
+    :root[data-tui-band] #bottomstack > .tp-pend { width: min(720px, var(--tui-stack-w)); }
+    :root[data-theme="day"][data-tui-sun] .tp-pend { border-color: #000; }
+    .tp-row.hd { font-weight: 800; color: var(--text-muted); }
+    .tp-row.r3, .tp-row.hd { grid-template-columns: minmax(0, 1fr) auto auto; gap: 0 18px; }
+    .tp-result .tp-btn { align-self: flex-start; }
     /* menu: active vehicle and tool on top */
     .tp-now { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(var(--tui-tile-w) * 2), 1fr)); gap: 10px; margin-bottom: 14px; }
     .tui-tile.tp-nowt { flex-direction: row; justify-content: flex-start; gap: 14px; padding: 0 14px; text-align: left; border-left: 6px solid var(--tui-acc); }

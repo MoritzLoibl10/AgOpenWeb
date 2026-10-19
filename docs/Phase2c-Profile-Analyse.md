@@ -190,6 +190,15 @@ Umsetzung (nur `wwwroot`, Block `TabletProfiles` am Ende von `app.js`):
   Profil wird nicht noch einmal angelegt) und beim Bearbeiten „Alte Werte wiederherstellen“
   (die Werte von vorher, genau wie der Host sie geschickt hatte, dann `profile.save`). Beim
   neuen Profil bleibt das bisherige Profil in jedem Fall unverändert.
+- **Unvollständig gespeichert:** Vom Senden bis zur Bestätigung merkt sich das Tablet das
+  Speichern (`aow.ui.profilePending`, nur dieses Gerät). Solange es nicht bestätigt ist, zeigt
+  das Fahrbild ein rotes Band „Profil unvollständig gespeichert – Werte prüfen“ (oben in der
+  unteren Leiste, über den Teilbreiten; verdeckt nichts). Ein Tipp öffnet „Profil unvollständig
+  gespeichert“: Soll-Werte, was der Host jetzt zeigt, „Erneut senden und speichern“ und beim
+  Bearbeiten „Alte Werte wiederherstellen“. Das Band verschwindet erst, wenn der Host eins davon
+  bestätigt hat. Nach einem Neuladen der Seite erscheint es wieder. Ist ein anderes Profil aktiv,
+  bietet die Ansicht erst „„Name“ laden“ an. Neue Profile anlegen oder bearbeiten geht erst
+  danach. Ein anderes Tablet sieht das Band nicht.
   Grenze: Ein Teilzustand liegt bis dahin nur im Speicher des Hosts. Lädt man in diesem Zustand
   ein anderes Profil, speichert der Host das ausgehende Paar vorher (so arbeitet `profile.load`).
 - Der max. Lenkwinkel wird nur angezeigt (eingestellt wird er unter Lenkung).
