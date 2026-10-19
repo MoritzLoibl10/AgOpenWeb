@@ -7967,6 +7967,8 @@ const TabletProfiles = (() => {
     if (W.kind === 'tool') {
       const n = parseInt(W.nSec.inp.value, 10);
       if (!(n >= 1 && n <= 64)) p.push(T(tr('Number of sections: 1 to 64.')));
+      // The host stores these as max(0, value): a negative entry would never be confirmed.
+      for (const k of ['hitchLength', 'length']) if (W.f[k].value() < 0) p.push(tr('{field}: 0 or more.', { field: T(W.f[k].f.label) }));
     }
     return p;
   }
