@@ -428,6 +428,9 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
   links/rechts“ und „Spur links/rechts“ (sichtbar, solange gelenkt wird) über die
   Vorgewende-Anzeige: Ihr Abstand ist halb verdeckt. Der UI-Audit misst das in jeder Ansicht
   mit eingeschalteter Lenkung (108×47 px), vor und nach der Gesamtprüfung gleich.
+- **Nachtrag (Audit nach dem Upstream-Merge):** In einer Ansicht (7 Zoll, Handschuh, Lenkung an,
+  Wende in Annäherung) lag einmal auch die U-Turn-Anzeige 47×53 px unter der rechten Leiste.
+  Das hängt vom Zeitpunkt im Szenario ab; in der nächsten UI-Runde mit ansehen.
 - **Vorschlag:** Die Knöpfe unter die HUD-Zeile setzen (`--tui-y-hud` + Höhe) oder auf 7 Zoll
   in die Spalte rechts neben der Querablage; danach Audit bei 1024×600 Handschuh.
 - **Host-Änderung nötig:** nein
