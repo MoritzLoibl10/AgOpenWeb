@@ -966,7 +966,9 @@ public class NtripClientService : INtripClientService, IDisposable
                 catch (OperationCanceledException) { return; }
 
                 var config = _config;
-                if (config == null || !Volatile.Read(ref _wanted)) return;
+                // A Connect (new profile, version, password) cancelled this loop just after its
+                // delay: it must not connect with the configuration it read before.
+                if (config == null || !Volatile.Read(ref _wanted) || token.IsCancellationRequested) return;
 
                 // Release the guard first: the new session's reply is checked on the
                 // receive loop, and a rejection there must be able to start a new loop.
