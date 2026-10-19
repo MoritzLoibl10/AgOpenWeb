@@ -57,6 +57,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Product name check
+        run: |
+          if grep -q '\[PRODUKTNAME\]' Platforms/AgOpenWeb.Android/Brand.cs; then
+            echo "::warning::The product name is still the placeholder [PRODUKTNAME]."
+          fi
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -188,7 +194,11 @@ jobs:
       - name: Write release notes
         env:
           NOTES: ${{ inputs.notes }}
-        run: printf '%s\n' "$NOTES" > notes.md
+        # Fixed footer: licence and the exact source of these binaries (GPL v3 §6), also for
+        # an APK passed on without the app's info page at hand.
+        run: |
+          printf '%s\n\n---\nLicence: GNU GPL v3 (text in the app under Setup → Info). Source code of this build: https://github.com/%s/tree/%s\n' \
+            "$NOTES" "$GITHUB_REPOSITORY" "$GITHUB_SHA" > notes.md
 
       - name: Publish pre-release
         uses: softprops/action-gh-release@v1
