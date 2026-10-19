@@ -6445,7 +6445,13 @@ const TabletTerminal = (() => {
     if (clockSb.textContent !== t) clockSb.textContent = t;
   }
 
+  // Live data: the socket is up and a tick came in the last 2 s. Otherwise the steer chip
+  // says so and the readouts show "—", instead of freezing on the last values (the host's
+  // deadman may already have released steering and sections).
+  function tuiLive() { return connState === 'connected' && !!lastTick && performance.now() - lastTick.t < 2000; }
   function steerState() {
+    if (connState !== 'connected') return ['fault', tr('Disconnected')];
+    if (!tuiLive()) return ['fault', tr('No data')];
     const op = tick && tick.op;
     if (!op || !scene || !scene.hasField || !op.autoSteerAvail) return ['none', tr('No line')];
     if (op.autoSteer && op.moduleNotSteering) return ['fault', tr('Not steering')];
@@ -6486,7 +6492,7 @@ const TabletTerminal = (() => {
       stackNow = true; // re-stack the light bar and HUDs this frame
     }
     if (!want) { xteLast = ''; return; }
-    const i = xteInfo();
+    const i = tuiLive() ? xteInfo() : { val: '—', unit: '', dir: null, cap: I18n.text(tr('No data')) };
     const key = i.val + i.unit + i.dir + i.cap;
     if (key === xteLast) return;
     xteLast = key;
@@ -6593,16 +6599,16 @@ const TabletTerminal = (() => {
   }
   function renderCards() {
     if (!terminal() || mode !== 'drive') return;
-    const mps = lastTick ? lastTick.speed : 0;
-    const spd = tuiNum(toDisplayUnit(Math.abs(mps) * 3.6, 'kmh'), 1), su = unitLabel('kmh');
+    const live = tuiLive();
+    const spd = live ? tuiNum(toDisplayUnit(Math.abs(lastTick.speed) * 3.6, 'kmh'), 1) : '—', su = live ? unitLabel('kmh') : '';
     setCard('speed', spd + su, c => { c.querySelector('.c-n').textContent = spd; c.querySelector('.c-u').textContent = su; });
     // The configured total width, as Tool Configuration shows it ("Total width", 2 decimals).
     // Not toolWidthM(): that falls back to a made-up 6 m when the scene has no sections.
     const wm = config && config.tool ? +config.tool.totalWidth || 0 : 0;
     const wv = wm > 0 ? tuiNum(toDisplayUnit(wm, 'm'), 2) : '—', wu = wm > 0 ? unitLabel('m') : '';
     setCard('width', wv + wu, c => { c.querySelector('.c-n').textContent = wv; c.querySelector('.c-u').textContent = wu; });
-    const secs = tick && scene && scene.hasField ? tick.sections : null;
-    const sk = secs ? secs.join('') : '-';
+    const secs = live && tick && scene && scene.hasField ? tick.sections : null;
+    const sk = secs ? secs.join('') : live ? '-' : 'x';
     setCard('sections', sk, c => {
       const on = secs ? secs.filter(s => s === 1 || s === 2).length : 0;
       c.querySelector('.c-n').textContent = secs && secs.length ? on + ' / ' + secs.length : '—';
@@ -6610,12 +6616,12 @@ const TabletTerminal = (() => {
       c.title = secs ? tr('{on} of {count} sections on', { on, count: secs.length }) : '';
     });
     if (cards.xte) {
-      const ok = !!(tick && tick.guidanceActive && scene && scene.hasField);
+      const ok = !!(live && tick && tick.guidanceActive && scene && scene.hasField);
       const i = ok ? xteInfo() : null;
-      setCard('xte', i ? i.val + i.unit + i.dir + i.cap : '-', c => {
+      setCard('xte', i ? i.val + i.unit + i.dir + i.cap : live ? '-' : 'x', c => {
         c.querySelector('.c-n').textContent = i ? i.val : '—';
         c.querySelector('.c-u').textContent = i ? i.unit : '';
-        c.querySelector('.c-cap').textContent = i ? i.cap : tr('No line');
+        c.querySelector('.c-cap').textContent = i ? i.cap : live ? tr('No line') : tr('No data');
         c.querySelector('.x-l').classList.toggle('on', !!i && i.dir < 0);
         c.querySelector('.x-r').classList.toggle('on', !!i && i.dir > 0);
         c.dataset.st = i ? (i.dir === 0 ? 'on' : '') : 'none';
