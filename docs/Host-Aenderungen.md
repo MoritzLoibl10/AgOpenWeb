@@ -105,3 +105,28 @@ Die Profil-Oberfläche selbst (Karten, Assistent) liegt im tablet-ui-Block (`Tab
 `TabletHostText` am Ende von `app.js`, CSS „Phase 2c“) und hängt sich über `lnOpen` /
 `lnCloseAll` ein: `lnOpen('vehtoolhub', …)` öffnet die Karten statt der zwei Listen, die
 alte Auswahl bleibt über „Klassische Ansicht“ erreichbar.
+
+## 4. Phase 4a: Android-Name, -Symbol und Paket-ID (Oktober 2026)
+
+Ausnahme genehmigt für App-Name, App-Symbol und Paket-ID. Signierung und Secrets unverändert.
+Lenk-, Regel- und Sicherheitslogik unberührt.
+
+| Datei | Änderung | Rebase-Hinweis |
+|---|---|---|
+| `Platforms/AgOpenWeb.Android/Brand.cs` | **neu**: `Brand.ProductName` | keine Konflikte möglich |
+| `Platforms/AgOpenWeb.Android/MainActivity.cs` | `Label`, Starttext, Fehlertext, „Beenden?“-Titel aus `Brand.ProductName` | 4 Zeilen |
+| `Platforms/AgOpenWeb.Android/BackendService.cs` | Titel der Benachrichtigung und des Kanals aus `Brand.ProductName` (Kanal-ID unverändert) | 2 Zeilen |
+| `Platforms/AgOpenWeb.Android/AgOpenWeb.Android.csproj` | `ApplicationId` `at.loibl.lenksystem` (vorher `com.agopenweb.android`), `ApplicationTitle` `[PRODUKTNAME]` | bei Konflikt Fork-Werte behalten |
+| `Platforms/AgOpenWeb.Android/Resources/drawable/icon.xml` | eigenes Symbol (Vektor) | Fork-Datei behalten |
+
+Folgen der neuen Paket-ID: Android installiert die App neben der alten; die Daten liegen unter
+`Android/data/at.loibl.lenksystem/…` statt `…/com.agopenweb.android/…` und werden nicht
+übernommen. Der Java-Klassenname des Dienstes (`com.agopenweb.android.BackendService`) bleibt;
+er hängt nicht an der Paket-ID.
+
+Web-Client (gehört zur normalen Regel): Abschnitt „Phase 4a“ in `app.js` (`BRAND`,
+`TabletBrand`), CSS „Phase 4a“ im tablet-ui-Block, am Ende von `index.html` zwei
+`<script type="text/plain">` mit den Lizenztexten, neue Symbole `icons/brand-192.png` und
+`brand-512.png`. Upstream-Teile werden nur aus dem Block heraus verändert: `renderAbout` ist
+umhüllt (Info-Seite), `#about` bekommt eigenen Inhalt, das Hilfe-Panel einen Knopf
+„Kurzanleitung“.

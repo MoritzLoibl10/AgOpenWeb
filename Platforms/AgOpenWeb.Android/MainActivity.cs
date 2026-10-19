@@ -37,7 +37,7 @@ namespace AgOpenWeb.Android;
 /// shows a full-screen <see cref="WebView"/> pointed at the local web app once the host is bound.
 /// </summary>
 [Activity(
-    Label = "AgOpenWeb",
+    Label = Brand.ProductName,
     Theme = "@style/MyTheme.NoActionBar",
     Icon = "@drawable/icon",
     MainLauncher = true,
@@ -128,7 +128,7 @@ public class MainActivity : Activity
 
         var splash = new TextView(this)
         {
-            Text = "Starting AgOpenWeb…",
+            Text = $"Starting {Brand.ProductName}…",
             Gravity = GravityFlags.Center,
         };
         splash.SetTextColor(global::Android.Graphics.Color.White);
@@ -250,7 +250,7 @@ public class MainActivity : Activity
     private void ShowSplashError(string? reason)
     {
         if (_splash == null) return;
-        _splash.Text = $"AgOpenWeb could not start.\n\n{reason}\n\nClose the app and open it again.";
+        _splash.Text = $"{Brand.ProductName} could not start.\n\n{reason}\n\nClose the app and open it again.";
         _splash.Visibility = ViewStates.Visible;
     }
 
@@ -263,7 +263,7 @@ public class MainActivity : Activity
     private void ConfirmExit()
     {
         new AlertDialog.Builder(this)
-            .SetTitle("Exit AgOpenWeb?")!
+            .SetTitle($"Exit {Brand.ProductName}?")!
             .SetMessage("Guidance stops, and other devices lose the web view.")!
             .SetPositiveButton("Exit", (_, _) => Exit())!
             .SetNegativeButton("Cancel", (_, _) => EnableImmersiveMode())!

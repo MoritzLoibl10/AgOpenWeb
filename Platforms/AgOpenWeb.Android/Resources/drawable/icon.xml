@@ -1,14 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Fork: own app symbol (tracks to the horizon, guidance line, own position); colour world B. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <!-- Simple GPS/tractor icon placeholder -->
+    android:viewportWidth="96"
+    android:viewportHeight="96">
     <path
-        android:fillColor="#4A9A7E"
-        android:pathData="M54,10 L94,50 L74,50 L74,90 L34,90 L34,50 L14,50 Z" />
-    <path
-        android:fillColor="#2ECC71"
-        android:pathData="M54,25 L79,50 L69,50 L69,80 L39,80 L39,50 L29,50 Z" />
+        android:fillColor="#6B2D87"
+        android:pathData="M26,4 H70 A22,22 0 0 1 92,26 V70 A22,22 0 0 1 70,92 H26 A22,22 0 0 1 4,70 V26 A22,22 0 0 1 26,4 Z" />
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.55" android:strokeWidth="5" android:strokeLineCap="round"
+        android:pathData="M20,76 C30,52 34,38 36,20" />
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.55" android:strokeWidth="5" android:strokeLineCap="round"
+        android:pathData="M36,78 C42,54 46,38 48,20" />
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.55" android:strokeWidth="5" android:strokeLineCap="round"
+        android:pathData="M64,78 C58,54 54,38 52,20" />
+    <path android:strokeColor="#FFFFFF" android:strokeAlpha="0.55" android:strokeWidth="5" android:strokeLineCap="round"
+        android:pathData="M80,76 C70,52 66,38 64,20" />
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="7" android:strokeLineCap="round"
+        android:pathData="M50,18 V62" />
+    <path android:fillColor="#FFFFFF"
+        android:pathData="M41,70 A9,9 0 1,0 59,70 A9,9 0 1,0 41,70 Z" />
 </vector>

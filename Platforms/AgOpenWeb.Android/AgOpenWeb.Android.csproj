@@ -6,10 +6,12 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>14</LangVersion>
-    <ApplicationId>com.agopenweb.android</ApplicationId>
+    <!-- fork: own package (installs next to the old com.agopenweb.android app; data is not moved) -->
+    <ApplicationId>at.loibl.lenksystem</ApplicationId>
     <ApplicationVersion>1</ApplicationVersion>
     <ApplicationDisplayVersion>26.7.0</ApplicationDisplayVersion>
-    <ApplicationTitle>AgOpenWeb</ApplicationTitle>
+    <!-- fork: same name as Brand.ProductName -->
+    <ApplicationTitle>[PRODUKTNAME]</ApplicationTitle>
     <OutputType>Exe</OutputType>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <AndroidCreatePackagePerAbi>false</AndroidCreatePackagePerAbi>
