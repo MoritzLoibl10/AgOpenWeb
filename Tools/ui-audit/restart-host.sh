@@ -23,8 +23,17 @@ if [ ! -x "$BIN" ]; then
   dotnet build "$REPO/Platforms/AgOpenWeb.Desktop/AgOpenWeb.Desktop.csproj" -c Debug >/dev/null
 fi
 
+# Only a scratch folder is emptied: under /tmp, or one this script made before (marker file).
+# A real data folder given by mistake stays untouched.
+case "$DATA" in
+  /tmp/?*) ;;
+  *) if [ -e "$DATA" ] && [ ! -f "$DATA/.ui-audit" ]; then
+       echo "Nicht geleert: $DATA liegt nicht unter /tmp und ist kein Audit-Ordner (.ui-audit fehlt)." >&2; exit 1
+     fi ;;
+esac
 rm -rf "$DATA"
 mkdir -p "$DATA"
+touch "$DATA/.ui-audit"
 cd "$REPO"
 AGOPENWEB_DATA="$DATA" setsid nohup "$BIN" --headless >"$LOG" 2>&1 </dev/null &
 
