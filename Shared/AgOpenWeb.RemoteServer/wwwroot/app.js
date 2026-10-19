@@ -7617,13 +7617,15 @@ const TabletProfiles = (() => {
     return '';
   }
 
+  // The host's values for the profile kind (a tool also depends on the vehicle type).
+  const snapOf = kind => JSON.stringify(config[kind]) + (kind === 'tool' ? '|' + (config.vehicle.type | 0) : '');
   function startWizard(kind, mode) {
     if (lockReason() || !config || !config.vehicle || !config.tool || !profiles) return;
     if (pending) { openRecover(); return; } // an unfinished save comes first
     const src = activeName(kind);
     const v = config.vehicle, t = config.tool;
     W = { kind, mode, src, name: mode === 'edit' ? src : '', step: 0, focus: '', save: null, sym: null,
-      harvester: (v.type | 0) === 1, baseToolType: t.type };
+      harvester: (v.type | 0) === 1, baseToolType: t.type, snap: snapOf(kind) };
     if (kind === 'vehicle') {
       W.type = { key: 'vehicle.type', base: v.type | 0, cur: v.type | 0 };
       W.f = {
@@ -8144,7 +8146,11 @@ const TabletProfiles = (() => {
     if (!config || !profiles || activeName(rec.kind) !== rec.name) return false;
     return list.every(valueOk);
   }
-  const wrongActive = rec => rec.mode === 'edit' && profiles && activeName(rec.kind) !== rec.name;
+  // The profile the commands must go to is not active: for an edit the profile itself; for a
+  // new one not made yet its template, since profile.new copies whatever is active.
+  const loadName = rec => rec.mode === 'edit' ? rec.name : rec.src;
+  const wrongActive = rec => !!profiles && (rec.mode === 'edit' ? activeName(rec.kind) !== rec.name
+    : !listOf(rec.kind).some(p => sameName(p.name, rec.name)) && activeName(rec.kind) !== rec.src);
   function startJob(rec, cmds, isRevert) {
     for (const c of cmds) transport.send(c);
     job = { rec, state: 'sending', t0: performance.now(), okAt: 0, revert: !!isRevert, expect: isRevert ? revertList(rec) : rec.ch };
@@ -8161,8 +8167,8 @@ const TabletProfiles = (() => {
   // Edit, other profile active (e.g. after a reload): load the one the save was for.
   function loadTarget() {
     if (!job || connState !== 'connected' || lockReason()) return;
-    const r = job.rec;
-    transport.send('profile.load|' + (r.kind === 'vehicle' ? r.name + '\t' + profiles.activeTool : profiles.activeVehicle + '\t' + r.name));
+    const r = job.rec, n = loadName(r);
+    transport.send('profile.load|' + (r.kind === 'vehicle' ? n + '\t' + profiles.activeTool : profiles.activeVehicle + '\t' + n));
   }
   function doSave() {
     if (!W || lockReason() || problems().length) return;
@@ -8171,7 +8177,9 @@ const TabletProfiles = (() => {
       const p = nameProblem(W.kind, W.name);
       if (p) { W.step = W.steps.indexOf('name'); renderWizard(); W.nameErr && (W.nameErr.textContent = p); return; }
     }
-    if (W.mode === 'edit' && activeName(W.kind) !== W.src) { W.err = 'stale'; renderResult(); return; }
+    // Another device loaded or changed the profile since the assistant opened: the review page
+    // no longer shows what would be saved (a new profile copies the active one as it is now).
+    if (activeName(W.kind) !== W.src || snapOf(W.kind) !== W.snap) { W.err = 'stale'; renderResult(); return; }
     if (connState !== 'connected') { W.err = 'offline'; renderResult(); return; }
     W.err = '';
     const rec = makeRec();
@@ -8196,8 +8204,9 @@ const TabletProfiles = (() => {
         : T(tr('The guidance computer did not confirm all values.')), 'bad');
       if (connState !== 'connected') { line(T(tr('Waiting for the connection…')), 'bad'); return; }
       if (wrongActive(rec)) {
-        line(tr('"{name}" is not active. Load it first, then send again or put the old values back.', { name: rec.name }), 'bad');
-        const b = btn(tr('Load "{name}"', { name: rec.name }), loadTarget); b.disabled = !!lockReason();
+        line(rec.mode === 'edit' ? tr('"{name}" is not active. Load it first, then send again or put the old values back.', { name: rec.name })
+          : tr('The new profile is made as a copy of "{name}", which is not active. Load it first, then send again.', { name: rec.src }), 'bad');
+        const b = btn(tr('Load "{name}"', { name: loadName(rec) }), loadTarget); b.disabled = !!lockReason();
         return;
       }
       line(matches(rec, rec.ch) ? T(tr('The values are there now. Save again to be sure.')) : T(tr('Some values are missing.')), 'bad');
