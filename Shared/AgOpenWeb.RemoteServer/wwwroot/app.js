@@ -8112,7 +8112,11 @@ const TabletProfiles = (() => {
   // after a reload, until "send again" or "put the old values back" has been confirmed.
   const PEND_KEY = 'aow.ui.profilePending';
   let pending = null, job = null; // job: { rec, state, t0, okAt, revert, expect, k }
-  try { const r = JSON.parse(lsGet(PEND_KEY, '') || 'null'); if (r && r.v === 1 && Array.isArray(r.ch) && r.name) pending = r; } catch (_) { /* unreadable: none */ }
+  // Only a record this code could have written: a broken one would send "config.set|key:undefined".
+  const recOk = r => !!r && r.v === 1 && (r.kind === 'vehicle' || r.kind === 'tool') && (r.mode === 'new' || r.mode === 'edit')
+    && typeof r.name === 'string' && !!r.name && typeof r.src === 'string' && Array.isArray(r.ch)
+    && r.ch.every(c => c && typeof c.key === 'string' && c.send !== undefined && c.send !== null);
+  try { const r = JSON.parse(lsGet(PEND_KEY, '') || 'null'); if (recOk(r)) pending = r; } catch (_) { /* unreadable: none */ }
   if (pending) job = { rec: pending, state: 'lost', reloaded: true };
   function setPending(r) { pending = r; lsSet(PEND_KEY, r ? JSON.stringify(r) : null); syncBand(); }
   const wjob = () => (job && W && W.rec && job.rec === W.rec ? job : null); // this assistant's save
