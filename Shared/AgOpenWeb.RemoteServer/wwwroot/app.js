@@ -8836,7 +8836,7 @@ const TabletBrand = (() => {
   apply();
 
   // --- Setup → Info: name, version, origin, licence, source --------------------------------
-  const LIC = { gpl: ['tui-lic-gpl3', 'GNU General Public License v3'], apache: ['tui-lic-apache', 'Apache License 2.0'] };
+  const LIC = { apache: ['tui-lic-apache', 'Apache License 2.0'] }; // LICENSE.md, embedded in index.html
   const sheet = el('div', 'tui-sheet tb-sheet', '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>');
   sheet.id = 'tb-sheet';
   const scrim = el('div', 'tp-scrim');
@@ -8877,16 +8877,15 @@ const TabletBrand = (() => {
     head.querySelector('.tb-claim').textContent = T(BRAND.claim);
     box.appendChild(head);
     const ori = el('div', 'tb-box');
-    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Based on AgOpenWeb and AgOpenGPS (Brian Tee and contributors).')) }));
-    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Free software under the GNU General Public License v3. You may use, change and pass it on; the source code is open.')) }));
-    // GPL v3 §0 / §5a: copyright, no warranty, and that this is a changed version.
-    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Copyright © 2024–2026 AgOpenWeb contributors; AgOpenGPS © Brian Tee and contributors.')) }));
-    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('This is a changed version (fork), changed since October 2026.')) }));
-    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('This program comes with ABSOLUTELY NO WARRANTY, to the extent permitted by law (see the licence text).')) }));
+    // Apache 2.0 (as upstream, LICENSE.md): the licence, that this is a changed version, the
+    // copyright of AgOpenWeb and of the changes, and the no-warranty clause (§4, §7).
+    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Changed version (fork) of AgOpenWeb, based on AgOpenWeb; changed since October 2026. AgOpenWeb builds on AgOpenGPS (Brian Tee and contributors).')) }));
+    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Licensed under the Apache License 2.0. You may use, change and pass it on; the source code is open.')) }));
+    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Copyright © 2024–2026 AgOpenWeb contributors. Changes in this version: Copyright © 2026 Moritz Loibl.')) }));
+    ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Provided “as is”, without warranties or conditions of any kind (see the licence text).')) }));
     const lr = el('div', 'tb-row');
-    const bg = el('button', 'tp-btn'); bg.textContent = T(tr('Licence text GPL v3')); onTap(bg, () => showLicense('gpl'));
-    const ba = el('button', 'tp-btn'); ba.textContent = T(tr('Licence text Apache 2.0 (as in the original project)')); onTap(ba, () => showLicense('apache'));
-    lr.append(bg, ba); ori.appendChild(lr);
+    const ba = el('button', 'tp-btn'); ba.textContent = T(tr('Licence text (Apache 2.0)')); onTap(ba, () => showLicense('apache'));
+    lr.append(ba); ori.appendChild(lr);
     box.appendChild(ori);
     const src = el('div', 'tb-box');
     src.appendChild(Object.assign(el('div', 'tb-lbl'), { textContent: T(tr('Source code of this version')) }));
