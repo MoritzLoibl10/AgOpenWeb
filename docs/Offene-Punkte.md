@@ -24,7 +24,7 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 | 3 | Beobachter können Geometrie und Profile ändern, auch bei eingeschalteter Lenkung | hoch | ja | Issue-Text an upstream |
 | 4 | Zwei Geräte speichern gleichzeitig: Befehle mischen sich, fremdes Profil wird beschrieben | hoch | ja | Issue-Text an upstream |
 | 5 | NTRIP-Passwörter und AgShare-Schlüssel gehen an jeden Browser im LAN | hoch | ja | Issue-Text an upstream |
-| 6 | Lizenz: `LICENSE.md` ist Apache 2.0, Dateiköpfe und README sagen GPL v3 | hoch | nein | offen |
+| 6 | Lizenz: `LICENSE.md` ist Apache 2.0, Dateiköpfe und README sagen GPL v3 | hoch | nein | upstream geklärt (#360, #363: Apache 2.0); die Fork-Info-Seite sagt noch GPL v3, Entscheidung offen |
 | 7 | Host liest Befehle in 1-KB-Stücken (WebSocket) | mittel | ja | offen |
 | 8 | Unvollständiges Speichern lässt sich nicht verwerfen | mittel | nein | erledigt (sync/upstream: Verwerfen in Sackgassen) |
 | 9 | Speicher-Merker gilt pro Adresse, nicht pro Lenkrechner | mittel | ja | offen |
