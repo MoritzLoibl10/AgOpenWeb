@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+// AgOpenWeb
+// Copyright (C) 2024-2026 AgOpenWeb Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 // Vergleichstabelle (Markdown) aus zwei oder mehr metrics.json von capture.js.
 //
 //   node compare.js out/vorher/metrics.json:Vorher out/handschuh/metrics.json:Handschuh

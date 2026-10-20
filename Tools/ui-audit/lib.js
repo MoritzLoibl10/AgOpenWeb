@@ -1,3 +1,7 @@
+// AgOpenWeb
+// Copyright (C) 2024-2026 AgOpenWeb Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 // Messfunktionen für den UI-Audit: Tippflächen, Schriftgrößen, Kontrast.
 // Läuft in Node mit Playwright; alles, was den DOM liest, läuft per page.evaluate im Browser.
 'use strict';

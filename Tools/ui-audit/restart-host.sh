@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# AgOpenWeb
+# Copyright (C) 2024-2026 AgOpenWeb Contributors
+# SPDX-License-Identifier: Apache-2.0
+
 # Startet den AgOpenWeb-Host headless mit einem leeren Datenordner neu (Linux).
 # Ein laufender Host wird vorher beendet, damit der Audit nicht gegen den alten Build läuft.
 #
