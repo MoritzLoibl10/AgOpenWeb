@@ -50,7 +50,7 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 | 29 | Name auf Desktop/iOS und in den Artefakten weiter „AgOpenWeb“ | niedrig | ja | offen |
 | 30 | Kleinigkeiten nach dem Upstream-Merge (#350, #352) | niedrig | teils | teils: #350 erledigt, #352 offen |
 | 31 | 7 Zoll, Handschuh: Bildschirmknöpfe verdecken die Vorgewende-Anzeige | mittel | nein | vorgemerkt für die nächste UI-Runde |
-| 32 | IMU-Kurs aus PGN 253: eine 0 der AiO-Firmware gilt als gültiger Kurs (upstream #357) | hoch | ja | offen, nur eingetragen (Lenklogik) |
+| 32 | IMU-Kurs aus PGN 253: eine 0 der AiO-Firmware gilt als gültiger Kurs (upstream #357) | hoch | ja | Firmware geprüft: v4 (auch v4.5) sendet 9999, v26 sendet 0; Anzeige im Einrichtungsmodus; Issue-Text an upstream |
 
 ---
 
@@ -428,26 +428,41 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
   links/rechts“ und „Spur links/rechts“ (sichtbar, solange gelenkt wird) über die
   Vorgewende-Anzeige: Ihr Abstand ist halb verdeckt. Der UI-Audit misst das in jeder Ansicht
   mit eingeschalteter Lenkung (108×47 px), vor und nach der Gesamtprüfung gleich.
+- **Nachtrag (Audit nach dem Upstream-Merge):** In einer Ansicht (7 Zoll, Handschuh, Lenkung an,
+  Wende in Annäherung) lag einmal auch die U-Turn-Anzeige 47×53 px unter der rechten Leiste.
+  Das hängt vom Zeitpunkt im Szenario ab; in der nächsten UI-Runde mit ansehen.
 - **Vorschlag:** Die Knöpfe unter die HUD-Zeile setzen (`--tui-y-hud` + Höhe) oder auf 7 Zoll
   in die Spalte rechts neben der Querablage; danach Audit bei 1024×600 Handschuh.
 - **Host-Änderung nötig:** nein
 
 ### 32. IMU-Kurs aus PGN 253: eine 0 der AiO-Firmware gilt als gültiger Kurs (upstream #357)
-- **Priorität:** hoch (Sicherheit; Lenklogik, deshalb nur eingetragen; nicht auf echter Hardware geprüft)
-- **Dateien:** `Shared/AgOpenWeb.Services/AutoSteer/PgnBuilder.cs` 665–669 (`hasImuHeading = headingRaw != 9999`), Kursfusion.
-- **Beschreibung:**
-  - Seit #357 nimmt der Host den IMU-Kurs aus PGN 253 (Lenkmodul) und PGN 211 und mischt
-    ihn mit dem Kurs aus aufeinanderfolgenden Fixes.
-  - „Kein IMU“ ist nur 9999. Der PR-Text sagt selbst, dass die AiO-v26-Firmware dort 0
-    sendet (Firmware_Teensy_AiO_26#60). Eine Firmware, die 0 statt 9999 sendet, würde also
-    einen Kurs von 0° (Nord) in die Fusion geben.
-  - Ob die Firmware deines AiO v4.5 mit BNO085 einen echten Kurs oder 0 sendet, ist nicht
-    geprüft.
-  - Seit #356 wird außerdem die Rollneigung aus PGN 253 verwendet (vorher immer 0). Roll-Null
-    und Roll-Umkehr wirken damit erst jetzt.
+- **Priorität:** hoch (Sicherheit; Lenklogik, deshalb im Fork nur angezeigt, nicht geändert)
+- **Dateien:** Host `Shared/AgOpenWeb.Services/AutoSteer/PgnBuilder.cs:669` (`hasImuHeading = headingRaw != 9999`), `AutoSteerService.PublishGpsData` (Übernahme, wenn der Satz keinen IMU-Kurs hat), `Gps/GpsHeadingFusionService.cs:258` (Versatz mit Gewicht nachziehen), 243–244 (Rückwärtserkennung).
+- **Firmware-Befund** (Stand Oktober 2026):
+  - **AiO v4-Firmware** (`AgOpenGPS-Official/Boards`, Commit 60e8d89; für AiO v4.x, also auch v4.5):
+    - Keya-/CAN-Build `TeensyModules/AIO v4 Firmware/AIO_v4_Firmware_Keya_CANBUS_HPR_Dual_27.04.2025/Autosteer.ino:655–660`: PGN 253 trägt **immer** Kurs 9999 und Roll 8888, mit oder ohne IMU. Der Standard-Build ist gleich (`AIO_v4_Firmware/Autosteer.ino:603–608`).
+    - Der IMU-Kurs geht im `$PANDA` raus: im RVC-Modus `bnoData.yawX10` (`zHandlers.ino:148`), ohne IMU 65535 (`zHandlers.ino:101`).
+    - **Mit dieser Firmware ändert #357 nichts.**
+  - **AiO v26-Firmware** (`Firmware_Teensy_AiO_26`, Commit 2551bff):
+    - `AutosteerProcessor.cpp:1148–1149` setzt Kurs und Roll in PGN 253 fest auf 0 („Deprecated - sent by GNSS“).
+    - Ohne IMU trägt `$PANDA` 65535 (`NAVProcessor.cpp:150`). Mit GPS-Durchreichung wird gar kein `$PANDA` gesendet (`NAVProcessor.cpp:298`).
+    - In beiden Fällen nimmt der Host 0° als IMU-Kurs.
+    - Ob v26 für AiO v4.5 gedacht ist, steht im Repo nicht.
+- **Nachgestellt im Host** (Prüfstand ohne Hardware: GGA/VTG und PGN 253 per UDP, 90°-Kurve):
+  - mit 0: IMU-Kurs „gültig“ 0°; nach der Kurve bis 9° Kursfehler, der über mehrere Sekunden abklingt;
+  - mit 9999: kein IMU-Kurs, höchstens 1,8° Abweichung.
+- **Einstellungen ohne Codeänderung:**
+  - Keine Einstellung schaltet die Übernahme aus PGN 253 ab.
+  - „Kursfusion“ (`gps.headingFusionWeight`, 0–1, Gewicht = Wert × 0,2) beschleunigt nur die Korrektur; auch bei 1,0 bleibt es eine gleitende Korrektur. Kleiner wird es schlimmer.
+  - „Rückwärtserkennung“ aus verhindert nur ein mögliches 180°-Umklappen, nicht den Nachlauf.
+  - Dual-GPS ist kein Ausweg bei einer Antenne.
+- **Im Fork umgesetzt (nur Anzeige):** Im Einrichtungsmodus zeigt die Karte „Kurs-Prüfung“:
+  - GPS-Kurs, IMU-Kurs empfangen, IMU-Kurs mit Versatz und die Abweichung;
+  - eine gelbe Warnung bei IMU-Kurs genau 0° für 5 s während der Fahrt;
+  - eine gelbe Warnung bei mehr als 20° Abweichung für 1 s.
 - **Vorschlag:**
-  - Vor dem ersten Lenken mit der echten Hardware im GPS-Fenster prüfen, ob „IMU-Kurs“ dem
-    Fahrzeugkurs folgt; Roll-Null kalibrieren.
-  - Upstream fragen, ob 0 bei fehlendem IMU abgefangen werden soll, bis die Firmware
-    korrigiert ist.
+  - Firmware v26 soll 9999/8888 senden.
+  - Der Host soll einen Modul-Kurs erst übernehmen, wenn er sich bewegt hat, oder nur nach Opt-in.
+  - Der englische Issue-Text an upstream ist geschrieben.
+  - Vor dem ersten Lenken auf dem Prüfstand die Kurs-Prüfung ansehen.
 - **Host-Änderung nötig:** ja (Lenklogik, nur upstream)

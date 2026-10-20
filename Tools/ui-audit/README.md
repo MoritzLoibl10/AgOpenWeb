@@ -108,6 +108,22 @@ danach in den Fahrmodus zurück. Mit `--ls aow.ui.layout=classic` läuft es im k
 Die Namen der Ansichten (`01-start-no-field`, `13-day-driving-clean`, …) sind fest, damit
 `compare.js` Läufe vergleichen kann.
 
+## Kurs-Prüfstand (`heading-bench.js`)
+
+Spielt ohne Hardware ein GPS- und ein Lenkmodul per UDP an den Host: GGA/VTG mit 10 Hz
+(Geradeaus, 90°-Kurve) und PGN 253 mit einem festen IMU-Kurs-Rohwert. Damit lässt sich die
+Karte „Kurs-Prüfung“ im Einrichtungsmodus prüfen, und es zeigt, was der Host aus einem
+IMU-Kurs 0 macht (`docs/Offene-Punkte.md`, Punkt 32).
+
+```bash
+./restart-host.sh
+node heading-bench.js 0 /tmp/kurs-0.json /tmp/kurs-0.png        # wie AiO-v26-Firmware
+node heading-bench.js 9999 /tmp/kurs-9999.json                 # wie AiO-v4-Firmware (kein IMU)
+```
+
+Nur zum Testen: Es sendet Daten wie ein Modul. Nie gegen einen Host laufen lassen, der an
+echter Hardware hängt.
+
 ## Grenzen
 
 - Headless Chromium mit Software-WebGL (SwiftShader); Bildrate und Kantenglättung weichen von
