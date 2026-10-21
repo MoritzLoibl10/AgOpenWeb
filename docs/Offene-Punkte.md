@@ -24,7 +24,7 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 | 3 | Beobachter können Geometrie und Profile ändern, auch bei eingeschalteter Lenkung | hoch | ja | Issue-Text an upstream |
 | 4 | Zwei Geräte speichern gleichzeitig: Befehle mischen sich, fremdes Profil wird beschrieben | hoch | ja | Issue-Text an upstream |
 | 5 | NTRIP-Passwörter und AgShare-Schlüssel gehen an jeden Browser im LAN | hoch | ja | Issue-Text an upstream |
-| 6 | Lizenz: `LICENSE.md` ist Apache 2.0, Dateiköpfe und README sagen GPL v3 | hoch | nein | upstream geklärt (#360, #363: Apache 2.0); die Fork-Info-Seite sagt noch GPL v3, Entscheidung offen |
+| 6 | Lizenz uneinheitlich (`LICENSE.md`, README, Dateiköpfe, Info-Seite) | hoch | nein | erledigt: upstream Apache 2.0 (#360, #363), der Fork folgt (sync/upstream-2) |
 | 7 | Host liest Befehle in 1-KB-Stücken (WebSocket) | mittel | ja | offen |
 | 8 | Unvollständiges Speichern lässt sich nicht verwerfen | mittel | nein | erledigt (sync/upstream: Verwerfen in Sackgassen) |
 | 9 | Speicher-Merker gilt pro Adresse, nicht pro Lenkrechner | mittel | ja | offen |
@@ -132,13 +132,18 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
   Bug-Reports nur für das Gerät mit Bedienung.
 - **Host-Änderung nötig:** ja
 
-### 6. Lizenz: `LICENSE.md` ist Apache 2.0, Dateiköpfe und README sagen GPL v3
+### 6. Lizenz uneinheitlich (erledigt)
 - **Priorität:** hoch (rechtlich)
-- **Dateien:** `LICENSE.md` (Apache-2.0-Text, „Copyright [2025] [AOG Group]“), `README.md` 83–85, Köpfe der C#-Dateien („GNU GPL v3. See LICENSE.md“), upstream-Info-Seite (`index.html` „Apache License 2.0“).
-- **Beschreibung:** Die Info-Seite des Forks nennt GPL v3 und zeigt beide Texte; sie hat jetzt
-  auch einen Copyright-, einen Gewährleistungs- und einen Änderungshinweis. Welche Lizenz
-  upstream gilt, ist aber widersprüchlich. Keine Rechtsberatung.
-- **Vorschlag:** Bei upstream nachfragen (Issue), danach Info-Seite und Release-Text anpassen.
+- **Stand:** erledigt. Upstream hat sich mit #360 und #363 auf die Apache License 2.0 festgelegt:
+  `LICENSE.md`, README, alle Dateiköpfe (SPDX `Apache-2.0`) und die About-Seite; die CI prüft das
+  (`Tools/license-headers.py --check`). Der Fork folgt (Branch `sync/upstream-2`):
+  - die Fork-eigenen Dateien haben den SPDX-Kopf;
+  - die Info-Seite nennt Apache 2.0, „geänderte Fassung, basiert auf AgOpenWeb“, das Copyright
+    der AgOpenWeb-Mitwirkenden und der Änderungen sowie den Gewährleistungsausschluss;
+  - mitgeliefert wird nur noch der Apache-Text (`LICENSE.md`);
+  - der Release-Text-Fuß nennt Apache 2.0.
+
+  Eine `NOTICE`-Datei hat upstream nicht.
 - **Host-Änderung nötig:** nein
 
 ### 7. Host liest Befehle in 1-KB-Stücken (WebSocket)

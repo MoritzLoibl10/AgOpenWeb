@@ -1,3 +1,7 @@
+// AgOpenWeb
+// Copyright (C) 2024-2026 AgOpenWeb Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 // Kurs-Prüfstand ohne Hardware: spielt ein GPS- und ein Lenkmodul (UDP an den Host, :9999).
 // GGA + VTG mit 10 Hz (15 s nach Osten, 90°-Linkskurve über 5 s, dann nach Norden) und PGN 253
 // mit dem IMU-Kurs-Rohwert aus dem ersten Argument: 0 wie die AiO-v26-Firmware, 9999 wie die

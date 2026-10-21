@@ -63,12 +63,10 @@ bleiben soll.
 Eigene Zeichnung: Spuren, die zum Horizont zusammenlaufen, eine Leitlinie und ein Punkt für die
 eigene Position; Akzentfarbe als Fläche, weißes Zeichen. Keine Traktor- oder Herstellerform.
 
-### GPL / Lizenz – bitte klären
-- `README.md` und die Kopfzeilen der Quelldateien nennen **GNU GPL v3**, `LICENSE.md` ist aber
-  der **Apache-2.0**-Text, und die Info-Seite sagt „Apache License 2.0“. AgOpenGPS selbst ist
-  GPL v3. Das ist upstream uneinheitlich. Ich bin kein Anwalt; bitte vor dem Bau klären
-  (am besten bei upstream nachfragen), welche Lizenz die Info-Seite nennt und welcher
-  Lizenztext mitgeliefert wird.
+### Lizenz
+- Damals uneinheitlich: `LICENSE.md` war der Apache-2.0-Text, README und Dateiköpfe nannten eine
+  andere Lizenz. Inzwischen geklärt: Upstream hat sich auf die Apache License 2.0 festgelegt
+  (#360, #363), und der Fork folgt (siehe `docs/Offene-Punkte.md`, Punkt 6).
 - Geplant für Einrichtung → Info: Produktname, Version und Git-Stand, „Basiert auf AgOpenWeb und
   AgOpenGPS (Brian Tee und Mitwirkende)“, Lizenzname, vollständiger Lizenztext in der App
   (offline), Link zum Quellcode des Forks (github.com/MoritzLoibl10/AgOpenWeb) und zum
@@ -136,7 +134,7 @@ Vorschlag Host-Änderung (nur Vorschlag, nicht gebaut):
 |---|---|---|
 | Farbwelt | B Pflaume | Akzentfarben aus `BRAND` (`app.js`, Abschnitt „Phase 4a“), als `<style id="tb-style">` für `html[data-tb]` |
 | Name | Platzhalter „[PRODUKTNAME]“ | `BRAND.name`; Titel, Info-Seite, PWA-Manifest daraus |
-| Lizenz | Info-Seite nennt GPL v3; beide Lizenztexte mitliefern | GPL-v3-Text (offizieller Text) und Apache-2.0-Text (`LICENSE.md` des Ursprungsprojekts) als `<script type="text/plain">` in `index.html`, offline lesbar unter Einrichtung → Info |
+| Lizenz | Info-Seite nennt die Lizenz und liefert den Text mit | heute: Apache 2.0, Text aus `LICENSE.md` als `<script type="text/plain">` in `index.html`, offline lesbar unter Einrichtung → Info (bis zur Klärung bei upstream waren es zwei Texte) |
 | App-Name, App-Symbol, Paket-ID (Android) | Ausnahme genehmigt, Paket-ID `at.loibl.lenksystem` | `Brand.cs`, `MainActivity.cs`, `BackendService.cs`, `.csproj`, `Resources/drawable/icon.xml`; Signierung und Secrets unverändert |
 | PWA-Manifest | aus `BRAND` erzeugen | `<link rel="manifest">` zeigt bei eingeschalteter Darstellung auf ein erzeugtes Manifest (data:-Adresse), Symbole `icons/brand-192.png` / `brand-512.png` |
 | Kurzanleitung | bauen | Menü → Hilfe (Kachel „Hilfe“), 7 Themen mit eigenen Zeichnungen; USB-Backup als „nicht auf echtem Tablet geprüft“ markiert |

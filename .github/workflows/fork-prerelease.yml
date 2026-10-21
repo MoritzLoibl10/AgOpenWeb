@@ -194,10 +194,10 @@ jobs:
       - name: Write release notes
         env:
           NOTES: ${{ inputs.notes }}
-        # Fixed footer: licence and the exact source of these binaries (GPL v3 §6), also for
-        # an APK passed on without the app's info page at hand.
+        # Fixed footer: licence and the exact source of these binaries, also for an APK passed
+        # on without the app's info page at hand.
         run: |
-          printf '%s\n\n---\nLicence: GNU GPL v3 (text in the app under Setup → Info). Source code of this build: https://github.com/%s/tree/%s\n' \
+          printf '%s\n\n---\nLicence: Apache License 2.0 (LICENSE.md; text in the app under Setup → Info). Changed version of AgOpenWeb. Source code of this build: https://github.com/%s/tree/%s\n' \
             "$NOTES" "$GITHUB_REPOSITORY" "$GITHUB_SHA" > notes.md
 
       - name: Publish pre-release

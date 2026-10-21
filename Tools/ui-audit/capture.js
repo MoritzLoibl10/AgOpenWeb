@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+// AgOpenWeb
+// Copyright (C) 2024-2026 AgOpenWeb Contributors
+// SPDX-License-Identifier: Apache-2.0
+
 // UI-Audit: fährt ein festes Szenario im Simulator ab, macht von jeder Hauptansicht einen
 // Screenshot und misst Tippflächen, Schriftgrößen und Kontrast.
 //

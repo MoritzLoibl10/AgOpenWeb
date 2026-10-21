@@ -1,7 +1,8 @@
 # Issues für upstream (AgOpenGPS-Official/AgOpenWeb)
 
 Fertige englische Texte zum Kopieren: je Issue der Titel und der Text in getrennten Blöcken.
-Geprüft gegen upstream `develop` am 20.10.2026 (Commit 9705344). Ob es upstream schon passende
+Ein viertes Thema, die uneinheitliche Lizenz, hat upstream selbst erledigt (#360, #363); dazu
+ist kein Issue mehr nötig. Geprüft gegen upstream `develop` am 20.10.2026 (Commit 9705344). Ob es upstream schon passende
 Issues gibt, ließ sich aus der Fork-Sitzung nicht prüfen; vor dem Anlegen kurz suchen.
 
 | Nr. | Thema | Stand |
@@ -9,7 +10,6 @@ Issues gibt, ließ sich aus der Fork-Sitzung nicht prüfen; vor dem Anlegen kurz
 | 1 | IMU-Kurs aus PGN 253 (#357) | anlegen |
 | 2 | Mehrgeräte-Sicherheit (Beobachter-Rechte, gleichzeitiges Speichern, Klartext-Passwörter) | anlegen |
 | 3 | Arbeitsbreite: Ersatzwert 6 m im Web-Client | anlegen (Teil „Profilvorschau“ gestrichen, #350 hat ihn behoben) |
-| 4 | Lizenz uneinheitlich | **nicht anlegen**: upstream erledigt (#360, #363: überall Apache 2.0) |
 
 ## 1. IMU heading from PGN 253 (#357): AiO v26 sends 0 for "no IMU", which now goes into the heading fusion as a real heading
 
@@ -188,29 +188,4 @@ No invented width: without sections, leave the inset empty and say the width is 
 Note: `ConfigurationStore.ActualToolWidth` itself falls back to `Tool.Width` when the section sum is 0.
 
 Checked against `develop` at 9705344.
-~~~~
-
-## 4. Licence inconsistency: LICENSE.md is Apache 2.0, README and source headers say GPL v3
-
-Stand: **nicht anlegen.** Upstream hat die Lizenz mit #360 und #363 vereinheitlicht: `LICENSE.md`, README, alle Dateiköpfe (SPDX `Apache-2.0`) und die About-Seite sagen jetzt Apache 2.0. Der Text bleibt nur zum Nachlesen.
-
-**Titel:**
-
-~~~~text
-Licence inconsistency: LICENSE.md is Apache 2.0, README and source headers say GPL v3
-~~~~
-
-**Text:**
-
-~~~~markdown
-The repository states two different licences:
-
-- LICENSE.md contains the Apache License 2.0 text.
-- README.md ("License" section) says "GNU General Public License v3.0" and links to LICENSE.md.
-- Source file headers (e.g. Shared/AgOpenWeb.Services/AppDataRoot.cs) say GPL v3 or later.
-- The in-app About panel (wwwroot/index.html, #about) says "Apache License 2.0".
-
-AgOpenWeb is based on AgOpenGPS, which is GPL v3. Forks and redistributors (e.g. people shipping an APK to farmers) need to know which licence applies and which text to ship.
-
-Could you clarify the intended licence and make LICENSE.md, README.md, the source headers and the About panel consistent? If it is GPL v3, LICENSE.md would need the GPL v3 text.
 ~~~~

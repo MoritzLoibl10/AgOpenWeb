@@ -452,7 +452,7 @@ Neue Texte laufen über `tr('…')` und `Tools/i18n-extract.py` (siehe `Docs/TRA
   (Fix, NTRIP-Status) auf Deutsch. Arbeitsbreite ohne 6-m-Ersatzwert im Schlag-Editor und in
   der Leistung.
 - **Phase 4a** (Kit-Vorbereitung, [Analyse](Phase4a-Kit-Analyse.md)): eigene Darstellung aus
-  `BRAND` (Farbwelt Pflaume, Logo, Name als Platzhalter, umschaltbar), Info-Seite mit GPL v3,
+  `BRAND` (Farbwelt Pflaume, Logo, Name als Platzhalter, umschaltbar), Info-Seite mit Lizenz (heute Apache 2.0),
   Lizenztexten und Quellcode-Link, Kurzanleitung unter Menü → Hilfe, Diagnose für Support;
   Android mit eigenem Namen, Symbol und Paket-ID. Profil-Backup nur als
   [Vorschlag](Vorschlag-Profil-Backup.md).
