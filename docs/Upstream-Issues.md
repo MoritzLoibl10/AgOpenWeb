@@ -10,7 +10,7 @@ Issues gibt, ließ sich aus der Fork-Sitzung nicht prüfen; vor dem Anlegen kurz
 | 1 | IMU-Kurs aus PGN 253 (#357) | anlegen |
 | 2 | Mehrgeräte-Sicherheit (Beobachter-Rechte, gleichzeitiges Speichern, Klartext-Passwörter) | anlegen |
 | 3 | Arbeitsbreite: Ersatzwert 6 m im Web-Client | anlegen (Teil „Profilvorschau“ gestrichen, #350 hat ihn behoben) |
-| 4 | Eine Antenne: rückwärts zuerst gefahren → Richtung verkehrt gelernt, Lenkung rechnet falsch herum (Simulator pendelt) | anlegen (geprüft gegen d075aa2) |
+| 4 | **Dringend:** Eine Antenne, zuerst rückwärts (Ausfahren aus der Halle) → Richtung verkehrt gelernt, Motor lenkt falsch herum | anlegen, zuerst (geprüft gegen d075aa2) |
 
 ## 1. IMU heading from PGN 253 (#357): AiO v26 sends 0 for "no IMU", which now goes into the heading fusion as a real heading
 
@@ -191,19 +191,26 @@ Note: `ConfigurationStore.ActualToolWidth` itself falls back to `Tool.Width` whe
 Checked against `develop` at 9705344.
 ~~~~
 
-## 4. Single antenna: backing first learns the heading facing backwards; steering then runs for the wrong direction
+## 4. Urgent: single antenna, backing out first (e.g. out of the shed) → the heading is learned backwards and the motor steers the wrong way
 
-Stand: anlegen. Fork: `docs/Bericht-Simulator-Richtung.md`. Geprüft gegen upstream `develop` d075aa2 (25.10.2026).
+Stand: anlegen, **dringend** (als erstes der vier). Fork: `docs/Bericht-Simulator-Richtung.md`. Geprüft gegen upstream `develop` d075aa2 (25.10.2026).
 
 **Titel:**
 
 ~~~~text
-Single antenna: backing first learns the heading facing backwards; steering then runs for the wrong direction
+Urgent: single antenna, backing out first (e.g. out of the shed) → the heading is learned backwards and the motor steers the wrong way
 ~~~~
 
 **Text:**
 
 ~~~~markdown
+**Why this is urgent:** with a single antenna, the most ordinary start of the day (switch on in the shed, back out, drive to the field) leaves the host believing the tractor faces the other way. From then on, until someone taps the vehicle:
+- **backing up with AutoSteer engaged, the motor steers with the forward computation: the wrong way round, and it diverges;**
+- **with "Steer in reverse" on, driving forward, the motor steers with the reverse computation: also the wrong way round;**
+- auto sections stay on while backing and stay off driving forward.
+
+Nothing on screen says so except a 180° vehicle icon and a REVERSE badge while driving forward. It does not wear off with distance.
+
 With one antenna (with or without an IMU), the first heading is taken from the first travel above 1.5 km/h, and that travel is assumed to be forward. If it is backwards (backing out of the shed), the heading is learned facing backwards and stays that way until the operator taps the vehicle. This is known (the test `StartedWhileBacking_ForwardTravelReadsAsReverse_UntilTheDirectionIsReset` calls it "the trap", and AgOpenGPS behaves the same), but what it does to steering and sections isn't visible anywhere, and the simulator falls into it every time it is started backwards.
 
 ### Where
@@ -237,5 +244,5 @@ Reproduced in the simulator (our fork at 1b9ba20, before #415; #415 doesn't chan
    - with an IMU and a WAS, the direction can be told once the wheels are turned: forward, a left steer angle turns the heading left; backing, it turns it right. A few degrees of consistent yaw against the WAS sign could reset the direction automatically, or at least warn.
 3. Optionally keep the IMU offset across restarts (as long as the IMU and the antenna haven't moved), so a restart in the shed doesn't need a first travel.
 
-In our fork (web client only) we show a warning in the simulator when the sim's speed sign and the reverse flag disagree, with a "Reset direction" button (the existing `heading.resetDirection`), and a help page. For real GPS the client can't tell, which is why this needs the host.
+In our fork (web client only) we show a warning in the simulator when the sim's speed sign and the reverse flag disagree, with a "Reset direction" button (the existing `heading.resetDirection`). After every (re)connection, before steering is first switched on, a card asks "Does the vehicle face the way it drives?" with a live sketch (vehicle arrow + driven track) and "Yes" / "Learn the direction again"; it does not block the steer button. Plus a help page. For real GPS the client can't tell the trap itself, which is why this needs the host.
 ~~~~

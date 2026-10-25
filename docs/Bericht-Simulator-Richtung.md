@@ -126,7 +126,22 @@ Regeln nicht, es geht als Issue an upstream (`docs/Upstream-Issues.md`, Punkt 4)
    - Er erscheint auch, wenn der Host den Simulator wegen echtem GPS abschaltet.
    - Hinweis: Der Host pausiert den Simulator nicht, er schaltet ihn aus. Wenn das GPS wieder weg
      ist, muss SIM von Hand wieder an. Das sagt der Hinweis.
-3. **Hilfe-Seite „Fahrzeug zeigt in die falsche Richtung“.** Mit einer Antenne wird die Richtung
+3. **Richtungskarte vor dem ersten Lenken.** Nach jedem Verbinden mit dem Host fragt eine Karte
+   „Zeigt das Fahrzeug in Fahrtrichtung?“. Ein Host-Neustart ist für den Client ebenfalls ein
+   neues Verbinden, ein Neuladen der Seite auch.
+   - Sie erscheint nur bei Einzelantenne und nur auf dem bedienenden Gerät. Bedingung: Eine Linie
+     ist aktiv, und die Lenkung wurde in dieser Verbindung noch nicht bestätigt.
+   - Inhalt: eine Live-Skizze, Kurs oben. Der Pfeil zeigt, wohin das Fahrzeug laut Host zeigt; die
+     gestrichelte Linie ist die zuletzt gefahrene Spur (bis 30 m). Beim Vorwärtsfahren liegt sie
+     hinter dem Pfeil.
+   - Knöpfe „Ja“ und „Nein – Richtung neu lernen“. Der zweite sendet den bestehenden Befehl
+     `heading.resetDirection`. Einen Befehl zum Umdrehen um 180° gibt es nicht; der bestehende
+     lernt die Richtung aus der nächsten Vorwärtsfahrt neu. Deshalb heißt der Knopf so, und die
+     Karte bleibt danach stehen, bis „Ja“ kommt.
+   - Die Karte sperrt nichts: Der Lenk-Knopf bleibt frei und funktioniert auch mit offener Karte.
+   - Die Skizze ist gezeichnet, kein Bildausschnitt der Karte. Ein Ausschnitt aus der WebGL-Karte
+     ist in den Web-Views (WebView2, WKWebView, WebKitGTK, Android) nicht verlässlich lesbar.
+4. **Hilfe-Seite „Fahrzeug zeigt in die falsche Richtung“.** Mit einer Antenne wird die Richtung
    aus der ersten Fahrt gelernt. Zuerst rückwärts dreht sie um. Lenkung nicht einschalten,
    anhalten, aufs Fahrzeug tippen, vorwärts anfahren. Mit Dual-GPS passiert das nicht. Das ist der
    einzige Schutz für echtes GPS, denn der Web-Client kann dort nicht erkennen, wie das Fahrzeug
@@ -140,5 +155,15 @@ Regeln nicht, es geht als Issue an upstream (`docs/Upstream-Issues.md`, Punkt 4)
     Rückwärts-Kennung, Hinweis weg.
   - C: echtes GPS (GGA/VTG über UDP) beginnt bei laufendem SIM. SIM geht aus, Hinweis erscheint.
   - D: SIM einschalten bei echtem GPS. SIM bleibt aus, Hinweis erscheint.
+  - E: Richtungskarte.
+    - Ohne Linie erscheint sie nicht; mit Linie erscheint sie.
+    - Die Skizze ist gezeichnet; die Karte verdeckt den Lenk-Knopf nicht.
+    - Lenkung einschalten geht trotz Karte. „Ja“ schließt sie.
+    - Nach dem Neuladen fragt sie wieder. „Neu lernen“ setzt zurück, und die Karte bleibt.
+    - Mit Dual-GPS erscheint keine Karte.
+- Hilfe „Lenkung ein und aus“: neuer erster Schritt „Nach jedem Start erst vorwärts fahren oder
+  die Richtung auf der Karte bestätigen“.
+- Audits: `capture.js` beantwortet die Karte am Anfang mit „Ja“. So bleiben die Ansichten mit den
+  früheren Läufen vergleichbar; die Karte selbst prüft der Flow.
 - Kursbestimmung ohne IMU und mit Dual-GPS: per Wegwerf-Test an `GpsHeadingFusionService`
   geprüft, nicht eingecheckt.
