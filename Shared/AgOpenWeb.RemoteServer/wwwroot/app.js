@@ -8949,6 +8949,7 @@ const TabletBrand = (() => {
       tr('"Track left" / "Track right" move the line by one working width.')] },
     { id: 'steer', t: tr('Steering on and off'), steps: [
       tr('Steering needs a track and, as set by default, an RTK fix.'),
+      tr('After every start, drive forward first or confirm the direction on the card ("Does the vehicle face the way it drives?").'),
       tr('Tap "Steer" (bottom right). The status bar shows "Steering ON".'),
       tr('Tap "Steer" again to switch it off. Turning the steering wheel by hand can switch it off too, if this is set up.'),
       tr('"Not steering" in red: steering is on, but the motor does not steer. Steer by hand and check the steering module.'),
@@ -9225,7 +9226,7 @@ const TabletSimGuard = (() => {
     showToast(T(tr('Direction reset. Drive forward above 1.5 kph.')));
   });
   let trapSince = 0, rightSince = 0, resetAt = 0, shownAt = 0, shown = false;
-  let enablePressAt = 0, wasSim = null;
+  let enablePressAt = 0, wasSim = null, simOffAt = 0;
 
   const realGps = () => !!(statusBar && statusBar.gpsSentence && statusBar.gpsSentence !== 'SIM' && !statusBar.gpsLost);
   function refusedHint() { showToast(T(tr('Real GPS active – simulator paused. To simulate, disconnect the GPS module and switch SIM on again.')), 7000); }
@@ -9243,7 +9244,10 @@ const TabletSimGuard = (() => {
       if (!s.simEnabled) refusedHint();
       enablePressAt = 0;
     }
-    if (wasSim === true && !s.simEnabled && !enablePressAt && realGps()) refusedHint();
+    // The source shown can still read SIM in the status that turns the sim off: watch 3 s.
+    if (wasSim === true && !s.simEnabled && !enablePressAt) simOffAt = now;
+    if (simOffAt && !s.simEnabled && realGps()) { refusedHint(); simOffAt = 0; }
+    if (simOffAt && (s.simEnabled || now - simOffAt > 3000)) simOffAt = 0;
     wasSim = !!s.simEnabled;
 
     // Wrong way round: the sim's speed sign against the host's reverse flag.
@@ -9275,4 +9279,91 @@ const TabletSimGuard = (() => {
   }
   setInterval(render, 250);
   return { render };
+})();
+
+// ===== Direction check before the first steering (fix/simulator-richtung) =====================
+// With one antenna the host learns which way the vehicle faces from its first travel; backing
+// first, it learns it the wrong way round and steering then runs for the wrong direction (see
+// TabletSimGuard). After every (re)connection (a host start is one too) and before steering is
+// first switched on, a card asks "Does the vehicle face the way it drives?", with a live
+// sketch: the vehicle arrow as the host has it and the track it just drove. "Yes" closes it for
+// this connection; "Learn the direction again" sends the existing heading.resetDirection (as a
+// tap on the vehicle). The card does not block anything: Steer works with it open. Not with a
+// dual antenna (the antennas give the heading). Display only.
+const TabletSteerConfirm = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); fn(e); });
+  const PX_PER_M = 6, TRAIL_M = 30;
+  const box = el('div'); box.id = 'tui-dircheck'; box.setAttribute('translate', 'no'); box.hidden = true;
+  box.addEventListener('pointerdown', e => e.stopPropagation());
+  const cv = el('canvas', 'dc-map');
+  const title = el('div', 'dc-t'), text = el('div', 'dc-x'), row = el('div', 'dc-b');
+  const yes = el('button', 'tp-btn pri'), redo = el('button', 'tp-btn');
+  row.append(yes, redo); box.append(title, cv, text, row);
+  document.body.appendChild(box);
+  let confirmed = false, wasConnected = false, resetAt = 0, lastLang = '';
+  const trail = [];
+  onTap(yes, () => { confirmed = true; render(); });
+  onTap(redo, () => {
+    if (!iHoldControl) { showToast(T(tr('Take control to reset the direction'))); return; }
+    transport.send('heading.resetDirection');
+    resetAt = performance.now(); trail.length = 0;
+    showToast(T(tr('Direction reset. Drive forward above 1.5 kph.')));
+    render();
+  });
+  function labels() {
+    title.textContent = T(tr('Does the vehicle face the way it drives?'));
+    yes.textContent = T(tr('Yes'));
+    redo.textContent = T(tr('No – learn the direction again'));
+    lastLang = I18n.language;
+  }
+  function draw() {
+    const w = cv.clientWidth, h = cv.clientHeight, dpr = window.devicePixelRatio || 1;
+    if (!w || !h) return;
+    if (cv.width !== Math.round(w * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); }
+    const g = cv.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const cs = getComputedStyle(box);
+    g.fillStyle = cs.getPropertyValue('--dc-bg') || '#e8edf3'; g.fillRect(0, 0, w, h);
+    const p = tick && tick.pose; if (!p) return;
+    // Heading up: the vehicle arrow points up, the driven track is drawn relative to it.
+    const cx = w / 2, cy = h * 0.42, s = Math.sin(p.heading), c = Math.cos(p.heading);
+    const toScr = (e, n) => { const de = e - p.e, dn = n - p.n; return [cx + (de * c - dn * s) * PX_PER_M, cy - (de * s + dn * c) * PX_PER_M]; };
+    g.strokeStyle = cs.getPropertyValue('--dc-grid') || 'rgba(60,72,90,0.25)'; g.lineWidth = 1;
+    for (let x = cx % 30; x < w; x += 30) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, h); g.stroke(); }
+    for (let y = cy % 30; y < h; y += 30) { g.beginPath(); g.moveTo(0, y); g.lineTo(w, y); g.stroke(); }
+    if (trail.length > 1) {
+      g.strokeStyle = cs.getPropertyValue('--dc-trail') || '#2563eb'; g.lineWidth = 4; g.lineCap = 'round'; g.setLineDash([6, 6]);
+      g.beginPath(); trail.forEach((q, i) => { const [x, y] = toScr(q[0], q[1]); if (i) g.lineTo(x, y); else g.moveTo(x, y); }); g.stroke(); g.setLineDash([]);
+    }
+    g.fillStyle = cs.getPropertyValue('--dc-veh') || '#7b2d6e';
+    g.beginPath(); g.moveTo(cx, cy - 22); g.lineTo(cx + 13, cy + 14); g.lineTo(cx, cy + 6); g.lineTo(cx - 13, cy + 14); g.closePath(); g.fill();
+  }
+  function render() {
+    const now = performance.now();
+    const connected = connState === 'connected';
+    if (connected && !wasConnected) { confirmed = false; trail.length = 0; } // host start or reconnect
+    wasConnected = connected;
+    const p = tick && tick.pose;
+    if (p) {
+      const l = trail[trail.length - 1];
+      if (!l || Math.hypot(p.e - l[0], p.n - l[1]) > 0.3) trail.push([p.e, p.n]);
+      let len = 0;
+      for (let i = trail.length - 1; i > 0; i--) { len += Math.hypot(trail[i][0] - trail[i - 1][0], trail[i][1] - trail[i - 1][1]); if (len > TRAIL_M) { trail.splice(0, i - 1); break; } }
+    }
+    const s = statusBar, gps = config && config.gps, op = tick && tick.op;
+    const dual = !!(gps && gps.isDualGps && s && !s.dualHeadingMissing);
+    const show = connected && !confirmed && !dual && !!iHoldControl && !!op && (op.autoSteerAvail || op.autoSteer);
+    if (box.hidden === show) box.hidden = !show;
+    if (!show) return;
+    if (lastLang !== I18n.language || !title.textContent) labels();
+    const moved = trail.length > 3;
+    const after = resetAt && now - resetAt < 60000;
+    text.textContent = T(after ? tr('Now drive forward above 1.5 km/h, then check again.')
+      : moved ? tr('Arrow = where it faces, as the system has it. Dashed = driven track; driving forward it lies behind the arrow.')
+        : tr('Arrow = where it faces, as the system has it. Drive a few metres forward to see the track.'));
+    draw();
+  }
+  setInterval(render, 250);
+  return { render, confirm: () => { confirmed = true; render(); }, get confirmed() { return confirmed; } };
 })();

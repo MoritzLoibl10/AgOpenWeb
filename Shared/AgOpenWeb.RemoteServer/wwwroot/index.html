@@ -2006,6 +2006,20 @@
     #tui-simdir .sd-x { font: 600 var(--tui-fs-lbl)/1.4 system-ui, sans-serif; color: var(--tui-ink-2); }
     #tui-simdir .sd-b { margin-top: 10px; display: flex; justify-content: flex-end; }
     :root[data-theme="day"][data-tui-sun] #tui-simdir { border: 3px solid #000; box-shadow: none; }
+    /* Direction check before the first steering (fix/simulator-richtung): right of the vehicle. */
+    #tui-dircheck { position: fixed; z-index: 59; top: calc(var(--tui-sb-h) + 100px + var(--sat, 0px)); left: calc(50% + 60px);
+      max-height: calc(100vh - var(--tui-sb-h) - 100px - var(--tui-nav) - 24px); overflow: auto;
+      width: min(400px, calc(50vw - 80px - var(--tui-rn-w, 72px))); background: var(--tui-card); color: var(--tui-ink);
+      border: 3px solid var(--tui-warn); border-radius: 12px; padding: 10px 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.45); box-sizing: border-box;
+      --dc-bg: var(--tui-card-2); --dc-grid: var(--tui-card-line); --dc-trail: var(--tui-ink-2); --dc-veh: var(--tui-acc); }
+    #tui-dircheck[hidden] { display: none; }
+    #tui-dircheck .dc-t { font: 800 calc(var(--tui-fs-lbl) + 2px)/1.2 system-ui, sans-serif; margin-bottom: 4px; }
+    #tui-dircheck .dc-map { display: block; width: 100%; height: clamp(64px, 13vh, 140px); border-radius: 8px; }
+    #tui-dircheck .dc-x { font: 600 calc(var(--tui-fs-lbl) - 1px)/1.3 system-ui, sans-serif; color: var(--tui-ink-2); margin: 4px 0 6px; }
+    #tui-dircheck .dc-b { display: flex; gap: 8px; }
+    #tui-dircheck .dc-b .tp-btn { flex: 1 1 0; min-width: 0; white-space: normal; line-height: 1.15; padding: 4px 8px; }
+    #tui-dircheck .dc-b .tp-btn.pri { flex: 0 0 34%; }
+    :root[data-theme="day"][data-tui-sun] #tui-dircheck { border: 3px solid #000; box-shadow: none; }
   </style>
 </head>
 <body>
