@@ -10,6 +10,7 @@ Issues gibt, ließ sich aus der Fork-Sitzung nicht prüfen; vor dem Anlegen kurz
 | 1 | IMU-Kurs aus PGN 253 (#357) | anlegen |
 | 2 | Mehrgeräte-Sicherheit (Beobachter-Rechte, gleichzeitiges Speichern, Klartext-Passwörter) | anlegen |
 | 3 | Arbeitsbreite: Ersatzwert 6 m im Web-Client | anlegen (Teil „Profilvorschau“ gestrichen, #350 hat ihn behoben) |
+| 4 | Eine Antenne: rückwärts zuerst gefahren → Richtung verkehrt gelernt, Lenkung rechnet falsch herum (Simulator pendelt) | anlegen (geprüft gegen d075aa2) |
 
 ## 1. IMU heading from PGN 253 (#357): AiO v26 sends 0 for "no IMU", which now goes into the heading fusion as a real heading
 
@@ -188,4 +189,53 @@ No invented width: without sections, leave the inset empty and say the width is 
 Note: `ConfigurationStore.ActualToolWidth` itself falls back to `Tool.Width` when the section sum is 0.
 
 Checked against `develop` at 9705344.
+~~~~
+
+## 4. Single antenna: backing first learns the heading facing backwards; steering then runs for the wrong direction
+
+Stand: anlegen. Fork: `docs/Bericht-Simulator-Richtung.md`. Geprüft gegen upstream `develop` d075aa2 (25.10.2026).
+
+**Titel:**
+
+~~~~text
+Single antenna: backing first learns the heading facing backwards; steering then runs for the wrong direction
+~~~~
+
+**Text:**
+
+~~~~markdown
+With one antenna (with or without an IMU), the first heading is taken from the first travel above 1.5 km/h, and that travel is assumed to be forward. If it is backwards (backing out of the shed), the heading is learned facing backwards and stays that way until the operator taps the vehicle. This is known (the test `StartedWhileBacking_ForwardTravelReadsAsReverse_UntilTheDirectionIsReset` calls it "the trap", and AgOpenGPS behaves the same), but what it does to steering and sections isn't visible anywhere, and the simulator falls into it every time it is started backwards.
+
+### Where
+
+`GpsHeadingFusionService` (develop d075aa2):
+- `TryStartHeading` (line 338): first heading = start fix → first fix ≥ `FixToFixDistance` away. With an IMU the offset snaps onto it (`_imuGpsOffset = Wrap(AngleDelta(imuRad, _gpsHeading))`, line 360), so it is 180° out after a backwards start.
+- With an IMU, reverse = travel more than 90° off IMU + offset (line 243). After the trap, backing reads as forward and forward reads as reverse, for as long as it lasts (the 0.02 offset nudge pulls toward the flipped heading).
+- Without an IMU, reverse = filtered change > 90° against the last heading (line 273). After a backwards start the first heading is already flipped, so every forward run reads as reverse, also for as long as it lasts (checked with a scratch test like the one above, `imuValid: false`).
+- Dual antenna: not affected.
+
+### What it does while the heading is flipped
+
+| Really | Host thinks | Effect |
+|---|---|---|
+| forward | reverse | Heading 180° out, REVERSE badge. Auto sections stay off (`IsReversing`). Steering paused (PGN 254 status 0), **unless Steer in reverse is on: then the motor steers with the reverse computation while driving forward.** |
+| backing | forward | No reverse pause. **With AutoSteer engaged the motor steers with the forward computation while backing: wrong way round, it diverges.** Auto sections are not switched off in reverse. |
+
+Reproduced in the simulator (our fork at 1b9ba20, before #415; #415 doesn't change this, as a paused steer still counts as engaged): start the sim, set −3 km/h first: heading 180°, no reverse flag; then +3 km/h: heading stays 180°, reverse flag on. A line 8° off, AutoSteer on: started forward, the sim captures the line (XTE < 0.1 m); started backwards, it runs off and swings (XTE up to 25 m, steer angle −35° … +23°). Not tested on real hardware.
+
+### The simulator part
+
+- The sim reports a signed speed (`Speed = simulatedData.SpeedKmh / 3.6`, MainViewModel.Simulator.cs:101) and its true heading as the IMU heading (line 119), but `FuseHeading` uses `Math.Abs(speedMs)`, so the sim always falls into the trap when started backwards.
+- While steering is paused for reverse (`steerPaused`, GpsPipelineService.cs:1017), the sim still follows the guidance angle: `simFollowsGuidance = g.HasGuidance && IsAutoSteerEngaged` (MainViewModel.ApplyResults.cs:231, #415). A real motor would stand still (status 0); the sim steers with the reverse computation, which is the swinging above.
+
+### Proposal
+
+1. **Sim:** follow guidance only while it actually steers (engaged and not `IsSteerPaused`), like the motor. And/or let the first heading use the sign of the speed when the source is the simulator (NMEA speed is unsigned, so this changes nothing for real GPS).
+2. **Real GPS, single antenna:** make the trap visible and harmless:
+   - after the first heading is learned, say so ("Direction learned from the first travel – if the vehicle faces the wrong way, tap it");
+   - don't allow engaging AutoSteer within the first few metres after a first heading, or until it has been confirmed by travel with a steer angle;
+   - with an IMU and a WAS, the direction can be told once the wheels are turned: forward, a left steer angle turns the heading left; backing, it turns it right. A few degrees of consistent yaw against the WAS sign could reset the direction automatically, or at least warn.
+3. Optionally keep the IMU offset across restarts (as long as the IMU and the antenna haven't moved), so a restart in the shed doesn't need a first travel.
+
+In our fork (web client only) we show a warning in the simulator when the sim's speed sign and the reverse flag disagree, with a "Reset direction" button (the existing `heading.resetDirection`), and a help page. For real GPS the client can't tell, which is why this needs the host.
 ~~~~
