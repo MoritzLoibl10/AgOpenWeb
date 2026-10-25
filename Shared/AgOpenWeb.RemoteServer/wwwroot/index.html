@@ -1997,6 +1997,15 @@
       font: 700 var(--tui-fs-lbl)/1.3 system-ui, sans-serif; }
     #tui-hdgchk.warn { border-color: var(--tui-warn); }
     :root[data-theme="day"][data-tui-sun] #tui-hdgchk { border: 2px solid #000; box-shadow: none; }
+    /* Simulator direction learned the wrong way round (fix/simulator-richtung). */
+    #tui-simdir { position: fixed; z-index: 60; left: 50%; top: 38%; transform: translate(-50%, -50%);
+      width: min(520px, calc(100vw - 32px)); background: var(--tui-card); color: var(--tui-ink); border: 3px solid var(--tui-warn);
+      border-radius: 12px; padding: 12px 14px; box-shadow: 0 6px 20px rgba(0,0,0,0.45); box-sizing: border-box; }
+    #tui-simdir[hidden] { display: none; }
+    #tui-simdir .sd-t { font: 800 calc(var(--tui-fs-lbl) + 2px)/1.3 system-ui, sans-serif; margin-bottom: 6px; }
+    #tui-simdir .sd-x { font: 600 var(--tui-fs-lbl)/1.4 system-ui, sans-serif; color: var(--tui-ink-2); }
+    #tui-simdir .sd-b { margin-top: 10px; display: flex; justify-content: flex-end; }
+    :root[data-theme="day"][data-tui-sun] #tui-simdir { border: 3px solid #000; box-shadow: none; }
   </style>
 </head>
 <body>

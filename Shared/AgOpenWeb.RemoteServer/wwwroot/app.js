@@ -8930,6 +8930,8 @@ const TabletBrand = (() => {
     rtk: () => sv(box(10, 20, 96, 40, 'RTK Fix', 'hb f1') + box(112, 20, 96, 40, 'RTK Float', 'hb f2') + box(214, 20, 96, 40, 'DGPS', 'hb f3') +
       '<text class="ht" x="58" y="84" text-anchor="middle">———</text><text class="ht" x="160" y="84" text-anchor="middle">- - -</text><text class="ht" x="262" y="84" text-anchor="middle">· · ·</text>' + box(10, 106, 300, 40, tr('Network & GPS'))),
     band: () => sv('<rect class="hband" x="20" y="60" width="280" height="50" rx="10"/><text class="ht inv" x="160" y="90" text-anchor="middle">' + esc(T(tr('Profile not completely saved'))) + '</text>'),
+    direction: () => sv('<path class="hl" d="M160 150 L160 20"/><path class="hl" d="M146 40 L160 20 L174 40"/>' +
+      box(110, 70, 100, 60, tr('Vehicle'), 'hb acc') + box(10, 14, 92, 34, tr('REVERSE'), 'hb f2') + box(218, 14, 92, 34, tr('Tap'), 'hb')),
     usb: () => sv(box(10, 40, 110, 90, tr('Tablet')) + '<path class="hl" d="M120 85 H200"/>' + box(200, 40, 110, 90, 'PC') + '<text class="ht" x="160" y="76" text-anchor="middle">USB</text>'),
   };
   const PAGES = [
@@ -8967,6 +8969,12 @@ const TabletBrand = (() => {
       tr('Tap the band. You see which values were meant to be saved and what is there now.'),
       tr('"Send again and save" sends the same values again. When editing, "Put the old values back" restores the previous ones.'),
       tr('The band only goes away when one of the two has been confirmed. Do not drive with steering until then.')] },
+    { id: 'direction', t: tr('Vehicle faces the wrong way'), steps: [
+      tr('With one antenna, the direction the vehicle faces is learned from its first travel above 1.5 km/h.'),
+      tr('If that first travel is backwards, it is learned the wrong way round: reversing shows as forward, and forward shows "REVERSE".'),
+      tr('Then the steering would be computed for the wrong direction, and the auto sections stay off driving forward. Do not engage steering.'),
+      tr('Stop, tap the vehicle on the map ("Reset direction"), then drive forward above 1.5 km/h.'),
+      tr('So after switching on, drive forward first if you can. With two antennas (Dual GPS) this does not happen.')] },
     { id: 'usb', t: tr('Back up profiles by USB copy'), warn: tr('Not checked on a real tablet yet.'), steps: [
       tr('Close the app. Connect the tablet to a PC by USB and choose "File transfer" on the tablet.'),
       tr('On the PC open: Android/data/at.loibl.lenksystem/files/AgOpenWeb/'),
@@ -9184,6 +9192,86 @@ const TabletHeadingCheck = (() => {
     warn.innerHTML = '';
     for (const t of w) warn.appendChild(Object.assign(document.createElement('div'), { textContent: '⚠ ' + t }));
     box.classList.toggle('warn', w.length > 0);
+  }
+  setInterval(render, 250);
+  return { render };
+})();
+
+// ===== Simulator direction (fix/simulator-richtung) ===========================================
+// The heading stage learns which way the vehicle faces from its first travel above 1.5 km/h
+// (GpsHeadingFusionService.TryStartHeading). Backing first, it learns it the wrong way round:
+// backing then shows as driving forward, forward as reversing, and the steering the guidance
+// computes is for the wrong direction. In the simulator the speed's sign says which way it
+// really goes, so the mix-up can be told for sure; this shows it and offers the existing
+// "Reset direction" (the same command as a tap on the vehicle). Display only: nothing is sent
+// unless the operator taps the button. With real GPS the client can't tell; see the help.
+// Also: real GPS present → the host keeps the simulator off; say so instead of a silent SIM button.
+const TabletSimGuard = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); fn(e); });
+  const MOVING_MPS = 0.3, TRAP_MS = 3000, RIGHT_MS = 2000, REFUSE_MS = 1500;
+  const box = document.createElement('div');
+  box.id = 'tui-simdir'; box.setAttribute('translate', 'no'); box.hidden = true;
+  box.innerHTML = '<div class="sd-t"></div><div class="sd-x"></div><div class="sd-b"></div>';
+  document.body.appendChild(box);
+  box.addEventListener('pointerdown', e => e.stopPropagation());
+  const [title, text, row] = box.children;
+  const btn = el('button', 'tp-btn pri'); row.appendChild(btn);
+  onTap(btn, () => {
+    if (!iHoldControl) { showToast(T(tr('Take control to reset the direction'))); return; }
+    transport.send('heading.resetDirection');
+    resetAt = performance.now();
+    showToast(T(tr('Direction reset. Drive forward above 1.5 kph.')));
+  });
+  let trapSince = 0, rightSince = 0, resetAt = 0, shownAt = 0, shown = false;
+  let enablePressAt = 0, wasSim = null;
+
+  const realGps = () => !!(statusBar && statusBar.gpsSentence && statusBar.gpsSentence !== 'SIM' && !statusBar.gpsLost);
+  function refusedHint() { showToast(T(tr('Real GPS active – simulator paused. To simulate, disconnect the GPS module and switch SIM on again.')), 7000); }
+  // The SIM switch on the sim bar: if the host keeps it off, a live GPS source is the reason (#478).
+  const simEnable = document.getElementById('sim-enable');
+  if (simEnable) simEnable.addEventListener('pointerdown', () => {
+    if (statusBar && !statusBar.simEnabled) enablePressAt = performance.now();
+  }, true);
+
+  function render() {
+    const s = statusBar, now = performance.now();
+    if (!s) return;
+    // Refused switch-on, or switched off by the host because real GPS started arriving.
+    if (enablePressAt && now - enablePressAt > REFUSE_MS) {
+      if (!s.simEnabled) refusedHint();
+      enablePressAt = 0;
+    }
+    if (wasSim === true && !s.simEnabled && !enablePressAt && realGps()) refusedHint();
+    wasSim = !!s.simEnabled;
+
+    // Wrong way round: the sim's speed sign against the host's reverse flag.
+    const gps = config && config.gps;
+    const live = connState === 'connected' && !!lastTick && now - lastTick.t < 2000;
+    const v = (s.simSpeedKph || 0);
+    const moving = live && Math.abs(lastTick.speed || 0) > MOVING_MPS;
+    const rev = !!(tick && tick.op && tick.op.reverse);
+    const dual = gps && gps.isDualGps && !s.dualHeadingMissing;
+    const checkable = s.simEnabled && moving && !dual && !(gps && gps.reverseDetection === false);
+    const wrong = checkable && ((v > 0 && rev) || (v < 0 && !rev));
+    trapSince = wrong ? (trapSince || now) : 0;
+    // Shown after TRAP_MS of the mix-up; it stays while standing (stopping is the first step
+    // of the fix) and goes after a reset, with the sim off, or after RIGHT_MS of travel the
+    // right way round.
+    rightSince = checkable && !wrong ? (rightSince || now) : 0;
+    let show = shown;
+    if (!shown && trapSince && now - trapSince >= TRAP_MS && now - resetAt > 3000) show = true;
+    if (shown && (!s.simEnabled || resetAt > shownAt || (rightSince && now - rightSince >= RIGHT_MS))) show = false;
+    if (show !== shown) {
+      shown = show; box.hidden = !show;
+      if (show) {
+        shownAt = now;
+        title.textContent = '⚠ ' + T(tr('Simulator: direction learned the wrong way round'));
+        text.textContent = T(tr('The first travel was backwards, so the heading was learned facing backwards: reversing shows as forward and forward as reversing. Steering computed now is for the wrong direction; do not engage it. Stop, reset the direction, then drive forward.'));
+        btn.textContent = T(tr('Reset direction'));
+      }
+    }
   }
   setInterval(render, 250);
   return { render };
