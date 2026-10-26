@@ -10295,6 +10295,7 @@ const TabletBrand = (() => {
     src.appendChild(link('AgOpenWeb', BRAND.upstream));
     src.appendChild(link('AgOpenGPS', BRAND.agopengps));
     box.appendChild(src);
+    try { box.appendChild(TabletUpdate.box()); } catch (_) { /* not loaded yet */ } // fork: update check
     const sw = el('div', 'tb-box');
     sw.appendChild(Object.assign(el('div', 'tb-lbl'), { textContent: T(tr('Look')) }));
     const seg = el('div', 'tp-seg');
@@ -11722,3 +11723,81 @@ const TabletFirstSetup = (() => {
   }, 300);
   return { open };
 })();
+
+// ===== Update check (feature/auslieferung) ====================================================
+// Asks GitHub for the releases of this fork (BRAND.source) and says whether a newer one exists:
+// a hint with a link, nothing is downloaded or installed. Runs from the browser (GitHub's API
+// allows any origin), so the host is not involved; it needs internet on this device. "Newer" is
+// only claimed when this build's commit (appInfo.gitHash) is itself one of the releases and a
+// later one exists; otherwise the newest release is shown without comparing. On demand (Info) or
+// at start, if switched on for this device.
+// update:begin
+const TabletUpdate = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
+  const KEY = 'aow.update.onStart';
+  const api = () => BRAND.source.replace('https://github.com/', 'https://api.github.com/repos/') + '/releases?per_page=30';
+  let state = { busy: false, res: null };
+  const onStart = () => { try { return localStorage.getItem(KEY) === '1'; } catch (_) { return false; } };
+
+  // releases (GitHub JSON) + this build's hash → { kind: 'newer'|'current'|'unknown', latest, mine }
+  function compare(releases, hash) {
+    const list = (releases || []).filter(r => r && !r.draft && r.published_at)
+      .sort((a, b) => String(b.published_at).localeCompare(String(a.published_at)));
+    if (!list.length) return { kind: 'none' };
+    const h = String(hash || '').replace(/-dirty$/, '').toLowerCase();
+    const mine = h.length >= 7 ? list.find(r => String(r.target_commitish || '').toLowerCase().startsWith(h)) : null;
+    const latest = list[0];
+    if (!mine) return { kind: 'unknown', latest };
+    return { kind: mine === latest ? 'current' : 'newer', latest, mine };
+  }
+  async function check() {
+    state = { busy: true, res: null }; refresh();
+    try {
+      const r = await fetch(api(), { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      state = { busy: false, res: compare(await r.json(), appInfo && appInfo.gitHash) };
+    } catch (e) { state = { busy: false, res: { kind: 'error', why: String(e && e.message || e) } }; }
+    refresh();
+    return state.res;
+  }
+  let host = null;
+  function refresh() { if (host && host.isConnected) fill(host); }
+  const day = s => { try { return new Date(s).toLocaleDateString(I18n.language || undefined); } catch (_) { return s; } };
+  function fill(b) {
+    b.innerHTML = '';
+    b.appendChild(el('div', 'tb-lbl', T(tr('Updates'))));
+    const r = state.res;
+    if (state.busy) b.appendChild(el('div', 'tp-note', T(tr('Checking GitHub…'))));
+    else if (r && r.kind === 'error') b.appendChild(el('div', 'tp-note warn', tr('No answer from GitHub ({f}). Internet on this device?', { f: r.why })));
+    else if (r && r.kind === 'none') b.appendChild(el('div', 'tp-note', T(tr('No release published yet.'))));
+    else if (r) {
+      const L = r.latest, name = L.name || L.tag_name;
+      const txt = r.kind === 'newer' ? tr('A newer version is available: {n} ({d}).', { n: name, d: day(L.published_at) })
+        : r.kind === 'current' ? tr('This is the newest version ({n}).', { n: name })
+          : tr('Newest published version: {n} ({d}). This build is not one of the published ones, so it is not compared.', { n: name, d: day(L.published_at) });
+      b.appendChild(el('div', 'tp-note' + (r.kind === 'newer' ? ' warn' : ''), txt));
+      if (r.kind !== 'current') {
+        const a = el('button', 'tp-btn', T(tr('Open the release page')) + ' ↗'); onTap(a, () => openExternal(L.html_url)); b.appendChild(a);
+      }
+      b.appendChild(el('div', 'tp-note', T(tr('Installing stays with you: download and install the new version yourself.'))));
+    }
+    const row = el('div', 'tb-row');
+    const go = el('button', 'tp-btn pri', T(tr('Check for updates'))); go.disabled = state.busy; onTap(go, check); row.appendChild(go);
+    const tg = el('button', 'tp-btn' + (onStart() ? ' pri' : ''), (onStart() ? '✓ ' : '') + T(tr('Check at start')));
+    onTap(tg, () => { try { localStorage.setItem(KEY, onStart() ? '0' : '1'); } catch (_) { /* ignore */ } refresh(); });
+    row.appendChild(tg);
+    b.appendChild(row);
+  }
+  function box() { host = el('div', 'tb-box'); fill(host); return host; }
+  // At start (opt-in): once appInfo is there; only a newer version is announced.
+  const auto = setInterval(() => {
+    if (!onStart()) { clearInterval(auto); return; }
+    if (!appInfo) return;
+    clearInterval(auto);
+    check().then(r => { if (r && r.kind === 'newer') showToast(T(tr('A newer version is available: {n} ({d}).', { n: r.latest.name || r.latest.tag_name, d: day(r.latest.published_at) })) + ' ' + T(tr('Setup → Info')), 8000); });
+  }, 1000);
+  return { check, box, compare };
+})();
+// update:end
