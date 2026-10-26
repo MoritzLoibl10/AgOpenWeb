@@ -312,6 +312,8 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
   Photino (Apache 2.0) und SkiaSharp (MIT) fehlen; das ist auch upstream so.
 - **Vorschlag:** `COPYING` und `SOURCE.txt` ins Windows-ZIP; eine Seite „Drittkomponenten“ in
   der Info-Seite.
+- **Stand (Auslieferung):** Seite „Drittkomponenten“ unter Einrichtung → Info; offene Punkte in
+  `docs/Drittkomponenten.md`.
 - **Host-Änderung nötig:** nein
 
 ### 21. „Gespeichert“ beweist nicht, dass der Host auf die Platte geschrieben hat

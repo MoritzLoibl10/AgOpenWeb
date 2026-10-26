@@ -1399,6 +1399,7 @@
   "The vehicle is moving. Stop to import.": "The vehicle is moving. Stop to import.",
   "Then the steering would be computed for the wrong direction, and the auto sections stay off driving forward. Do not engage steering.": "Then the steering would be computed for the wrong direction, and the auto sections stay off driving forward. Do not engage steering.",
   "These values for \"{name}\" are not saved:": "These values for \"{name}\" are not saved:",
+  "Third-party components": "Third-party components",
   "This backup has a format version this app does not support.": "This backup has a format version this app does not support.",
   "This card connects when the other terminal lets it go.": "This card connects when the other terminal lets it go.",
   "This mount point does not send RTCM 3. Its data is forwarded as it comes.": "This mount point does not send RTCM 3. Its data is forwarded as it comes.",

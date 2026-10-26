@@ -10235,7 +10235,8 @@ const TabletBrand = (() => {
   apply();
 
   // --- Setup → Info: name, version, origin, licence, source --------------------------------
-  const LIC = { apache: ['tui-lic-apache', 'Apache License 2.0'] }; // LICENSE.md, embedded in index.html
+  const LIC = { apache: ['tui-lic-apache', 'Apache License 2.0'], // LICENSE.md, embedded in index.html
+    third: ['tui-lic-third', tr('Third-party components')] }; // fork: index.html, block third-party:begin/end
   const sheet = el('div', 'tui-sheet tb-sheet', '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>');
   sheet.id = 'tb-sheet';
   const scrim = el('div', 'tp-scrim');
@@ -10253,7 +10254,7 @@ const TabletBrand = (() => {
   }
   function showLicense(k) {
     const [id, name] = LIC[k], src = $(id);
-    openSheet(name, b => {
+    openSheet(T(name), b => {
       const back = el('button', 'tp-btn'); back.textContent = '← Info'; onTap(back, () => openInfo());
       b.appendChild(back);
       const pre = el('pre', 'tb-lic'); pre.setAttribute('translate', 'no');
@@ -10284,7 +10285,8 @@ const TabletBrand = (() => {
     ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Provided “as is”, without warranties or conditions of any kind (see the licence text).')) }));
     const lr = el('div', 'tb-row');
     const ba = el('button', 'tp-btn'); ba.textContent = T(tr('Licence text (Apache 2.0)')); onTap(ba, () => showLicense('apache'));
-    lr.append(ba); ori.appendChild(lr);
+    const b3 = el('button', 'tp-btn'); b3.textContent = T(tr('Third-party components')); onTap(b3, () => showLicense('third'));
+    lr.append(ba, b3); ori.appendChild(lr);
     box.appendChild(ori);
     const src = el('div', 'tb-box');
     src.appendChild(Object.assign(el('div', 'tb-lbl'), { textContent: T(tr('Source code of this version')) }));

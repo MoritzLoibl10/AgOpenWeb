@@ -4045,6 +4045,51 @@
   <script src="/i18n.js"></script>
   <script src="/app.js"></script>
   <!-- Phase 4a: the licence text shown under Setup → Info (offline): LICENSE.md, Apache 2.0. -->
+  <!-- third-party:begin -->
+  <!-- Fork (feature/auslieferung): Setup → Info → Third-party components. Gathered from the repo
+       (csproj PackageReferences, NuGet package metadata, wwwroot/vendor, docs/Geodaten-Herkunft.md);
+       docs/Drittkomponenten.md has the sources and the open points. The licence check skips only
+       this block (Tools/license-headers.py). -->
+  <script type="text/plain" id="tui-lic-third">
+Third-party components in this app
+==================================
+
+AgOpenWeb itself: Apache License 2.0 (see "Licence text").
+The components below come with the app; each keeps its own licence.
+
+Web client
+----------
+CanvasKit (Skia for WebAssembly), wwwroot/vendor/canvaskit.js, canvaskit.wasm
+  Google / Skia project. BSD-3-Clause (no licence file in the repository yet).
+
+Map data
+--------
+Grid AT_GIS_GRID (2014), MGI -> ETRS89, file at_bev_AT_GIS_GRID.tif (eAMA import)
+  Source: BEV – Bundesamt für Eich- und Vermessungswesen (Austria).
+  Licence: Creative Commons Attribution 4.0 International (CC BY 4.0).
+  Converted to GeoTIFF by the PROJ project (OSGeo/PROJ-data), otherwise unchanged.
+
+.NET libraries (NuGet)
+----------------------
+CommunityToolkit.Mvvm 8.4.0 ............ MIT
+Microsoft.Extensions.DependencyInjection, Hosting, Hosting.Systemd,
+  Hosting.WindowsServices, Logging, Logging.Abstractions, Logging.Console,
+  Logging.Debug 9.0.0 .................. MIT
+System.IO.Ports 9.0.0 .................. MIT
+Newtonsoft.Json 13.0.3 ................. MIT
+SkiaSharp 3.119.4 and SkiaSharp.NativeAssets (Android, iOS, Linux.NoDependencies,
+  macOS, Win32) 3.119.4 ................ MIT
+Clipper2 1.5.4 (Angus Johnson) ......... Boost Software License 1.0
+Dev4Agriculture.ISO11783.ISOXML 0.23.1.1 Apache License 2.0
+Photino.NET 4.0.16, Photino.Native ..... Apache License 2.0 (desktop window)
+StbImageSharp 2.30.15 .................. licence not stated in the package data
+
+.NET runtime
+------------
+The desktop packages (Windows, Linux, macOS) contain the .NET 10 runtime
+(self-contained). Microsoft, MIT.
+  </script>
+  <!-- third-party:end -->
   <script type="text/plain" id="tui-lic-apache">
                                  Apache License
                            Version 2.0, January 2004

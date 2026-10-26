@@ -1399,6 +1399,7 @@
   "The vehicle is moving. Stop to import.": "Das Fahrzeug fährt. Zum Übernehmen anhalten.",
   "Then the steering would be computed for the wrong direction, and the auto sections stay off driving forward. Do not engage steering.": "Dann würde die Lenkung für die falsche Richtung berechnet, und die automatischen Teilbreiten bleiben beim Vorwärtsfahren aus. Lenkung nicht einschalten.",
   "These values for \"{name}\" are not saved:": "Diese Werte für „{name}“ werden nicht gespeichert:",
+  "Third-party components": "Drittkomponenten",
   "This backup has a format version this app does not support.": "Diese Sicherung stammt aus einer neueren oder anderen Version. App aktualisieren oder andere Sicherung wählen.",
   "This card connects when the other terminal lets it go.": "Diese Karte verbindet sich, sobald das andere Terminal sie freigibt.",
   "This mount point does not send RTCM 3. Its data is forwarded as it comes.": "Dieser Mountpoint sendet kein RTCM 3. Die Daten werden unverändert weitergegeben.",
