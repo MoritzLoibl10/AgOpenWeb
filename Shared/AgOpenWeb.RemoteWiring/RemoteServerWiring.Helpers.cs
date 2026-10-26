@@ -725,6 +725,9 @@ public static partial class RemoteServerWiring
                     var v = store.ActiveVehicleProfileName; var t = store.ActiveToolProfileName;
                     if (r.Written.Contains("vehicle:" + v, StringComparer.OrdinalIgnoreCase) || r.Written.Contains("tool:" + t, StringComparer.OrdinalIgnoreCase))
                         cfg.LoadProfiles(v, t);
+                    // NTRIP profiles from the new files (the list the NTRIP panel shows).
+                    if (r.Written.Any(x => x.StartsWith("ntrip:", StringComparison.Ordinal)))
+                        _ = services.GetRequiredService<INtripProfileService>().LoadProfilesAsync();
                     BackupState(services, b =>
                     {
                         b["op"] = "apply"; b["busy"] = false; b["ok"] = true; b["err"] = null;
@@ -732,6 +735,7 @@ public static partial class RemoteServerWiring
                         {
                             ["auto"] = System.IO.Path.GetFileName(r.AutoBackup),
                             ["written"] = new System.Text.Json.Nodes.JsonArray(r.Written.Select(x => (System.Text.Json.Nodes.JsonNode?)x).ToArray()),
+                            ["needPassword"] = new System.Text.Json.Nodes.JsonArray(r.NeedPassword.Select(x => (System.Text.Json.Nodes.JsonNode?)x).ToArray()),
                         };
                     });
                 }

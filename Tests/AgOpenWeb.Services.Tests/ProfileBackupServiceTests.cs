@@ -30,7 +30,7 @@ public class ProfileBackupServiceTests
         Write(_src, "Fields/Acker 1/field.geojson", "{ \"type\": \"FeatureCollection\", \"features\": [] }");
         Write(_src, "Fields/Acker 1/background.png", "PNG");
         Write(_src, "Fields/Acker 1/jobs/Mais/coverage/0_0.bin", "COVERAGE");
-        Write(_src, "NtripProfiles/Apos.json", "{ \"Password\": \"geheim\" }");
+        Write(_src, "NtripProfiles/Apos.json", "{ \"name\": \"Apos\", \"casterHost\": \"apos.at\", \"username\": \"bauer\", \"password\": \"geheim\" }");
         Write(_src, "appsettings.json", "{ \"AgShareApiKey\": \"schluessel\" }");
     }
 
@@ -53,12 +53,12 @@ public class ProfileBackupServiceTests
         : new List<string>();
 
     [Test]
-    public void Export_TakesProfilesAndFields_NotJobsNtripOrSettings()
+    public void Export_TakesProfilesFieldsAndNtrip_NotJobsOrSettings()
     {
         using var zip = ZipFile.OpenRead(Export());
         var names = zip.Entries.Select(e => e.FullName).OrderBy(n => n).ToList();
         Assert.That(names, Is.EqualTo(new[] { "Fields/Acker 1/background.png", "Fields/Acker 1/field.geojson", "manifest.json",
-            "Tools/Spritze.json", "Vehicles/Fendt.AutoSteer.json", "Vehicles/Fendt.json" }));
+            "NtripProfiles/Apos.json", "Tools/Spritze.json", "Vehicles/Fendt.AutoSteer.json", "Vehicles/Fendt.json" }));
     }
 
     [Test]
@@ -85,15 +85,17 @@ public class ProfileBackupServiceTests
     {
         var zip = Export();
         var items = B.Preview(zip, _dst);
-        Assert.That(items.Select(i => i.Key), Is.EqualTo(new[] { "field:Acker 1", "tool:Spritze", "vehicle:Fendt" }));
+        Assert.That(items.Select(i => i.Key), Is.EqualTo(new[] { "field:Acker 1", "ntrip:Apos", "tool:Spritze", "vehicle:Fendt" }));
         Assert.That(items.All(i => i.State == B.ItemState.New), Is.True);
 
         var r = B.Apply(zip, _dst, items.Select(i => i.Key), _bak, "26.7.0-test");
-        Assert.That(r.Written, Has.Count.EqualTo(3));
+        Assert.That(r.Written, Has.Count.EqualTo(4));
+        Assert.That(r.NeedPassword, Is.EqualTo(new[] { "Apos" }), "new NTRIP profile: password to enter again");
         Assert.That(File.Exists(r.AutoBackup), Is.True, "a backup of the state before the import");
         foreach (var rel in new[] { "Vehicles/Fendt.json", "Vehicles/Fendt.AutoSteer.json", "Tools/Spritze.json", "Fields/Acker 1/field.geojson", "Fields/Acker 1/background.png" })
             Assert.That(Read(_dst, rel), Is.EqualTo(Read(_src, rel)), rel);
-        Assert.That(AllFiles(_dst).Any(f => f.Contains("jobs/") || f.StartsWith("NtripProfiles")), Is.False);
+        Assert.That(AllFiles(_dst).Any(f => f.Contains("jobs/") || f == "appsettings.json"), Is.False);
+        Assert.That(Read(_dst, "NtripProfiles/Apos.json"), Does.Contain("apos.at").And.Contain("bauer").And.Not.Contain("geheim"));
         Assert.That(B.Preview(zip, _dst).All(i => i.State == B.ItemState.Same), Is.True);
 
         Write(_dst, "Vehicles/Fendt.json", "{ \"Vehicle\": { \"Wheelbase\": 3.1, \"TrackWidth\": 1.9 } }");
@@ -106,6 +108,32 @@ public class ProfileBackupServiceTests
         v = B.Preview(zip, _dst).Single(i => i.Key == "vehicle:Fendt");
         Assert.That(v.State, Is.EqualTo(B.ItemState.Overwrites));
         Assert.That(v.Changes, Is.EqualTo(new[] { "+ Fendt.json" }));
+    }
+
+    [Test]
+    public void Ntrip_ExportedWithoutPassword_KeepsUserName()
+    {
+        var all = Encoding.UTF8.GetString(ReadAllEntries(Export()));
+        Assert.That(all, Does.Not.Contain("geheim"));
+        Assert.That(all, Does.Contain("bauer"));
+    }
+
+    [Test]
+    public void Ntrip_ImportKeepsTheStoredPassword_AndPreviewIgnoresIt()
+    {
+        Write(_dst, "NtripProfiles/Apos.json", "{ \"name\": \"Apos\", \"casterHost\": \"apos.at\", \"username\": \"bauer\", \"password\": \"lokal\" }");
+        var zip = Export();
+        Assert.That(B.Preview(zip, _dst).Single(i => i.Key == "ntrip:Apos").State, Is.EqualTo(B.ItemState.Same), "the password alone is no difference");
+
+        Write(_dst, "NtripProfiles/Apos.json", "{ \"name\": \"Apos\", \"casterHost\": \"alt.at\", \"username\": \"bauer\", \"password\": \"lokal\" }");
+        var it = B.Preview(zip, _dst).Single(i => i.Key == "ntrip:Apos");
+        Assert.That(it.State, Is.EqualTo(B.ItemState.Overwrites));
+        Assert.That(it.Changes, Is.EqualTo(new[] { "casterHost: \"alt.at\" → \"apos.at\"" }));
+
+        var r = B.Apply(zip, _dst, new[] { "ntrip:Apos" }, _bak, "t");
+        Assert.That(r.NeedPassword, Is.Empty);
+        var now = Read(_dst, "NtripProfiles/Apos.json");
+        Assert.That(now, Does.Contain("apos.at").And.Contain("lokal"));
     }
 
     [Test]
@@ -150,7 +178,7 @@ public class ProfileBackupServiceTests
 
     private void AssertRefused(string zip, string code)
     {
-        var e = Assert.Throws<B.BackupException>(() => B.Apply(zip, _dst, new[] { "vehicle:Fendt", "tool:Spritze", "field:Acker 1" }, _bak, "t"));
+        var e = Assert.Throws<B.BackupException>(() => B.Apply(zip, _dst, new[] { "vehicle:Fendt", "tool:Spritze", "field:Acker 1", "ntrip:Apos" }, _bak, "t"));
         Assert.That(e!.Code, Is.EqualTo(code));
         Assert.Throws<B.BackupException>(() => B.Preview(zip, _dst));
         Assert.That(AllFiles(_dst), Is.Empty, "nothing written");

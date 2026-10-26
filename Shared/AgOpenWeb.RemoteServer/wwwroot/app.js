@@ -10008,7 +10008,8 @@ const TabletBench = (() => {
 })();
 
 // ===== Back up and restore profiles (feature/profil-backup), setup mode =======================
-// Export: the host packs vehicles, tools and fields into one ZIP (backup.create), offered as a
+// Export: the host packs vehicles, tools, fields and the NTRIP profiles (without password) into
+// one ZIP (backup.create), offered as a
 // download like the bug report. Import: a ZIP copied into the Import folder, with a preview
 // "new / overwrites / same" per entry (backup.preview), then the chosen entries
 // (backup.apply, the operating device only; the host first saves the current state and refuses
@@ -10018,7 +10019,7 @@ const TabletBackup = (() => {
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
   const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
   const STILL_MPS = 0.15;
-  const KIND = { vehicle: tr('Vehicle'), tool: tr('Tool'), field: tr('Field') };
+  const KIND = { vehicle: tr('Vehicle'), tool: tr('Tool'), field: tr('Field'), ntrip: tr('NTRIP profile') };
   const STATE = { new: tr('new'), overwrites: tr('overwrites'), same: tr('same') };
   const ERR = {
     notzip: tr('The file is not a readable ZIP file.'),
@@ -10089,8 +10090,8 @@ const TabletBackup = (() => {
     // Export
     const ex = el('div', 'tb-box');
     ex.appendChild(el('div', 'tb-lbl', T(tr('Back up'))));
-    ex.appendChild(el('div', '', T(tr('One file with all vehicles, tools and fields (boundaries, tracks, headland, background image).'))));
-    ex.appendChild(el('div', 'tp-note', T(tr('Not included: the worked area of the jobs, the NTRIP profiles and all passwords (NTRIP, AgShare). Enter the NTRIP access again after a restore.'))));
+    ex.appendChild(el('div', '', T(tr('One file with all vehicles, tools, fields (boundaries, tracks, headland, background image) and NTRIP profiles.'))));
+    ex.appendChild(el('div', 'tp-note', T(tr('Not included: the worked area of the jobs and all passwords (NTRIP, AgShare). NTRIP profiles come without their password; on restore a password stored on that device is kept.'))));
     ex.appendChild(el('div', 'tp-note warn', T(tr('The file contains your fields with their positions. Only pass it on to someone you trust.'))));
     const exRow = el('div', 'tb-row');
     const mk = el('button', 'tp-btn pri big', T(tr('Create backup')));
@@ -10179,6 +10180,7 @@ const TabletBackup = (() => {
       if (done.err) resBox.appendChild(el('div', 'tp-note bad', done.err));
       else if (done.applied) {
         resBox.appendChild(el('div', 'tp-note', T(tr('Imported: {n} entries.')).replace('{n}', (done.applied.written || []).length)));
+        for (const n of done.applied.needPassword || []) resBox.appendChild(el('div', 'tp-note warn', T(tr('Enter the password for NTRIP profile {n} again (Setup → Network & GPS).')).replace('{n}', n)));
         const ab = el('div', 'tb-row');
         const fn = el('span', 'tp-note', T(tr('Saved before the import:')) + ' ' + done.applied.auto); ab.appendChild(fn);
         const dl = el('button', 'tp-btn', T(tr('Download')) + ' ↓');

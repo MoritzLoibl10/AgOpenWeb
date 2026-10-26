@@ -245,12 +245,20 @@ und Steuerlogik ist nicht berührt.
 
 ### Verhalten
 - **Export:** `Vehicles/*.json` und `Tools/*.json` (mit `.AutoSteer.json`), `Fields/<Schlag>/…` ohne
-  `jobs/` (bearbeitete Fläche). Dazu kommt ein `manifest.json` mit Format, Formatversion 1,
+  `jobs/` (bearbeitete Fläche) und `NtripProfiles/*.json` **ohne Passwort** (Nachtrag; Benutzername,
+  Caster, Port und Mountpoint bleiben). Dazu kommt ein `manifest.json` mit Format, Formatversion 1,
   App-Version, Datum und jeder Datei mit Größe und SHA-256. Die Datei landet unter
   `Backups/backup_<Datum>.zip`.
-- **Nicht im Export:** die NTRIP-Profile und die App-Einstellungen (Passwörter, AgShare-Schlüssel).
-  JSON-Eigenschaften, deren Name nach einem Geheimnis aussieht (password, apikey, secret, token,
-  username), werden zusätzlich geleert. Den NTRIP-Zugang gibt man nach dem Wiederherstellen neu ein.
+- **Nicht im Export:** die App-Einstellungen (AgShare-Schlüssel) und alle Passwörter.
+  JSON-Eigenschaften, deren Name nach einem Geheimnis aussieht, werden zusätzlich geleert:
+  - in Fahrzeug-, Geräte- und Schlagdateien password, apikey, secret, token und username;
+  - in NTRIP-Profilen dasselbe ohne username.
+- **NTRIP beim Import:**
+  - Hat das Gerät für dieselbe Profildatei schon ein Passwort, bleibt es erhalten.
+  - Fehlt es, meldet der Host das Profil (`needPassword`). Der Client zeigt dann „Passwort für
+    NTRIP-Profil X neu eingeben“.
+  - Die Vorschau vergleicht NTRIP-Profile ohne Passwort.
+  - Nach dem Import lädt der Host die NTRIP-Profile neu.
 - **Import:** nur aus `Import/`, nur ZIPs mit einem `manifest.json` dieses Formats. Die ZIP wird
   vollständig geprüft, bevor etwas geschrieben wird:
   - jede Datei mit Größe und Prüfsumme;

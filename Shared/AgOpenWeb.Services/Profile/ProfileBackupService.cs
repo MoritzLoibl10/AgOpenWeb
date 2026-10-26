@@ -20,9 +20,11 @@ namespace AgOpenWeb.Services.Profile;
 /// Profile backup (fork, feature/profil-backup): the vehicle, tool and field profiles of the data
 /// root as one ZIP, and back again. Export: <c>Vehicles/*.json</c>, <c>Tools/*.json</c> and
 /// <c>Fields/&lt;field&gt;/…</c> without the jobs' worked area (<c>jobs/</c>), with a
-/// <c>manifest.json</c> (format, app version, date, every file with size and SHA-256). NTRIP
-/// profiles and the app settings are not in it (passwords, the AgShare key); JSON properties
-/// that look like a secret are blanked anyway. Import: a ZIP of this format only, checked
+/// <c>manifest.json</c> (format, app version, date, every file with size and SHA-256), and the
+/// NTRIP profiles (<c>NtripProfiles/*.json</c>) with the password blanked. The app settings are
+/// not in it (the AgShare key); JSON properties that look like a secret are blanked anyway. On
+/// import an NTRIP profile keeps the password already stored on this device; one left without
+/// is reported (<see cref="ApplyResult.NeedPassword"/>). Import: a ZIP of this format only, checked
 /// against its manifest; a preview says per profile and field whether it is new, overwrites
 /// or is the same; applying first writes a backup of the current state, then only the chosen
 /// entries. The caller checks standstill, steering off and control (<see cref="CheckApply"/>).
@@ -35,8 +37,10 @@ public static class ProfileBackupService
     public const string AutoPrefix = "before-import_";
     private const string ManifestName = "manifest.json";
     private const long MaxTotalBytes = 1L << 30; // 1 GB uncompressed: more is not a profile backup
-    private static readonly string[] Roots = { "Vehicles", "Tools", "Fields" };
+    private static readonly string[] Roots = { "Vehicles", "Tools", "Fields", "NtripProfiles" };
     private static readonly Regex Secret = new("(password|passwd|apikey|api_key|secret|token|username)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    // NTRIP profiles keep the user name (it is no secret on its own; the password is re-entered).
+    private static readonly Regex NtripSecret = new("(password|passwd|apikey|api_key|secret|token)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     public enum ItemState { New, Overwrites, Same }
 
@@ -45,7 +49,8 @@ public static class ProfileBackupService
         public string Key => Kind + ":" + Name;
     }
 
-    public sealed record ApplyResult(string AutoBackup, IReadOnlyList<string> Written);
+    /// <param name="NeedPassword">NTRIP profiles (their name) that have no password after the import.</param>
+    public sealed record ApplyResult(string AutoBackup, IReadOnlyList<string> Written, IReadOnlyList<string> NeedPassword);
 
     /// <summary>A refused or damaged backup. <see cref="Code"/> is what the client translates
     /// (notzip, nomanifest, version, nolist, notallowed, twice, missing, size, toolarge, damaged,
@@ -96,7 +101,7 @@ public static class ProfileBackupService
     /// <summary>The files a backup takes, as (path in the ZIP with '/', full path).</summary>
     private static IEnumerable<(string Rel, string Full)> Collect(string dataRoot)
     {
-        foreach (var root in new[] { "Vehicles", "Tools" })
+        foreach (var root in new[] { "Vehicles", "Tools", "NtripProfiles" })
         {
             var dir = Path.Combine(dataRoot, root);
             if (!Directory.Exists(dir)) continue;
@@ -119,21 +124,21 @@ public static class ProfileBackupService
         if (!rel.EndsWith(".json", StringComparison.OrdinalIgnoreCase) && !rel.EndsWith(".geojson", StringComparison.OrdinalIgnoreCase)) return bytes;
         JsonNode? n;
         try { n = JsonNode.Parse(bytes); } catch (JsonException) { return bytes; }
-        if (n is null || !Blank(n)) return bytes;
+        if (n is null || !Blank(n, rel.StartsWith("NtripProfiles/", StringComparison.Ordinal) ? NtripSecret : Secret)) return bytes;
         return Encoding.UTF8.GetBytes(n.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
     }
 
-    private static bool Blank(JsonNode n)
+    private static bool Blank(JsonNode n, Regex secret)
     {
         bool changed = false;
         if (n is JsonObject o)
             foreach (var kv in o.ToList())
             {
-                if (Secret.IsMatch(kv.Key) && kv.Value is JsonValue v && v.TryGetValue(out string? s) && s.Length > 0) { o[kv.Key] = ""; changed = true; }
-                else if (kv.Value is not null) changed |= Blank(kv.Value);
+                if (secret.IsMatch(kv.Key) && kv.Value is JsonValue v && v.TryGetValue(out string? s) && s.Length > 0) { o[kv.Key] = ""; changed = true; }
+                else if (kv.Value is not null) changed |= Blank(kv.Value, secret);
             }
         else if (n is JsonArray a)
-            foreach (var x in a) if (x is not null) changed |= Blank(x);
+            foreach (var x in a) if (x is not null) changed |= Blank(x, secret);
         return changed;
     }
 
@@ -195,17 +200,48 @@ public static class ProfileBackupService
         if (groups.Count == 0) throw new BackupException("empty");
         var auto = Create(dataRoot, backupDir, appVersion, AutoPrefix);
         var written = new List<string>();
+        var needPassword = new List<string>();
         foreach (var g in groups)
             foreach (var rel in g.Files)
             {
                 var full = Path.Combine(dataRoot, rel.Replace('/', Path.DirectorySeparatorChar));
                 Directory.CreateDirectory(Path.GetDirectoryName(full)!);
+                var bytes = entries[rel];
+                if (g.Kind == "ntrip") bytes = KeepPassword(bytes, full, g.Name, needPassword);
                 var tmp = full + ".import.tmp";
-                File.WriteAllBytes(tmp, entries[rel]);
+                File.WriteAllBytes(tmp, bytes);
                 File.Move(tmp, full, overwrite: true);
             }
         written.AddRange(groups.Select(g => g.Kind + ":" + g.Name));
-        return new ApplyResult(auto, written);
+        return new ApplyResult(auto, written, needPassword);
+    }
+
+    /// <summary>An imported NTRIP profile comes without its password: take the one this device
+    /// has stored for the same file, else report the profile.</summary>
+    private static byte[] KeepPassword(byte[] imported, string currentPath, string fileName, List<string> needPassword)
+    {
+        JsonObject? imp;
+        try { imp = JsonNode.Parse(imported) as JsonObject; } catch (JsonException) { return imported; }
+        if (imp is null) return imported;
+        var key = imp.Select(kv => kv.Key).FirstOrDefault(k => k.Equals("password", StringComparison.OrdinalIgnoreCase)) ?? "password";
+        string? old = null;
+        if (File.Exists(currentPath))
+            try
+            {
+                var cur = JsonNode.Parse(File.ReadAllBytes(currentPath)) as JsonObject;
+                var ck = cur?.Select(kv => kv.Key).FirstOrDefault(k => k.Equals("password", StringComparison.OrdinalIgnoreCase));
+                if (ck != null && cur![ck] is JsonValue v && v.TryGetValue(out string? s) && s.Length > 0) old = s;
+            }
+            catch (JsonException) { /* unreadable: treated as no password */ }
+        var name = imp.FirstOrDefault(kv => kv.Key.Equals("name", StringComparison.OrdinalIgnoreCase)).Value is JsonValue nv && nv.TryGetValue(out string? n) && n.Length > 0 ? n : fileName;
+        if (old is null)
+        {
+            var has = imp[key] is JsonValue pv && pv.TryGetValue(out string? p) && p.Length > 0;
+            if (!has) needPassword.Add(name);
+            return imported;
+        }
+        imp[key] = old;
+        return Encoding.UTF8.GetBytes(imp.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
     }
 
     /// <summary>Opens the ZIP and checks it fully: format, every entry in the manifest with the
@@ -271,7 +307,7 @@ public static class ProfileBackupService
         if (string.IsNullOrEmpty(rel) || rel.Contains('\\') || rel.StartsWith('/') || rel.Contains(':')) return false;
         var p = rel.Split('/');
         if (p.Any(s => s.Length == 0 || s == "." || s == "..") || !Roots.Contains(p[0])) return false;
-        if (p[0] is "Vehicles" or "Tools") return p.Length == 2 && p[1].EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+        if (p[0] is "Vehicles" or "Tools" or "NtripProfiles") return p.Length == 2 && p[1].EndsWith(".json", StringComparison.OrdinalIgnoreCase);
         if (p.Length < 3 || p[2].Equals("jobs", StringComparison.OrdinalIgnoreCase)) return false;
         return !p[^1].EndsWith(".tmp", StringComparison.OrdinalIgnoreCase);
     }
@@ -288,6 +324,7 @@ public static class ProfileBackupService
             {
                 "Vehicles" => ("vehicle", ProfileName(p[1])),
                 "Tools" => ("tool", ProfileName(p[1])),
+                "NtripProfiles" => ("ntrip", p[1][..^".json".Length]),
                 _ => ("field", p[1]),
             };
             if (!d.TryGetValue(k, out var l)) d[k] = l = new List<string>();
@@ -313,6 +350,9 @@ public static class ProfileBackupService
             if (!File.Exists(full)) { same = false; changes.Add("+ " + (kind == "field" ? rel[(rel.IndexOf('/', 7) + 1)..] : rel[(rel.IndexOf('/') + 1)..])); continue; }
             any = true;
             var cur = File.ReadAllBytes(full);
+            // An NTRIP profile is compared without its password (the backup carries none, and the
+            // stored one is kept on import).
+            if (kind == "ntrip") cur = Scrub(rel, cur);
             if (cur.AsSpan().SequenceEqual(entries[rel])) continue;
             same = false;
             if (kind == "field") changes.Add("~ " + rel[(rel.IndexOf('/', 7) + 1)..]);
