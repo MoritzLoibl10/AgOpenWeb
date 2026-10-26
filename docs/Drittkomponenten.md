@@ -13,12 +13,14 @@ Block nimmt `Tools/license-headers.py` von der Prüfung auf fremde Lizenznamen a
 | .NET-Laufzeit | `deploy/windows/package.sh` (`--self-contained true`) | nicht im Cache geprüft |
 
 ## Offen
-1. **CanvasKit:** Lizenztext (BSD-3 von Skia/Google) im Repo ablegen und Version festhalten.
-2. **StbImageSharp 2.30.15:** Das Paket nennt keine Lizenz. Beim Projekt nachsehen und eintragen.
-3. **.NET-Laufzeit:** Lizenz (MIT) an den Paketdaten der Laufzeit bestätigen.
-4. **Android und iOS:** Indirekte Pakete (AndroidX, Mono-Laufzeit u. a.) sind nicht aufgelistet;
+Erledigt (Oktober 2026): Lizenztext von CanvasKit liegt in `wwwroot/vendor/canvaskit-LICENSE.txt`
+(LICENSE von google/skia, Version laut Code-Kommentar 0.41); StbImageSharp laut README des Projekts
+„Public Domain or MIT“; .NET-Laufzeit laut `LICENSE.TXT` von dotnet/runtime MIT.
+
+1. **Android und iOS:** Indirekte Pakete (AndroidX, Mono-Laufzeit u. a.) sind nicht aufgelistet;
    eine Liste ließe sich aus `project.assets.json` eines Release-Builds erzeugen.
-5. **Symbole (`wwwroot/icons`) und Töne (`wwwroot/sounds`):** stammen aus upstream bzw. AgOpenGPS.
+2. **Symbole (`wwwroot/icons`) und Töne (`wwwroot/sounds`):** stammen aus upstream bzw. AgOpenGPS.
    Ob sie unter Apache 2.0 stehen (upstream hat die Lizenz in #360/#363 vereinheitlicht), ist nicht
    eigens belegt.
-6. Die Lizenztexte selbst (MIT, Boost, CC BY 4.0) liegen nicht in der App; die Seite nennt sie nur.
+3. Die Lizenztexte selbst (MIT, Boost, CC BY 4.0) liegen nicht in der App; die Seite nennt sie nur.
+4. Die CanvasKit-Version steht nur im Code-Kommentar; die Datei selbst trägt keine Versionsnummer.

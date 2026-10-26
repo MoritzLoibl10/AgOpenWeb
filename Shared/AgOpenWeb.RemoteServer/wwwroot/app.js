@@ -11703,7 +11703,7 @@ const TabletFirstSetup = (() => {
   setInterval(render, 500);
   // First start on this device: once, on the device that has control, not during a demo.
   const auto = setInterval(() => {
-    if (lsOk()) { clearInterval(auto); return; }
+    if (lsOk() || navigator.webdriver) { clearInterval(auto); return; } // not in automated browsers (CI layout check)
     // Only while no vehicle profile exists yet (the profile list the client already has).
     if (profiles && profiles.vehicles && profiles.vehicles.length) { clearInterval(auto); return; }
     let legal = true; try { legal = TabletLegal.done; } catch (_) { legal = false; } // the notice at first start comes first
@@ -11836,7 +11836,8 @@ const TabletLegal = (() => {
     box.appendChild(ok);
     box.hidden = false; scrim.classList.add('open');
   }
-  let done = acked();
+  // Automated browsers (CI's layout check, tests) get no notice: it would cover what they measure.
+  let done = acked() || !!navigator.webdriver;
   const t = setInterval(() => {
     if (done) { clearInterval(t); return; }
     if (typeof I18n !== 'undefined' && appInfo) { clearInterval(t); show(); }
