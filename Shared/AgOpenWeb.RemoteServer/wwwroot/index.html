@@ -1632,6 +1632,11 @@
     #tui-demo .tp-btn { background: var(--tui-card); color: var(--tui-ink); border-color: var(--tui-card-line); white-space: nowrap; }
     :root[data-tui-demo] body::after { content: ''; position: fixed; inset: 0; z-index: 28; pointer-events: none;
       border: 6px solid transparent; border-image: repeating-linear-gradient(-45deg, var(--tui-warn) 0 14px, #1e1500 14px 28px) 6; }
+    /* Long press = explanation (feature/bedienung-2). */
+    #tui-explain { position: fixed; z-index: 40; padding: 10px 14px; border-radius: 12px; background: var(--tui-card, #fff); color: var(--tui-ink, #111);
+      border: 2px solid var(--tui-acc); box-shadow: 0 8px 24px rgba(0,0,0,0.3); font: 600 var(--tui-fs-lbl)/1.4 system-ui, sans-serif; pointer-events: auto; }
+    #tui-explain[hidden] { display: none; }
+    :is(#rightnav, #bottomnav, #statusbar, .tui-tiles) button { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
     #tui-sb-clock { font: 800 var(--tui-fs-val) ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums;
       white-space: nowrap; align-items: center; }
     /* GPS/RTK: the fix quality also as a border pattern (solid = RTK fix, dashed = float,
