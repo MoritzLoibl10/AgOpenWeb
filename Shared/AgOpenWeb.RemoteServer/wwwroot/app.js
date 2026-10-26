@@ -6906,7 +6906,7 @@ const TabletTerminal = (() => {
     const secs = live && tick && scene && scene.hasField ? tick.sections : null;
     const sk = secs ? secs.join('') : live ? '-' : 'x';
     setCard('sections', sk, c => {
-      const on = secs ? secs.filter(s => s === 1 || s === 2).length : 0;
+      const on = secs ? secs.filter(s => s === 1 || s === 2 || s === 3).length : 0; // 3 = turning off: still applying
       c.querySelector('.c-n').textContent = secs && secs.length ? on + ' / ' + secs.length : '—';
       c.querySelector('.tui-secs').innerHTML = secs ? secs.map(s => '<i data-st="' + (s | 0) + '"></i>').join('') : '';
       c.title = secs ? tr('{on} of {count} sections on', { on, count: secs.length }) : '';
@@ -7681,7 +7681,7 @@ const TabletProfiles = (() => {
   // The active profile's values as the host's preview writes them (same fields, 2 decimals).
   function activePreview(kind) {
     if (!config || !config.vehicle || !config.tool) return {};
-    const f = v => fmtUnit(v, 'm', 2);
+    const f = v => Number.isFinite(v) ? fmtUnit(v, 'm', 2) : '—'; // point 25: no "NaN m"
     if (kind === 'vehicle') return { Wheelbase: f(config.vehicle.wheelbase), 'Antenna height': f(config.vehicle.antennaHeight), 'Antenna pivot': f(config.vehicle.antennaPivot) };
     return { Sections: String(config.tool.numSections) };
   }
