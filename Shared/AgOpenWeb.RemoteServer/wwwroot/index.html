@@ -1637,6 +1637,20 @@
       border: 2px solid var(--tui-acc); box-shadow: 0 8px 24px rgba(0,0,0,0.3); font: 600 var(--tui-fs-lbl)/1.4 system-ui, sans-serif; pointer-events: auto; }
     #tui-explain[hidden] { display: none; }
     :is(#rightnav, #bottomnav, #statusbar, .tui-tiles) button { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+    /* Start work (feature/bedienung-2). */
+    #tui-work .tw-step { display: grid; grid-template-columns: 34px auto 1fr; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--tui-card-line);
+      font: 700 var(--tui-fs-lbl) system-ui, sans-serif; opacity: 0.7; }
+    #tui-work .tw-step.cur, #tui-work .tw-step.done { opacity: 1; }
+    #tui-work .tw-n { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--tui-card-line); font-weight: 900; }
+    #tui-work .tw-step.cur .tw-n { border-color: var(--tui-acc); background: var(--tui-acc); color: var(--tui-acc-ink); }
+    #tui-work .tw-step.done .tw-n { border-color: #1fa64a; background: #1fa64a; color: #fff; }
+    #tui-work .tw-t { font-weight: 900; }
+    #tui-work .tw-v { text-align: right; overflow-wrap: anywhere; }
+    #tui-work-mini { position: fixed; z-index: 35; left: 50%; transform: translateX(-50%); top: calc(var(--tui-sb-h) + 6px + var(--sat, 0px));
+      display: flex; gap: 8px; align-items: center; padding: 6px 8px 6px 14px; border-radius: 12px; background: var(--tui-card, #fff); color: var(--tui-ink, #111);
+      border: 2px solid var(--tui-acc); box-shadow: 0 6px 18px rgba(0,0,0,0.3); font: 800 var(--tui-fs-lbl) system-ui, sans-serif; max-width: calc(100vw - 20px); }
+    #tui-work-mini[hidden] { display: none; }
+    #tui-work-mini .wm-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     #tui-sb-clock { font: 800 var(--tui-fs-val) ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums;
       white-space: nowrap; align-items: center; }
     /* GPS/RTK: the fix quality also as a border pattern (solid = RTK fix, dashed = float,
