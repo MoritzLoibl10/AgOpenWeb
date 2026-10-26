@@ -1,8 +1,8 @@
 # Geodaten: Herkunft und Prüfsummen
 
 ## BEV-Gitter AT_GIS_GRID (2014), MGI → ETRS89
-- **Datei:** `at_bev_AT_GIS_GRID.tif`, unverändert, als Base64 in `wwwroot/index.html`
-  (`<script id="geo-at-gis-grid">`), genutzt von `GeoAT` in `wwwroot/app.js` (eAMA-Import).
+- **Datei:** `wwwroot/geo/at_bev_AT_GIS_GRID.tif`, unverändert, ausgeliefert unter
+  `/geo/at_bev_AT_GIS_GRID.tif`; `GeoAT` in `wwwroot/app.js` lädt sie erst beim eAMA-Import.
 - **Herkunft:** GitHub-Spiegel von PROJ-data,
   `https://raw.githubusercontent.com/OSGeo/PROJ-data/master/at_bev/at_bev_AT_GIS_GRID.tif`
   (cdn.proj.org war aus der Bauumgebung nicht erreichbar). PROJ hat das NTv2-Gitter des BEV

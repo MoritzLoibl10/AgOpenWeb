@@ -10212,8 +10212,8 @@ const TabletBackup = (() => {
 
 // ── GeoAT (fork, eAMA import): MGI / Austria Lambert (EPSG:31287) → ETRS89 ──────────────────
 // Inside the BEV grid: "MGI to ETRS89 (5)" (EPSG accuracy 0.15 m), NTv2 grid AT_GIS_GRID 2014 as
-// PROJ ships it (at_bev_AT_GIS_GRID.tif; BEV, CC BY 4.0; embedded in index.html as base64,
-// SHA-256 in GeoAT.GRID_SHA256). Outside it: "MGI to ETRS89 (1)", 7-parameter Helmert, EPSG
+// PROJ ships it (wwwroot/geo/at_bev_AT_GIS_GRID.tif; BEV, CC BY 4.0; fetched only when an
+// import needs it, SHA-256 in GeoAT.GRID_SHA256). Outside it: "MGI to ETRS89 (1)", 7-parameter Helmert, EPSG
 // accuracy 1.5 m, also in the grid's zero-filled margin (see shift()); the result then carries
 // grid: false and the UI must say so. Same steps as PROJ:
 // inverse LCC 2SP on Bessel 1841, then hgridshift (bilinear) or Helmert with height 0.
@@ -10311,17 +10311,21 @@ const GeoAT = (() => {
     const d = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
     return [...d].map(b => b.toString(16).padStart(2, '0')).join('');
   }
-  // Decodes the embedded grid once. Resolves to true, or false when it is missing, damaged or
-  // its checksum does not match (then every point uses the Helmert fallback, marked grid: false).
-  function load(base64) {
+  // Fetches and decodes the grid once (bytes may be passed in instead). Resolves to true, or
+  // false when it is missing, damaged or its checksum does not match; then every point uses the
+  // Helmert fallback, marked grid: false. A failed load is retried on the next call.
+  function load(bytes) {
     if (grid) return Promise.resolve(true);
     if (!loading) loading = (async () => {
       try {
-        const src = base64 ?? document.getElementById('geo-at-gis-grid')?.textContent ?? '';
-        const bin = atob(src.replace(/\s+/g, '')), bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        if (await sha256Hex(bytes) !== GRID_SHA256) throw new Error('grid: checksum mismatch');
-        grid = await readGrid(bytes);
+        if (!bytes) {
+          const res = await fetch('/geo/at_bev_AT_GIS_GRID.tif');
+          if (!res.ok) throw new Error('grid: HTTP ' + res.status);
+          bytes = await res.arrayBuffer();
+        }
+        const buf = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+        if (await sha256Hex(buf) !== GRID_SHA256) throw new Error('grid: checksum mismatch');
+        grid = await readGrid(buf);
         return true;
       } catch (e) { console.warn('GeoAT:', e.message); loading = null; return false; }
     })();

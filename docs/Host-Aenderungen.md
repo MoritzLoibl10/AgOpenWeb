@@ -289,3 +289,11 @@ und Steuerlogik ist nicht berührt.
 ### Beim Rebase auf upstream
 `AppInfoDto` und `transport.js` haben ein angehängtes Feld. Hängt upstream dort selbst etwas an,
 muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
+
+## 9. eAMA-Import: Route für das BEV-Gitter (feature/eama-import, Oktober 2026)
+- **Datei:** `Shared/AgOpenWeb.RemoteServer/RemoteServerHost.cs`, eine Zeile `MapGet`:
+  `/geo/at_bev_AT_GIS_GRID.tif` liefert `wwwroot/geo/at_bev_AT_GIS_GRID.tif` (eingebettete Ressource,
+  `image/tiff`), nur Lesen.
+- **Grund:** Der Host liefert aus wwwroot nur fest eingetragene Pfade aus. Das Gitter (217 KB) wird
+  nur beim Import geladen, statt `index.html` bei jedem Laden zu vergrößern.
+- **Beim Rebase auf upstream:** Die Zeile steht vor der Route `/backpic.png`; sonst unabhängig.

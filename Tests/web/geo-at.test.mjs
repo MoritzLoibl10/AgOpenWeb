@@ -14,8 +14,7 @@ const app = readFileSync(new URL('app.js', root), 'utf8');
 const block = app.slice(app.indexOf('// geo-at:begin'), app.indexOf('// geo-at:end'));
 const fresh = () => new Function(block + '\nreturn GeoAT;')();
 const GeoAT = fresh();
-const html = readFileSync(new URL('index.html', root), 'utf8');
-const b64 = html.match(/<script type="text\/plain" id="geo-at-gis-grid">([\s\S]*?)<\/script>/)[1];
+const tif = readFileSync(new URL('geo/at_bev_AT_GIS_GRID.tif', root));
 const ref = JSON.parse(readFileSync(new URL('geo-at-refpoints.json', import.meta.url), 'utf8'));
 
 const metres = (la1, lo1, la2, lo2) => {
@@ -23,8 +22,8 @@ const metres = (la1, lo1, la2, lo2) => {
   return Math.hypot(dN, dE);
 };
 
-test('embedded grid is the PROJ-data file (SHA-256)', () => {
-  const sha = createHash('sha256').update(Buffer.from(b64.replace(/\s+/g, ''), 'base64')).digest('hex');
+test('shipped grid is the PROJ-data file (SHA-256)', () => {
+  const sha = createHash('sha256').update(tif).digest('hex');
   assert.equal(sha, GeoAT.GRID_SHA256);
 });
 
@@ -35,12 +34,13 @@ test('fallback without grid is marked', () => {
 
 test('wrong checksum: no crash, Helmert fallback marked grid: false', async () => {
   const geo = fresh();
-  const bytes = Buffer.from(b64.replace(/\s+/g, ''), 'base64');
+  const bytes = new Uint8Array(tif);
   bytes[bytes.length - 1] ^= 0xff; // one flipped byte
   const warn = console.warn; console.warn = () => {};
   try {
-    assert.equal(await geo.load(bytes.toString('base64')), false);
-    assert.equal(await geo.load('not base64 at all'), false);
+    assert.equal(await geo.load(bytes), false);
+    assert.equal(await geo.load(new Uint8Array([1, 2, 3])), false);
+    assert.equal(await geo.load(), false); // no server: the fetch fails
   } finally { console.warn = warn; }
   const [e, n, lat, lon] = ref.austria.find(r => r[4] === 1);
   const r = geo.toEtrs89(e, n);
@@ -50,7 +50,7 @@ test('wrong checksum: no crash, Helmert fallback marked grid: false', async () =
 });
 
 test('matches pyproj: grid inside, Helmert outside; < 0.1 m', async () => {
-  assert.equal(await GeoAT.load(b64), true);
+  assert.equal(await GeoAT.load(new Uint8Array(tif)), true);
   const groups = {
     austria: ref.austria, weinviertel: ref.weinviertel, outside: ref.outside,
     'March/Thaya strip': ref.weinviertel.filter(r => r[4] === 1 && (r[3] >= 16.8 || r[2] >= 48.65)),

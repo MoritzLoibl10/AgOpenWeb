@@ -359,6 +359,10 @@ public sealed class RemoteServerHost
             catch (FileNotFoundException) { return SimpleWebServer.Response.NotFound; }
         });
 
+        // Fork (eAMA import): BEV grid MGI → ETRS89 (CC BY 4.0, docs/Geodaten-Herkunft.md), read-only;
+        // the client fetches it only when an import needs it and checks its SHA-256.
+        server.MapGet("/geo/at_bev_AT_GIS_GRID.tif", () => SimpleWebServer.Response.Bytes(ReadAssetBytes("geo.at_bev_AT_GIS_GRID.tif"), "image/tiff"));
+
         // Field background imagery. Served DOWNSCALED for the web: native composites
         // are huge (tens of MB) and an iOS WKWebView <img>/CanvasKit decode of that
         // OOMs — so big PNGs are decoded in THIS (app) process (which already decodes
