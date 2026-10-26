@@ -7309,7 +7309,18 @@ const TabletTerminal = (() => {
   function syncLayoutOpts() { for (const b of lay.children) b.classList.toggle('active', b.dataset.tuiLayout === layout); }
 
   // --- Frame loop ----------------------------------------------------------------------------
+  // Point 12: with the host gone or silent, upstream displays keep their last state (fix chip,
+  // light bar, roll gauge, right nav states). Mark the page stale; CSS and the light bar wrapper
+  // below hide or grey them until data flows again.
+  let staleNow = null;
+  lightbarSk = (orig => function (canvas) { if (staleNow) return; return orig(canvas); })(lightbarSk);
   function frame() {
+    const stale = !tuiLive();
+    if (stale !== staleNow) {
+      staleNow = stale;
+      if (stale) root.setAttribute('data-tui-stale', ''); else root.removeAttribute('data-tui-stale');
+      const fb = $('sb-fixbtn'); if (fb) fb.dataset.stale = I18n.text(tr('No data'));
+    }
     if (sb && statusBar) {
       const q = statusBar.gpsLost ? 0 : statusBar.fixQuality | 0;
       const fb = $('sb-fixbtn');
