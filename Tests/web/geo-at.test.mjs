@@ -12,7 +12,8 @@ import { createHash } from 'node:crypto';
 const root = new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/', import.meta.url);
 const app = readFileSync(new URL('app.js', root), 'utf8');
 const block = app.slice(app.indexOf('// geo-at:begin'), app.indexOf('// geo-at:end'));
-const GeoAT = new Function(block + '\nreturn GeoAT;')();
+const fresh = () => new Function(block + '\nreturn GeoAT;')();
+const GeoAT = fresh();
 const html = readFileSync(new URL('index.html', root), 'utf8');
 const b64 = html.match(/<script type="text\/plain" id="geo-at-gis-grid">([\s\S]*?)<\/script>/)[1];
 const ref = JSON.parse(readFileSync(new URL('geo-at-refpoints.json', import.meta.url), 'utf8'));
@@ -30,6 +31,22 @@ test('embedded grid is the PROJ-data file (SHA-256)', () => {
 test('fallback without grid is marked', () => {
   const [e, n] = ref.austria.find(r => r[4] === 1);
   assert.equal(GeoAT.toEtrs89(e, n).grid, false); // not loaded yet
+});
+
+test('wrong checksum: no crash, Helmert fallback marked grid: false', async () => {
+  const geo = fresh();
+  const bytes = Buffer.from(b64.replace(/\s+/g, ''), 'base64');
+  bytes[bytes.length - 1] ^= 0xff; // one flipped byte
+  const warn = console.warn; console.warn = () => {};
+  try {
+    assert.equal(await geo.load(bytes.toString('base64')), false);
+    assert.equal(await geo.load('not base64 at all'), false);
+  } finally { console.warn = warn; }
+  const [e, n, lat, lon] = ref.austria.find(r => r[4] === 1);
+  const r = geo.toEtrs89(e, n);
+  assert.equal(r.grid, false);
+  assert.ok(Number.isFinite(r.lat) && Number.isFinite(r.lon));
+  assert.ok(metres(r.lat, r.lon, lat, lon) < 3, 'fallback stays near the grid result');
 });
 
 test('matches pyproj: grid inside, Helmert outside; < 0.1 m', async () => {
