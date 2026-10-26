@@ -10721,24 +10721,32 @@ const TabletEama = (() => {
       flush();
     });
     transport.send('field.fromGeo|create\t' + name);
+    return waitActive(name);
+  }
+  async function waitActive(name) {
     const t0 = performance.now();
     while (performance.now() - t0 < 20000) {
       await new Promise(r => setTimeout(r, 250));
-      if (fieldOps && fieldOps.activeField === name && existing().has(name.toLowerCase())) return true;
+      if (fieldOps && (fieldOps.activeField || '') === name && (!name || existing().has(name.toLowerCase()))) return true;
     }
     return false;
   }
   async function create() {
-    const todo = plan();
-    run = { busy: true, i: 0, n: todo.length, res: [] }; render();
+    const todo = plan(), before = (fieldOps && fieldOps.activeField) || '';
+    run = { busy: true, i: 0, n: todo.length, res: [], aborted: false, back: '' }; render();
     for (const p of todo) {
       if (p.skip) { run.res.push({ name: p.name, r: 'skip' }); continue; }
       const why = lockReason();
-      if (why) { run.res.push({ name: p.name, r: 'fail', why }); break; }
+      if (why) { run.res.push({ name: p.name, r: 'fail', why }); run.aborted = true; break; }
       run.i++; render();
       const ok = await sendField(p.name, p.it.rings);
       run.res.push({ name: p.name, r: ok ? 'ok' : 'fail', approx: p.it.approx });
-      if (!ok) break; // the host did not confirm: stop rather than pile up commands
+      if (!ok) { run.aborted = true; break; } // the host did not confirm: stop rather than pile up commands
+    }
+    // Leave the field the operator had open (or none) as it was before the import.
+    if (run.res.some(x => x.r === 'ok') && connState === 'connected') {
+      transport.send(before ? 'field.openOnly|' + before : 'field.close');
+      run.back = (await waitActive(before)) ? '' : (before || '-');
     }
     run.busy = false; render();
   }
@@ -10875,9 +10883,14 @@ const TabletEama = (() => {
       gr.appendChild(go);
       if (why) gr.appendChild(el('span', 'tp-note warn', T(why)));
       lb.appendChild(gr);
-      lb.appendChild(el('div', 'tp-note', T(tr('Each new field is opened once while it is created; the field open before is saved and closed.'))));
+      lb.appendChild(el('div', 'tp-note', T(tr('Each new field is opened once while it is created; afterwards the field open before (or none) is open again.'))));
       if (run) {
         if (run.busy) lb.appendChild(el('div', 'tp-note', tr('Creating field {i} of {n}…', { i: run.i, n: run.n })));
+        if (run.aborted) {
+          const done = run.res.filter(x => x.r === 'ok').map(x => x.name);
+          lb.appendChild(el('div', 'tp-note bad', done.length ? tr('Stopped. Already created: {f}', { f: done.join(', ') }) : T(tr('Stopped. No field was created.'))));
+        }
+        if (run.back) lb.appendChild(el('div', 'tp-note warn', run.back === '-' ? T(tr('Could not close the last created field.')) : tr('Could not open {f} again.', { f: run.back })));
         for (const x of run.res) {
           const d = el('div', 'tp-note' + (x.r === 'fail' ? ' bad' : ''));
           d.textContent = x.name + ': ' + T(RES[x.r]) + (x.why ? ' – ' + T(x.why) : '') + (x.r === 'ok' && x.approx ? ' · ' + T(APPROX) : '');
