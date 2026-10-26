@@ -29,28 +29,29 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 | 8 | Unvollständiges Speichern lässt sich nicht verwerfen | mittel | nein | erledigt (sync/upstream: Verwerfen in Sackgassen) |
 | 9 | Speicher-Merker gilt pro Adresse, nicht pro Lenkrechner | mittel | ja | offen |
 | 10 | Deutsch als Standard überstimmt eine bewusste Sprachwahl | mittel | ja | offen |
-| 11 | Host-Meldungen als Toast bleiben englisch, auch sicherheitsnahe | mittel | nein | offen |
-| 12 | Bei Verbindungsverlust frieren upstream-Anzeigen ein (Fix-Chip, Lichtleiste, Rollanzeige) | mittel | nein | offen |
+| 11 | Host-Meldungen als Toast bleiben englisch, auch sicherheitsnahe | mittel | nein | erledigt (tablet-feedback-1): 62 feste Host-Meldungen deutsch; Meldungen mit Werten bleiben englisch |
+| 12 | Bei Verbindungsverlust frieren upstream-Anzeigen ein (Fix-Chip, Lichtleiste, Rollanzeige) | mittel | nein | erledigt (tablet-feedback-1): Fix „Keine Daten“, Lichtleiste, Rollanzeige und Ein/Aus-Zustände ausgeblendet, solange keine Daten kommen |
 | 13 | `GpsService.CurrentData` veraltet nie, wenn das GPS verstummt | mittel | ja | offen |
 | 14 | Neues Feld ohne GPS bekommt den Ursprung New York | mittel | ja | offen |
-| 15 | Network IO: Subnetz-Ersatz 192.168.5 wird gesendet | mittel | nein | offen |
+| 15 | Network IO: Subnetz-Ersatz 192.168.5 wird gesendet | mittel | nein | erledigt (tablet-feedback-1): Beispielwert 192.168.5 wird ohne Eingabe nicht gesendet |
 | 16 | Nach dem Upstream-Merge: Schnellleiste bricht (#339, #318) | mittel | nein | erledigt (sync/upstream) |
 | 17 | Nach dem Upstream-Merge: i18n-Prüfung rot, `de.json` kollidiert bei jedem Merge | mittel | nein | teils: Prüfung grün; `de.json` kollidiert weiter |
 | 18 | Nach dem Upstream-Merge: „Report on GitHub“ führt zum Upstream-Repo | mittel | nein | erledigt (sync/upstream: ausgeblendet) |
-| 19 | Dauerlast: Beobachter auf Bild-für-Bild-Texten, 9 Intervalle, erzwungene Layouts | mittel | nein | offen |
+| 19 | Dauerlast: Beobachter auf Bild-für-Bild-Texten, 9 Intervalle, erzwungene Layouts | mittel | nein | offen: erst auf einem echten Tablet messen (wie vorgeschlagen) |
 | 20 | Binärdateien ohne Lizenzdatei und ohne Hinweise auf Fremdkomponenten | mittel | nein | offen |
 | 21 | „Gespeichert“ beweist nicht, dass der Host auf die Platte geschrieben hat | niedrig | ja | offen |
-| 22 | Gesperrter localStorage: das rote Band überlebt kein Neuladen, ohne Hinweis | niedrig | nein | offen |
-| 23 | Profilnamen und Eingaben: Kleinigkeiten | niedrig | teils | offen |
+| 22 | Gesperrter localStorage: das rote Band überlebt kein Neuladen, ohne Hinweis | niedrig | nein | erledigt (tablet-feedback-1) |
+| 23 | Profilnamen und Eingaben: Kleinigkeiten | niedrig | teils | teils (tablet-feedback-1): Windows-Namen, Teilbreiten runden, „Geladen“ erst nach Bestätigung; gleichzeitiges Anlegen nur im Host |
 | 24 | NTRIP: kleinere Punkte (HDOP, Fix 7/8, Rest-Wettlauf, Backoff) | niedrig | ja | offen |
-| 25 | Anzeige: kleine Ersatz-Nullen und Ausblendungen | niedrig | nein | offen |
-| 26 | Hilfslinien und Raster rechnen mit 6 m ohne Teilbreiten | niedrig | nein | offen |
-| 27 | Doppelte Hilfsfunktionen im tablet-ui-Block | niedrig | nein | offen |
-| 28 | i18n: Fast-Dubletten und ein unübersetzter upstream-Text | niedrig | nein | offen |
+| 25 | Anzeige: kleine Ersatz-Nullen und Ausblendungen | niedrig | nein | teils (tablet-feedback-1): Zustand 3 zählt als an, kein „NaN m“; Rest (Platz, Vorzeichen) offen |
+| 26 | Hilfslinien und Raster rechnen mit 6 m ohne Teilbreiten | niedrig | nein | offen: nach deiner Vorgabe aus Phase 2c nicht angefasst (Issue-Text Punkt 3) |
+| 27 | Doppelte Hilfsfunktionen im tablet-ui-Block | niedrig | nein | offen: reiner Umbau ohne Nutzen für die Bedienung; mit eigenem Testlauf in einer späteren Runde |
+| 28 | i18n: Fast-Dubletten und ein unübersetzter upstream-Text | niedrig | nein | erledigt (tablet-feedback-1): upstream-Schlüssel wiederverwendet; „Current: “ bleibt upstream |
 | 29 | Name auf Desktop/iOS und in den Artefakten weiter „AgOpenWeb“ | niedrig | ja | offen |
 | 30 | Kleinigkeiten nach dem Upstream-Merge (#350, #352) | niedrig | teils | teils: #350 erledigt, #352 offen |
-| 31 | 7 Zoll, Handschuh: Bildschirmknöpfe verdecken die Vorgewende-Anzeige | mittel | nein | vorgemerkt für die nächste UI-Runde |
+| 31 | 7 Zoll, Handschuh: Bildschirmknöpfe verdecken die Vorgewende-Anzeige | mittel | nein | erledigt (tablet-feedback-1): Knöpfe rücken unter die Vorgewende-Anzeige; Audit 1024×600 Handschuh 0 Überlappungen |
 | 32 | IMU-Kurs aus PGN 253: eine 0 der AiO-Firmware gilt als gültiger Kurs (upstream #357) | hoch | ja | Firmware geprüft: v4 (auch v4.5) sendet 9999, v26 sendet 0; Anzeige im Einrichtungsmodus; Issue-Text an upstream |
+| 34 | Gezogene Geräte: Drehpunkt-Abstand wirkt umgekehrt zur Beschriftung; TBT: „Arbeitsmitte“ wirkt nicht | mittel | ja | Fork: Anzeige an das Host-Verhalten angepasst (`docs/Host-Aenderungen.md` Punkt 7); Host offen |
 
 ---
 
@@ -471,3 +472,9 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
   - Der englische Issue-Text an upstream ist geschrieben.
   - Vor dem ersten Lenken auf dem Prüfstand die Kurs-Prüfung ansehen.
 - **Host-Änderung nötig:** ja (Lenklogik, nur upstream)
+
+### 34. Gezogene Geräte: Drehpunkt-Abstand umgekehrt; TBT: „Arbeitsmitte“ ohne Wirkung
+- **Priorität:** mittel (Teilbreiten und Bearbeitung, nicht die Lenkung des Traktors)
+- **Befund:** `ToolPositionService.cs:223` legt die Arbeitslinie bei positivem Drehpunkt-Abstand **vor** die Geräteachse; der Dialog nannte + „hinter“. Der AgOpenGPS-Import dreht nur die Anhängelänge (`ProfileJsonServiceV1.cs:256`). Bei TBT nimmt der Host die Zugpunkt-Länge des Fahrzeugs (`ToolPositionService.cs:113–115`), „Arbeitsmitte“ wirkt nicht.
+- **Im Fork (nur Anzeige):** Knöpfe, Skizze und Satz im Drehpunkt-Tab folgen dem Host; „Arbeitsmitte“ bei TBT ausgeblendet. Nach einem Fix upstream zurücknehmen.
+- **Host-Änderung nötig:** ja (upstream)

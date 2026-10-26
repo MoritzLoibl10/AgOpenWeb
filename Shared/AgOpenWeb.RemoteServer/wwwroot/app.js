@@ -7858,10 +7858,10 @@ const TabletProfiles = (() => {
       sides: [['left', -1, tr('Left')], ['center', 0, tr('Center')], ['right', 1, tr('Right')]] },
   };
   const T_FIELDS = {
-    hitchLength: { key: 'tool.hitchLength', unit: 'm', label: tr('Working center'), help: tr('See the sketch: rear axle to the working point of the tool.'), img: 'hitch' },
-    trailingHitchLength: { key: 'tool.trailingHitchLength', unit: 'm', label: tr('Trailing hitch'), help: tr('See the sketch.'), img: 'hitch' },
-    tankTrailingHitchLength: { key: 'tool.tankTrailingHitchLength', unit: 'm', label: tr('Tank trailing hitch'), help: tr('See the sketch.'), img: 'hitch' },
-    length: { key: 'tool.length', unit: 'm', label: tr('Implement length'), help: tr('See the sketch.'), img: 'hitch' },
+    hitchLength: { key: 'tool.hitchLength', unit: 'm', label: tr('Working center'), help: tr('Middle of the rear axle to the working point of the tool, along the vehicle.'), sk: 'tool:hitchLength' },
+    trailingHitchLength: { key: 'tool.trailingHitchLength', unit: 'm', label: tr('Trailing hitch'), help: tr('Hitch pin of the tractor to the axle of the tool.'), sk: 'tool:trailingHitchLength' },
+    tankTrailingHitchLength: { key: 'tool.tankTrailingHitchLength', unit: 'm', label: tr('Tank trailing hitch'), help: tr('Hitch pin of the tractor to the axle of the tank.'), sk: 'tool:tankTrailingHitchLength' },
+    length: { key: 'tool.length', unit: 'm', label: tr('Implement length'), help: tr('Working point to the rear end of the tool.'), sk: 'tool:length' },
     offset: { key: 'tool.offset', unit: 'm', label: tr('Tool offset'), help: tr('Tool shifted sideways from the middle of the vehicle.'), img: 'ToolOffsetPositiveRight',
       sides: [['left', -1, tr('Left')], ['zero', 0, tr('Zero')], ['right', 1, tr('Right')]] },
     overlap: { key: 'tool.overlap', unit: 'm', label: tr('Overlap / gap'), help: tr('Overlap between two passes, or a gap.'), img: 'ToolOverlap',
@@ -7948,6 +7948,30 @@ const TabletProfiles = (() => {
     r.querySelector('.tp-f-in').appendChild(s);
     return { key, sel: s, base: cur, row: r, changed: () => s.value !== String(cur), value: () => s.value, label, opts };
   }
+  // Coupling type (ISO 11783 code, Vehicle/Tool.HitchType) as tiles with everyday names, the norm
+  // small below. The host only writes it into the ISO-XML export (connector type, DDI 157); it
+  // does not change guidance, steering or the tool position. Same value as the select had.
+  function hitchTiles(key, cur) {
+    const r = el('div', 'tp-fld wide');
+    r.innerHTML = '<div class="tp-f-l"></div><div class="tp-f-h"></div><div class="tp-hitch"></div>';
+    r.querySelector('.tp-f-l').textContent = T(tr('Coupling type'));
+    r.querySelector('.tp-f-h').textContent = T(tr('Only a description (ISO-XML export); it does not change guidance or steering.'));
+    const g = r.querySelector('.tp-hitch');
+    const st = { key, base: cur, cur: String(cur), row: r, label: tr('Coupling type'), opts: HITCH_OPTS };
+    for (const h of TUI_HITCH) {
+      const b = el('button', 'tp-ht', tuiHitchPicto(h.code) + '<b></b><small></small>');
+      b.dataset.code = String(h.code);
+      b.querySelector('b').textContent = T(h.name);
+      b.querySelector('small').textContent = HITCH_NORM[h.code + 1] || '';
+      onTap(b, () => { st.cur = String(h.code); sync(); onEdit(); });
+      g.appendChild(b);
+    }
+    const sync = () => { for (const b of g.children) b.classList.toggle('on', b.dataset.code === st.cur); };
+    sync();
+    st.changed = () => st.cur !== String(cur);
+    st.value = () => st.cur;
+    return st;
+  }
   function warnFor(f, v) {
     if (!Number.isFinite(v)) return '';
     if (f.warn && (v < f.warn[0] || v > f.warn[1]))
@@ -7976,7 +8000,7 @@ const TabletProfiles = (() => {
         antennaHeight: plainField(V_FIELDS.antennaHeight, v.antennaHeight),
         antennaOffset: signedField(V_FIELDS.antennaOffset, v.antennaOffset),
       };
-      W.hitch = selectField('vehicle.hitchType', tr('Coupling type'), HITCH_OPTS, v.hitchType);
+      W.hitch = hitchTiles('vehicle.hitchType', v.hitchType);
       W.steps = mode === 'new' ? ['type', 'name', 'size', 'antenna', 'check'] : ['type', 'size', 'antenna', 'check'];
     } else {
       const ty = TOOL_TYPES.find(x => x[1] === t.type) || TOOL_TYPES[1];
@@ -7987,13 +8011,15 @@ const TabletProfiles = (() => {
       for (const k of ['hitchLength', 'trailingHitchLength', 'tankTrailingHitchLength', 'length', 'defaultSectionWidth']) W.f[k] = plainField(T_FIELDS[k], t[k]);
       W.f.offset = signedField(T_FIELDS.offset, t.offset);
       W.f.overlap = signedField(T_FIELDS.overlap, t.overlap);
-      W.hitch = selectField('tool.hitchType', tr('Coupling type'), HITCH_OPTS, t.hitchType);
+      W.hitch = hitchTiles('tool.hitchType', t.hitchType);
       W.nSec = { base: t.numSections | 0 };
       W.nSec.inp = makeNum('tool.numSections', '', t.numSections | 0, '1');
       W.nSec.inp.min = '1'; W.nSec.inp.max = '64';
       W.widths = []; // { inp, init, edited }
       W.baseWidths = (t.sectionWidths || []).slice();
       W.steps = mode === 'new' ? ['type', 'name', 'sections', 'hitch', 'check'] : ['type', 'sections', 'hitch', 'check'];
+      // A new tool on a harvester: the header is offered straight away (front fixed, one section).
+      if (mode === 'new' && W.harvester) setHeader(true);
     }
     view = 'wiz';
     renderWizard();
@@ -8039,6 +8065,70 @@ const TabletProfiles = (() => {
       '<text class="sk-dl" x="' + lx + '" y="' + ly + '" text-anchor="' + (anchor || 'middle') + '">' + esc(T(label)) + '</text>';
   }
   const dash = (x1, y1, x2, y2) => '<line class="sk-x" x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '"/>';
+
+  // --- Coupling types: everyday names and own pictograms (side view, tractor rear on the left) ---
+  // code = ISO 11783 connector code (Vehicle/Tool.HitchType); the norm comes from HITCH_NORM.
+  const TUI_HITCH = [
+    { code: 5, name: tr('Clevis (jaw)') }, { code: 8, name: tr('Ball hitch K80') }, { code: 6, name: tr('Piton-fix') },
+    { code: 4, name: tr('Hitch hook') }, { code: 1, name: tr('Swinging drawbar') }, { code: 3, name: tr('Three-point linkage') },
+    { code: 2, name: tr('Three-point, semi-mounted') }, { code: 7, name: tr('CUNA hitch') }, { code: 10, name: tr('Drawbar eye (wagon)') },
+    { code: 9, name: tr('Self-propelled (on the chassis)') }, { code: 0, name: tr('Unknown') }, { code: -1, name: tr('Not specified') },
+  ];
+  const HITCH_NORM = ['', '', 'ISO 6489-3', 'ISO 730', 'ISO 730', 'ISO 6489-1', 'ISO 6489-2 (40 mm)', 'ISO 6489-4', 'ISO 6489-5', 'ISO 24347', '', 'ISO 5692-2'];
+  function tuiHitchPicto(code) {
+    // Tractor rear: wheel, fender, body; the coupling sits right of x = 58.
+    const base = '<circle cx="34" cy="46" r="20"/><circle cx="34" cy="46" r="5"/><path d="M6 22h44l8 18v10"/><path d="M14 30a22 22 0 0 1 40 6"/>';
+    const c = {
+      1: '<path d="M58 54h34"/><circle cx="88" cy="54" r="3"/>',
+      2: '<path d="M58 52l26 6"/><path d="M84 40v22h22"/><circle cx="100" cy="62" r="6"/>',
+      3: '<path d="M58 52l24 4"/><path d="M58 32l24 4"/><path d="M82 30v32h18v-32z"/>',
+      4: '<path d="M58 54h26q8 0 8-8v-4"/>',
+      5: '<path d="M58 44h28M58 56h28"/><path d="M80 38v24"/>',
+      6: '<path d="M58 58h30"/><path d="M82 58v-14q0-4 4-4"/>',
+      7: '<path d="M58 42h24M58 58h24"/><path d="M82 42q10 8 0 16"/><path d="M76 36v28"/>',
+      8: '<path d="M58 56h26v-8"/><circle cx="84" cy="42" r="6"/>',
+      9: '<path d="M58 30h44v24h-44z"/><path d="M66 54v8M94 54v8"/>',
+      10: '<path d="M58 54h22"/><circle cx="88" cy="54" r="7"/>',
+    }[code];
+    const q = '<text x="84" y="56" text-anchor="middle" class="ht-q">?</text>';
+    return '<svg class="tp-htp" viewBox="0 0 120 72"><line class="ht-g" x1="2" y1="67" x2="118" y2="67"/><g class="ht-b">' + base + (c || '') + '</g>' + (c ? '' : q) + '</svg>';
+  }
+
+  // --- Tool measurements: side view per tool type, each length with arrows from point to point.
+  // The focused field's length is highlighted; the vehicle's hitch length (rear axle → hitch pin)
+  // is shown for trailing/TBT tools, where the host adds it (ToolPositionService.Update).
+  function tuiToolSketch(type, focus, veh) {
+    const on = k => !focus || focus === k;
+    const D = (k, x1, x2, y, label, ly) => '<g class="' + (on(k) ? 'sk-on' : 'sk-off') + '">' + dash(x1, y - 30, x1, y + 8) + dash(x2, y - 30, x2, y + 8) +
+      dim(Math.min(x1, x2), y, Math.max(x1, x2), y, label, (x1 + x2) / 2, ly != null ? ly : y + 26) + '</g>';
+    const tractor = (dx, flip) => '<g class="sk-b" transform="translate(' + dx + ' 0) scale(0.82)' + (flip ? '' : '') + '">' +
+      '<circle cx="170" cy="262" r="68"/><circle cx="170" cy="262" r="14"/><circle cx="410" cy="284" r="46"/><circle cx="410" cy="284" r="9"/>' +
+      '<path d="M100 200V70h120l26 90h164l42 54v24"/><path d="M226 70l-20 90"/></g>';
+    const wheel = (x, r) => '<g class="sk-b"><circle cx="' + x + '" cy="' + (270 - r) + '" r="' + r + '"/><circle cx="' + x + '" cy="' + (270 - r) + '" r="4"/></g>';
+    const mark = x => '<path class="sk-wp" d="M' + x + ' 270l-9 -16h18z"/>'; // working point on the ground
+    let g = '<line class="sk-g" x1="10" y1="270" x2="890" y2="270"/>';
+    const vh = veh && Number.isFinite(veh.hitchLength) ? veh.hitchLength : NaN;
+    if (type === 0) { // front fixed: tractor left (rear axle x 180), tool ahead on the right
+      g += tractor(40) + '<g class="sk-b"><path d="M412 238h46"/><path d="M412 214l46 6"/><rect x="470" y="150" width="150" height="90" rx="8"/></g>' + mark(560);
+      g += D('hitchLength', 180, 560, 300, tr('Working center')) + D('length', 560, 620, 120, tr('Implement length'), 104);
+    } else if (type === 1) { // rear fixed: tractor right (rear axle x 640), tool behind on the left
+      g += tractor(500) + '<g class="sk-b"><path d="M584 236h-60"/><path d="M584 214l-60 6"/><rect x="400" y="150" width="124" height="90" rx="8"/></g>' + mark(450);
+      g += D('hitchLength', 450, 640, 300, tr('Working center')) + D('length', 400, 450, 120, tr('Implement length'), 104);
+    } else if (type === 3) { // trailing
+      g += tractor(500) + '<g class="sk-b"><circle cx="555" cy="225" r="6"/><path d="M549 225H330"/><rect x="180" y="170" width="150" height="60" rx="8"/></g>' + wheel(300, 26);
+      g += '<g class="sk-off">' + dash(555, 195, 555, 278) + dash(640, 195, 640, 278) + dim(555, 288, 640, 288, '', 0, 0) + '</g>';
+      g += D('trailingHitchLength', 300, 555, 300, tr('Trailing hitch')) + D('length', 180, 300, 140, tr('Implement length'), 124);
+    } else { // TBT: tank on the hitch, tool behind the tank
+      g += tractor(500) + '<g class="sk-b"><circle cx="555" cy="225" r="6"/><path d="M549 225H480"/><rect x="360" y="120" width="120" height="110" rx="10"/><path d="M360 220H230"/>' +
+        '<rect x="70" y="175" width="160" height="55" rx="8"/></g>' + wheel(420, 30) + wheel(170, 24);
+      g += '<g class="sk-off">' + dash(555, 195, 555, 278) + dash(640, 195, 640, 278) + dim(555, 288, 640, 288, '', 0, 0) + '</g>';
+      g += D('tankTrailingHitchLength', 420, 555, 300, tr('Tank trailing hitch')) + D('trailingHitchLength', 170, 420, 300, tr('Trailing hitch'))
+        + D('length', 70, 170, 140, tr('Implement length'), 124);
+    }
+    if (type === 2 || type === 3)
+      g += '<text class="sk-dl sk-small" x="598" y="328" text-anchor="start">' + esc(T(tr('Hitch length (vehicle)'))) + ' ' + esc(fmtM(vh, 'm')) + '</text>';
+    return '<svg class="tp-sk tp-sk-tool" viewBox="0 0 900 340">' + g + '</svg>';
+  }
   function sideView(extra) {
     return '<svg class="tp-sk" viewBox="0 0 560 380"><line class="sk-g" x1="20" y1="330" x2="540" y2="330"/>' +
       '<g class="sk-b"><circle cx="170" cy="262" r="68"/><circle cx="170" cy="262" r="14"/><circle cx="410" cy="284" r="46"/><circle cx="410" cy="284" r="9"/>' +
@@ -8076,22 +8166,22 @@ const TabletProfiles = (() => {
       case 'antennaOffset': return rearView(dim(280, 22, 326, 22, tr('Antenna to the side'), 340, 27, 'start'));
       case 'sections': return sectionsView();
       case 'hitch': return '<img class="tp-skimg" src="' + hitchImg() + '" alt="">';
+      default: if (id.startsWith('tool:')) return tuiToolSketch(toolTypeNo(), id.slice(5), config && config.vehicle); return '';
       case 'ToolOffsetPositiveRight': case 'ToolOverlap': return '<img class="tp-skimg" src="/icons/' + id + '.png" alt="">';
-      default: return '';
     }
   }
   function drawSketch() {
     const box = W && W.skBox;
     if (!box) return;
     const id = W.focus || W.skDefault || '';
-    const k = id + '|' + (id === 'sections' ? W.nSec.inp.value + W.widths.map(w => w.inp.value).join(',') : id === 'hitch' ? W.type.cur : '') + '|' + I18n.language;
+    const k = id + '|' + (id === 'sections' ? W.nSec.inp.value + W.widths.map(w => w.inp.value).join(',') : id === 'hitch' || id.startsWith('tool:') ? W.type.cur : '') + '|' + I18n.language;
     if (box.dataset.k === k) return;
     box.dataset.k = k;
     box.innerHTML = sketchSvg(id);
   }
 
   const STEP_LABEL = { type: tr('Type'), attach: tr('Attach'), name: tr('Name'), size: tr('Dimensions'), antenna: tr('Antenna'),
-    sections: tr('Sections'), hitch: tr('Hitch'), check: tr('Check and save') };
+    sections: tr('Sections'), hitch: tr('Hitch'), header: tr('Header'), check: tr('Check and save') };
   const stepTitle = s => T(STEP_LABEL[s === 'type' && W.kind === 'tool' ? 'attach' : s]);
   function renderWizard() {
     const isV = W.kind === 'vehicle';
@@ -8116,6 +8206,7 @@ const TabletProfiles = (() => {
     else if (s === 'antenna') pageFields(page, [W.f.antennaPivot, W.f.antennaHeight, W.f.antennaOffset], null, 'antennaPivot');
     else if (s === 'sections') pageSections(page);
     else if (s === 'hitch') pageHitch(page);
+    else if (s === 'header') pageHeader(page);
     else pageCheck(page);
     body.appendChild(page);
     if (s === 'check') renderResult();
@@ -8150,6 +8241,13 @@ const TabletProfiles = (() => {
   }
   function stepOk() {
     const s = W.steps[W.step];
+    if (s === 'header') {
+      const m = metricOf(W.cutW);
+      if (!(Number.isFinite(m) && m > 0)) { showToast(T(tr('Please enter the cutting width.'))); W.cutW.focus(); return false; }
+      const d = metricOf(W.f.hitchLength.inp);
+      if (!(Number.isFinite(d) && d > 0)) { showToast(T(tr('Measure the distance from the rear axle to the cutter bar.'))); W.f.hitchLength.inp.focus(); return false; }
+      applyHeader();
+    }
     if (s === 'name') {
       const p = nameProblem(W.kind, W.nameInp.value.trim());
       W.nameErr.textContent = p;
@@ -8170,11 +8268,17 @@ const TabletProfiles = (() => {
         g.appendChild(b);
       }
     } else {
+      if (W.harvester && W.mode === 'new') {
+        const b = el('button', 'tp-ch img' + (W.header ? ' on' : ''), '<img src="/icons/ToolChkFront.png" alt=""><span></span>');
+        b.querySelector('span').textContent = T(tr('Header (front)'));
+        onTap(b, () => { setHeader(true); renderWizard(); });
+        g.appendChild(b);
+      }
       for (const [val, , label, img] of TOOL_TYPES) {
         if (W.harvester && val !== 'front') continue; // a harvester takes a front tool only (host, #111)
-        const b = el('button', 'tp-ch img' + (W.type.cur === val ? ' on' : ''), '<img src="/icons/' + img + '.png" alt=""><span></span>');
+        const b = el('button', 'tp-ch img' + (W.type.cur === val && !W.header ? ' on' : ''), '<img src="/icons/' + img + '.png" alt=""><span></span>');
         b.querySelector('span').textContent = T(label);
-        onTap(b, () => { W.type.cur = val; renderWizard(); });
+        onTap(b, () => { setHeader(false); W.type.cur = val; renderWizard(); });
         g.appendChild(b);
       }
     }
@@ -8203,7 +8307,7 @@ const TabletProfiles = (() => {
     inp.value = W.name;
     W.nameInp = inp;
     W.nameErr = el('div', 'tp-ask-e');
-    inp.addEventListener('input', () => { W.name = inp.value.trim(); W.nameErr.textContent = ''; });
+    inp.addEventListener('input', () => { W.name = inp.value.trim(); W.nameTouched = true; W.nameErr.textContent = ''; });
     inp.addEventListener('keydown', e => { if (e.key === 'Enter' && stepOk()) { W.step++; renderWizard(); } });
     page.append(inp, W.nameErr);
     page.appendChild(Object.assign(el('div', 'tp-note'), { textContent: tr('It starts as a copy of "{name}"; the next steps change the values that differ.', { name: W.src }) }));
@@ -8257,17 +8361,99 @@ const TabletProfiles = (() => {
     drawSketch();
   }
   function syncWidthsEv() { syncWidths(); drawSketch(); }
+  // Header preset (harvester): front fixed, one section as wide as the cut. Asked: the cutting
+  // width, and the distance rear axle → cutter bar (empty: to be measured). Same commands as the normal steps: tool.type,
+  // tool.numSections, tool.sectionWidth, tool.hitchLength.
+  function setHeader(on) {
+    W.header = on;
+    if (on) {
+      W.type.cur = 'front';
+      W.steps = ['type', 'header', 'name', 'check'];
+      if (!W.cutW) {
+        W.cutW = makeNum('tool.cutWidth', 'm', NaN, '0.01');
+        W.cutW.addEventListener('input', () => applyHeader());
+        // No made-up or copied value: the distance starts empty and has to be measured (an
+        // empty box can't be saved). On a harvester the copied tool is always front fixed (host).
+        W.f.hitchLength.inp.value = '';
+      }
+    } else {
+      W.steps = W.mode === 'new' ? ['type', 'name', 'sections', 'hitch', 'check'] : ['type', 'sections', 'hitch', 'check'];
+    }
+  }
+  function applyHeader() {
+    if (!W.header) return;
+    W.nSec.inp.value = '1';
+    if (!W.swBox) W.swBox = el('div', 'tp-swgrid');
+    syncWidths();
+    const m = metricOf(W.cutW);
+    const w = W.widths[0];
+    if (w) { if (Number.isFinite(m) && m > 0) { writeUnitInput(w.inp, m * 100); w.edited = true; } else { w.inp.value = w.inp.dataset.init; w.edited = false; } }
+    if (!W.nameTouched && W.mode === 'new') W.name = T(tr('Header')) + (Number.isFinite(m) && m > 0 ? ' ' + fmtUnit(m, 'm') : '');
+  }
+  function pageHeader(page) {
+    page.appendChild(Object.assign(el('div', 'tp-lead'), { textContent: T(tr('Header of the harvester: how wide does it cut?')) }));
+    const f = { label: tr('Cutting width'), unit: 'm', help: tr('Working width of the header, from one end of the cutter bar to the other.'), sk: 'tool:' };
+    const wrap = el('div', 'tp-meas');
+    const sk = el('div', 'tp-skbox'); W.skBox = sk; W.skDefault = 'tool:hitchLength';
+    const col = el('div', 'tp-fields');
+    col.appendChild(fieldRow(f, W.cutW));
+    const hl = W.f.hitchLength.row; hl.querySelector('.tp-f-h').textContent = T(tr('Middle of the rear axle forwards to the cutter bar, along the vehicle.'));
+    hl.querySelector('.tp-f-l').textContent = T(tr('Rear axle to cutter bar'));
+    col.appendChild(hl);
+    if (W.f.hitchLength.inp.value === '') col.appendChild(Object.assign(el('div', 'tp-note warn'), { textContent: T(tr('Measure the distance from the rear axle to the cutter bar.')) }));
+    col.appendChild(Object.assign(el('div', 'tp-note'), { textContent: T(tr('Front fixed, one section as wide as the header. Sections, offset and the rest can be changed later in the tool settings.')) }));
+    wrap.append(sk, col); page.appendChild(wrap);
+    drawSketch();
+    setTimeout(() => W.cutW && W.cutW.focus(), 50);
+  }
+  // The lengths the host uses per tool type (ToolPositionService.Update, ImplementSweptPath):
+  // rigid front/rear: Tool.HitchLength = rear axle → working point; trailing: Vehicle.HitchLength
+  // (rear axle → hitch pin, from the vehicle) + Tool.TrailingHitchLength (hitch pin → tool axle);
+  // TBT: Vehicle.HitchLength + TankTrailingHitchLength (hitch pin → tank axle) + TrailingHitchLength
+  // (tank axle → tool axle). Tool.HitchLength is not used for TBT, so it is not asked for there.
+  // Length: from the working point (rigid) or the tool axle (trailing/TBT) to the rear end (front
+  // tool: its front end); only the U-turn clearance from a hard boundary uses it.
+  const toolTypeNo = () => (TOOL_TYPES.find(x => x[0] === W.type.cur) || TOOL_TYPES[1])[1];
   function hitchFields() {
-    const ty = (TOOL_TYPES.find(x => x[0] === W.type.cur) || TOOL_TYPES[1])[1];
+    const ty = toolTypeNo();
     const trailing = ty === 3, tbt = ty === 2;
     const f = [];
-    if (!trailing) f.push(W.f.hitchLength);          // rigid (front, rear, TBT): data-show="rigid"
-    if (trailing || tbt) f.push(W.f.trailingHitchLength);
+    if (!trailing && !tbt) f.push(W.f.hitchLength);  // rigid front/rear only (the host ignores it for TBT)
     if (tbt) f.push(W.f.tankTrailingHitchLength);
+    if (trailing || tbt) f.push(W.f.trailingHitchLength);
     f.push(W.f.length);
     return f;
   }
-  function pageHitch(page) { pageFields(page, hitchFields(), [W.hitch, W.f.offset, W.f.overlap], 'hitch'); }
+  const HITCH_HELP = {
+    hitchLength: [tr('Middle of the rear axle forwards to the working point of the tool, along the vehicle.'), tr('Middle of the rear axle to the working point of the tool, along the vehicle.')],
+    trailingHitchLength: { 2: tr('Axle of the tank to the axle of the tool.'), 3: tr('Hitch pin of the tractor to the axle of the tool.') },
+    length: [tr('Working point forwards to the front end of the tool. Only used to keep the tool clear of a hard boundary in U-turns.'),
+      tr('Working point to the rear end of the tool. Only used to keep the tool clear of a hard boundary in U-turns.'),
+      tr('Axle of the tool to its rear end. Only used to keep the tool clear of a hard boundary in U-turns.'),
+      tr('Axle of the tool to its rear end. Only used to keep the tool clear of a hard boundary in U-turns.')],
+  };
+  function setHitchHelp() {
+    const ty = toolTypeNo();
+    const set = (st, txt) => { const h = st.row.querySelector('.tp-f-h'); if (h && txt) h.textContent = T(txt); };
+    set(W.f.hitchLength, HITCH_HELP.hitchLength[ty === 0 ? 0 : 1]);
+    set(W.f.trailingHitchLength, HITCH_HELP.trailingHitchLength[ty]);
+    set(W.f.length, HITCH_HELP.length[ty]);
+  }
+  // Trailing and TBT tools hang on the vehicle's hitch pin: show that length (from the vehicle).
+  function vehHitchNote() {
+    const v = config && config.vehicle;
+    const r = el('div', 'tp-note');
+    r.textContent = T(tr('Rear axle to the hitch pin: {len} (vehicle "{name}"; change it in the vehicle).',
+      { len: fmtM(v ? v.hitchLength : NaN, 'm'), name: activeName('vehicle') }));
+    return r;
+  }
+  function pageHitch(page) {
+    const ty = toolTypeNo();
+    setHitchHelp();
+    pageFields(page, hitchFields(), [W.f.offset, W.f.overlap], 'tool:');
+    if (ty === 2 || ty === 3) page.querySelector('.tp-fields').prepend(vehHitchNote());
+    page.appendChild(W.hitch.row);
+  }
 
   // All changes as commands, in the order the setup dialog would need them.
   function changes() {
@@ -8351,7 +8537,7 @@ const TabletProfiles = (() => {
   function fmtChange(c, v) {
     if (c.kindOf === 'vtype') return T((VEH_TYPES.find(x => x[0] === v) || [0, '', '—'])[2]);
     if (c.kindOf === 'ttype') return T((TOOL_TYPES.find(x => x[0] === v) || [0, 0, '—'])[2]);
-    if (c.kindOf === 'hitch') return T(HITCH_OPTS[(+v) + 1] || '—');
+    if (c.kindOf === 'hitch') { const h = TUI_HITCH.find(x => x.code === +v); return h ? T(h.name) : '—'; }
     if (c.kindOf === 'int') return String(v);
     return fmtM(v, c.unit);
   }
@@ -8773,6 +8959,102 @@ const TabletProfiles = (() => {
   }
   setInterval(() => { const m = $('tui-menu'); if (m && m.classList.contains('open')) nowTiles(); }, 300);
 
+  // --- Setup dialogs (tablet-feedback-1): coupling types with everyday names, the tool lengths
+  // drawn point to point, and no "Working center" for TBT (the host takes the vehicle's hitch
+  // length there, ToolPositionService.Update). Values and commands stay those of the dialog.
+  function relabelHitchSelect(sel) {
+    if (!sel) return;
+    for (const o of sel.options) {
+      const h = TUI_HITCH.find(x => String(x.code) === o.value);
+      const norm = HITCH_NORM[(+o.value) + 1];
+      if (h) o.textContent = T(h.name) + (norm ? ' (' + norm + ')' : '');
+    }
+  }
+  let dlgFocus = '';
+  function toolDialogExtras() {
+    const t = config && config.tool;
+    if (!t) return;
+    relabelHitchSelect(document.querySelector('#toolcfg .cfg-sel[data-key="tool.hitchType"]'));
+    // TBT: the host takes the vehicle's hitch length, not Tool.HitchLength ("Working center").
+    if (t.type === 2) for (const n of document.querySelectorAll('#toolcfg [data-show="rigid"]')) n.hidden = true;
+    const img = document.getElementById('tc-img-hitch');
+    if (!img) return;
+    let box = document.getElementById('tui-tc-sk');
+    if (!box) {
+      box = el('div', 'tp-skbox'); box.id = 'tui-tc-sk';
+      img.after(box); img.hidden = true;
+      for (const k of ['hitchLength', 'trailingHitchLength', 'tankTrailingHitchLength', 'length']) {
+        const inp = document.querySelector('#toolcfg .cfg-num[data-key="tool.' + k + '"]');
+        if (inp) { inp.addEventListener('focus', () => { dlgFocus = k; toolDialogExtras(); }); inp.addEventListener('blur', () => { dlgFocus = ''; toolDialogExtras(); }); }
+      }
+    }
+    const k = t.type + '|' + dlgFocus + '|' + (config.vehicle ? config.vehicle.hitchLength : '') + '|' + I18n.language;
+    if (box.dataset.k !== k) { box.dataset.k = k; box.innerHTML = tuiToolSketch(t.type, dlgFocus, config.vehicle); }
+  }
+  // Pivot distance (Tool.TrailingToolToPivotLength) as the host uses it: the working line sits
+  // at hitch − (TrailingHitchLength − value) (ToolPositionService.cs:223), so a POSITIVE value puts
+  // it AHEAD of the tool axle, towards the tractor. The dialog's buttons send behind = +, ahead = −
+  // (RemoteServerWiring.Helpers "tool.pivotSide"), i.e. their labels were the wrong way round. The
+  // labels and the picture follow the host here; see docs/Host-Aenderungen.md (undo after a fix upstream).
+  function pivotDialogExtras(t) {
+    const body = document.getElementById('tcs-pivot');
+    if (!body) return;
+    const bB = body.querySelector('.cfg-act[data-val="behind"]'), bA = body.querySelector('.cfg-act[data-val="ahead"]');
+    if (bB && bA) {
+      if (!body.dataset.tuiPivot) { // order: behind | zero | ahead, by what each button really does
+        body.dataset.tuiPivot = '1';
+        const z0 = body.querySelector('.cfg-act[data-val="zero"]');
+        bB.parentNode.insertBefore(bA, bB.parentNode.firstChild);
+        if (z0) bB.parentNode.insertBefore(z0, bB);
+      }
+      bB.textContent = T(tr('Ahead of the axle')); bA.textContent = T(tr('Behind the axle'));
+      const v = +t.trailingToolToPivotLength || 0;
+      bB.classList.toggle('active', v > 0.0005); bA.classList.toggle('active', v < -0.0005);
+      const z = body.querySelector('.cfg-act[data-val="zero"]'); if (z) z.classList.toggle('active', Math.abs(v) <= 0.0005);
+    }
+    const img = body.querySelector('img.vc-diag');
+    let box = document.getElementById('tui-tc-pivot');
+    if (img && !box) {
+      box = el('div', 'tp-skbox'); box.id = 'tui-tc-pivot'; img.after(box); img.hidden = true;
+      const note = el('div', 'tp-note'); note.id = 'tui-tc-pivot-n'; box.after(note);
+      const wrap = el('div', 'tui-tc-pivot-w'); box.before(wrap); wrap.append(box, note);
+    }
+    if (!box) return;
+    const v = +t.trailingToolToPivotLength || 0;
+    const k = v.toFixed(3) + '|' + I18n.language;
+    if (box.dataset.k === k) return;
+    box.dataset.k = k;
+    // Side view, tractor to the right: tool axle (pivot) and the working line.
+    const ax = 300, wx = v > 0.0005 ? 400 : v < -0.0005 ? 200 : 300;
+    let g = '<line class="sk-g" x1="20" y1="230" x2="580" y2="230"/><g class="sk-b"><rect x="150" y="110" width="300" height="70" rx="8"/><path d="M450 150h110"/><circle cx="566" cy="150" r="6"/>' +
+      '<circle cx="' + ax + '" cy="204" r="26"/><circle cx="' + ax + '" cy="204" r="4"/></g>' +
+      '<path class="sk-wp" d="M' + wx + ' 230l-9 -16h18z"/><text class="sk-dl sk-small" x="560" y="130" text-anchor="end">' + esc(T(tr('Tractor'))) + ' →</text>';
+    if (wx !== ax) g += '<g class="sk-on">' + dash(ax, 170, ax, 262) + dash(wx, 170, wx, 262) + dim(Math.min(ax, wx), 252, Math.max(ax, wx), 252, '', 0, 0) + '</g>';
+    g += '<text class="sk-dl sk-small" x="' + wx + '" y="100" text-anchor="middle">' + esc(T(tr('Working line'))) + '</text>';
+    box.innerHTML = '<svg class="tp-sk" viewBox="0 0 600 280">' + g + '</svg>';
+    document.getElementById('tui-tc-pivot-n').textContent = T(Math.abs(v) <= 0.0005 ? tr('Working line on the tool axle.')
+      : v > 0 ? tr('Working line {d} ahead of the tool axle (towards the tractor).', { d: fmtUnit(v, 'm', 2) })
+        : tr('Working line {d} behind the tool axle.', { d: fmtUnit(-v, 'm', 2) }));
+  }
+  populateToolCfg = (orig => function (force) { orig(force); toolDialogExtras(); if (config && config.tool) pivotDialogExtras(config.tool); })(populateToolCfg);
+
+  // Point 15: Network IO fills empty subnet boxes with 192.168.5 (upstream). Without modules
+  // found, that default would go out as the new subnet of every module after one confirm; it is
+  // only sent once the operator has typed the subnet in.
+  {
+    const btn = document.getElementById('nio-subnet');
+    const boxes = ['nio-o1', 'nio-o2', 'nio-o3'].map(id => document.getElementById(id)).filter(Boolean);
+    let typed = false;
+    for (const b of boxes) b.addEventListener('input', () => { typed = true; });
+    // On the parent, capture phase: runs before the button's own (upstream) listener.
+    if (btn) btn.parentNode.addEventListener('pointerdown', e => {
+      if (!e.target.closest('#nio-subnet') || typed || (statusBar && statusBar.moduleSubnet)) return;
+      e.stopImmediatePropagation(); e.preventDefault();
+      showToast(T(tr('No modules found: please type in the subnet first (192.168.5 is only filled in as an example).')), 6000);
+    }, true);
+  }
+  populateVehicleCfg = (orig => function (force) { orig(force); relabelHitchSelect(document.querySelector('#vehiclecfg .cfg-sel[data-key="vehicle.hitchType"]')); })(populateVehicleCfg);
+
   return { open, get view() { return view; } };
 })();
 
@@ -9042,32 +9324,35 @@ const TabletBrand = (() => {
     rtk: () => sv(box(10, 20, 96, 40, 'RTK Fix', 'hb f1') + box(112, 20, 96, 40, 'RTK Float', 'hb f2') + box(214, 20, 96, 40, 'DGPS', 'hb f3') +
       '<text class="ht" x="58" y="84" text-anchor="middle">———</text><text class="ht" x="160" y="84" text-anchor="middle">- - -</text><text class="ht" x="262" y="84" text-anchor="middle">· · ·</text>' + box(10, 106, 300, 40, tr('Network & GPS'))),
     band: () => sv('<rect class="hband" x="20" y="60" width="280" height="50" rx="10"/><text class="ht inv" x="160" y="90" text-anchor="middle">' + esc(T(tr('Profile not completely saved'))) + '</text>'),
+    board: () => sv(box(60, 30, 200, 110, 'AiO v4') + box(84, 100, 70, 26, 'v4', 'hb acc') + box(166, 100, 70, 26, 'v26', 'hb f3')),
     usb: () => sv(box(10, 40, 110, 90, tr('Tablet')) + '<path class="hl" d="M120 85 H200"/>' + box(200, 40, 110, 90, 'PC') + '<text class="ht" x="160" y="76" text-anchor="middle">USB</text>'),
   };
   const PAGES = [
     { id: 'vehicle', t: tr('Choose vehicle and tool'), steps: [
-      tr('Open the menu. At the top you see the active vehicle and tool.'),
+      tr('Open the menu {menu}. At the top you see the active vehicle and tool.'),
       tr('Tap one of them: the cards show all vehicles and tools.'),
       tr('Tap a card, then "Load". This only works standing, with steering off.'),
       tr('New vehicle or tool: "New" starts the assistant. Measure each value; the sketch shows where.'),
       tr('A yellow note means an unusual value. Check it; it is saved as entered.')] },
     { id: 'track', t: tr('Create a track'), steps: [
       tr('Open a field first: Menu → Fields and Jobs.'),
-      tr('Tap "AB Line" in the bottom bar, then the Quick AB Line button.'),
+      tr('Tap {abline} "AB Line" in the bottom bar, then {quickab} "Quick AB Line".'),
       tr('"A+": a straight line through your position in the direction you drive.'),
       tr('"Drive AB": drive to the start, set A; drive to the end, set B.'),
-      tr('"Track left" / "Track right" move the line by one working width.')] },
+      tr('{snapleft} "Track left" / {snapright} "Track right" move the line by one working width.'),
+      tr('{next} "Next track" (right) switches to the next track. It switches steering and auto U-turn off; switch steering on again yourself.')] },
     { id: 'steer', t: tr('Steering on and off'), steps: [
       tr('Steering needs a track and, as set by default, an RTK fix.'),
-      tr('Tap "Steer" (bottom right). The status bar shows "Steering ON".'),
+      tr('Before the first steering: check the heading in setup mode (card "Heading check"). Driving, GPS and IMU heading should agree.'),
+      tr('Tap {steer} "Steer" (bottom right). The status bar shows "Steering ON".'),
       tr('Tap "Steer" again to switch it off. Turning the steering wheel by hand can switch it off too, if this is set up.'),
       tr('"Not steering" in red: steering is on, but the motor does not steer. Steer by hand and check the steering module.'),
       tr('Stay at the wheel. Steering is an aid; you remain responsible.')] },
     { id: 'headland', t: tr('Headland'), steps: [
       tr('The headland is set up per field: Field Tools → Field Builder → Headland.'),
-      tr('"Headland" in the bottom bar switches it on and off.'),
+      tr('{headland} "Headland" in the bottom bar switches it on and off.'),
       tr('"Headland 12.0 m" is the distance to the headland line ahead. It turns red inside the headland.'),
-      tr('"Sec. in headl." switches the sections off in the headland.')] },
+      tr('{secheadland} "Sec. in headl." switches the sections off in the headland.')] },
     { id: 'rtk', t: tr('Understand NTRIP and RTK'), steps: [
       tr('The box at the top shows the fix: solid frame = RTK Fix (steering ready), dashed = RTK Float, dotted = DGPS/GPS.'),
       tr('"Age" is the age of the correction in seconds. Above about 5 s the correction is old.'),
@@ -9084,8 +9369,36 @@ const TabletBrand = (() => {
       tr('On the PC open: Android/data/at.loibl.lenksystem/files/AgOpenWeb/'),
       tr('Copy the folders Vehicles, Tools, Fields and NtripProfiles to the PC. NtripProfiles contains your NTRIP password.'),
       tr('To restore, copy them back to the same place while the app is closed.'),
-      tr('Older versions of this app used the folder Android/data/com.agopenweb.android/ instead.')] },
+      tr('Older versions of this app used the folder Android/data/com.agopenweb.android/ instead.'),
+      tr('Windows tablet: the same folders are in Documents\\AgOpenWeb (C:\\Users\\<name>\\Documents\\AgOpenWeb; with OneDrive possibly OneDrive\\Documents\\AgOpenWeb). Close the app and copy them to a USB stick.')] },
+    { id: 'board', t: tr('Steering module: firmware'), warn: tr('Board and motor are not tested on real hardware yet.'), steps: [
+      tr('AiO board (v4.x, also v4.5): use the AiO v4 firmware, not v26.'),
+      tr('v26 sends 0 as IMU heading in the steering data. The system then takes 0° as a real heading, and the heading lags behind every turn.'),
+      tr('Check it in setup mode on the card "Heading check": a yellow warning appears when the IMU heading stays exactly 0° while driving.')] },
   ];
+  // Buttons named in a step show their real symbol inline: {abline} → the image of that button
+  // as it is on screen now (the bottom bar's, the right nav's), else its file.
+  const HELP_ICON = {
+    abline: ['#bn-abmenu img', 'TrackOn.png'], quickab: ['#bn-quickab img', 'ABTrackAPlus.png'],
+    snapleft: ['#bottomnav [data-cmd="track.snapLeft"] img', 'SnapLeft.png'], snapright: ['#bottomnav [data-cmd="track.snapRight"] img', 'SnapRight.png'],
+    next: ['#rn-cycle img', 'ABLineCycle.png'], steer: [null, 'AutoSteerOff.png'],
+    headland: ['#bn-headland-ic', 'HeadlandOff.png'], secheadland: ['#bn-secheadland-ic', 'HeadlandSectionOn.png'],
+  };
+  function stepItem(text) {
+    const li = el('li');
+    for (const part of text.split(/(\{[a-z]+\})/)) {
+      const m = /^\{([a-z]+)\}$/.exec(part);
+      if (m && m[1] === 'menu') { const b = $('tui-menu-btn'); const i = el('span', 'tb-ic tb-ic-svg', b ? (b.querySelector('svg') || {}).outerHTML || '' : ''); li.appendChild(i); continue; }
+      if (m && HELP_ICON[m[1]]) {
+        const [q, file] = HELP_ICON[m[1]];
+        const live = q ? document.querySelector(q) : null;
+        const img = el('img', 'tb-ic'); img.alt = ''; img.src = live && live.getAttribute('src') ? live.src : '/icons/' + file;
+        li.appendChild(img); continue;
+      }
+      li.appendChild(document.createTextNode(part));
+    }
+    return li;
+  }
   function openHelp(id) {
     const pg = PAGES.find(p => p.id === id);
     if (!pg) {
@@ -9111,7 +9424,7 @@ const TabletBrand = (() => {
       const col = el('div');
       if (pg.warn) col.appendChild(Object.assign(el('div', 'tp-note warn'), { textContent: T(pg.warn) }));
       const ol = el('ol', 'tb-steps');
-      for (const s of pg.steps) ol.appendChild(Object.assign(el('li'), { textContent: T(s) }));
+      for (const s of pg.steps) ol.appendChild(stepItem(T(s)));
       col.appendChild(ol);
       w.appendChild(col);
       b.appendChild(w);

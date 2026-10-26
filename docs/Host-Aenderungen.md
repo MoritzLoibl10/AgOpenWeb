@@ -211,3 +211,17 @@ Werte für beide Geräte. Ohne Migration: Standardwerte (8 m / 20 m / 2 m).
 Nicht übernommen wird die Startspur aus `TramConfig.json` des Feldes (Feldzustand, gehört
 nicht zum Gerät).
 
+
+## 7. Nur Anzeige, wegen Host-Verhalten: Drehpunkt-Abstand und Arbeitsmitte bei TBT (Oktober 2026)
+
+Keine Host-Datei geändert. Der Web-Client passt zwei Anzeigen an das an, was der Host
+tatsächlich rechnet. **Nach einem Fix upstream wieder zurücknehmen** (`app.js`, TabletProfiles
+`pivotDialogExtras`, `toolDialogExtras`).
+
+| Host-Stelle | Was der Host tut | Was die Anzeige jetzt zeigt |
+|---|---|---|
+| `ToolPositionService.cs:223` (`pivotOffset = TrailingHitchLength − TrailingToolToPivotLength`, mit positiver `TrailingHitchLength`) und `RemoteServerWiring.Helpers.cs` `tool.pivotSide` (behind = +, ahead = −) | Ein **positiver** Drehpunkt-Abstand legt die Arbeitslinie **vor** die Geräteachse (zum Traktor hin). Per Test geprüft: Anhängelänge 3 m, Abstand +1 m → Achse 3 m, Arbeitslinie nur 2 m hinter dem Zugpunkt. In AgOpenGPS (Anhängelänge negativ gespeichert) bedeutet + „hinter“; der Import (`ProfileJsonServiceV1.cs:256`) dreht nur die Anhängelänge, nicht den Abstand. | Gerätedialog → Drehpunkt: Der Knopf, der + sendet, heißt „Vor der Achse“, der für − „Hinter der Achse“. Eine Skizze und ein Satz zeigen, wo die Arbeitslinie liegt. Werte und Befehle unverändert. |
+| `ToolPositionService.cs:113–115` | Bei TBT nimmt der Host die Zugpunkt-Länge des **Fahrzeugs**, `Tool.HitchLength` („Arbeitsmitte“) wirkt nicht. | „Arbeitsmitte“ ist bei TBT im Gerätedialog und im Assistenten ausgeblendet. |
+
+Beim Rebase auf upstream: prüfen, ob upstream das Vorzeichen oder die Beschriftung geändert hat.
+Dann die Umbeschriftung entfernen, sonst stimmt sie doppelt falsch.
