@@ -1462,6 +1462,14 @@
     /* In steer-bar style #lb carries the steer-angle error (degrees), which the readout does not show. */
     :root[data-tui-xte]:not([data-tui-steerbar]) #lb { display: none !important; }
     #onscreenbtns, #uturn-indicator { top: max(calc(96px + var(--tui-dy) + var(--sat)), var(--tui-xte-b, 0px)); }
+    #onscreenbtns { top: max(calc(96px + var(--tui-dy) + var(--sat)), var(--tui-xte-b, 0px), var(--tui-osb-y, 0px)); }
+    /* Point 12: no data from the host: no frozen fix, light bar, roll or on/off states. */
+    :root[data-tui-stale] #sb-fix { display: none; }
+    :root[data-tui-stale] #sb-fixbtn::after { content: attr(data-stale); font-weight: 700; color: var(--text-2); }
+    :root[data-tui-stale] #sb-fixdot { background: #6b7280 !important; }
+    :root[data-tui-stale] :is(#lb, #rollgauge) { visibility: hidden; }
+    :root[data-tui-stale] .tui-rn-st { visibility: hidden; }
+    :root[data-tui-stale] .rn-btn.tui-on { border-color: var(--border-2); background: none; }
     /* With the cross-track readout shown, the U-turn indicator sits to its right, on the same line. */
     :root[data-tui-xte] #uturn-indicator { top: var(--tui-xte-t); left: var(--tui-xte-r); right: auto; }
     #tui-col { pointer-events: none; }

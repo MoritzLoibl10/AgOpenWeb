@@ -7375,7 +7375,20 @@ const TabletTerminal = (() => {
       if (stackRects.some(o => r.left < o.right && r.right > o.left && r.bottom > o.top - 4 && r.top < o.bottom)) row.classList.add('tui-osb-off');
     }
   }
-  setInterval(() => { stackTop(); placeBand(); placeWorkArea(); countSlots(); gaugeFit(); fitOverlays(); }, 300);
+  // Point 31: on a narrow screen (7 inch, glove) the on-screen buttons (turn / track left-right)
+  // sat over the headland distance. When the two overlap sideways, the buttons move below it.
+  let osbKey = '';
+  function placeOsb() {
+    const osb = $('onscreenbtns'), hud = $('headland-hud');
+    let y = 0;
+    if (osb && hud && hud.offsetWidth && getComputedStyle(hud).display !== 'none') {
+      const a = osb.getBoundingClientRect(), b = hud.getBoundingClientRect();
+      if (a.width && a.left < b.right && a.right > b.left) y = Math.round(b.bottom + 8);
+    }
+    const k = String(y);
+    if (k !== osbKey) { osbKey = k; root.style.setProperty('--tui-osb-y', y + 'px'); }
+  }
+  setInterval(() => { stackTop(); placeBand(); placeWorkArea(); countSlots(); gaugeFit(); placeOsb(); fitOverlays(); }, 300);
   window.addEventListener('resize', () => { waKey = ''; yKey = ''; bandKey = ''; stackNow = true; placeBand(); placeWorkArea(); });
   frame();
   return { get layout() { return layout; }, get mode() { return mode; }, setMode, openMenu, goPage,
