@@ -307,3 +307,11 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
   nicht auf.
 - **Beim Merge von upstream:** Ändert upstream `build-ios` in `build-and-release.yml`, gibt es dort einen
   Konflikt; die Änderung dann in den Job `ios` von `fork-prerelease.yml` übernehmen.
+
+## 13. CI: Web-Tests mit Browser (feature/bedienung-2, Oktober 2026)
+- **Datei:** `.github/workflows/build-and-release.yml`, Job `test`: Schritt „Run web client tests“.
+  Er installiert Playwright 1.63.0 mit Chromium außerhalb des Repos (`$RUNNER_TEMP/pw`) und führt
+  `node --test Tests/web/*.test.mjs` mit `AOW_REQUIRE_BROWSER=1` aus: fehlt der Browser, schlägt
+  `long-press.test.mjs` fehl statt übersprungen zu werden.
+- **Hinweis:** Auf diesem Branch gab es den Schritt noch nicht (er liegt sonst nur in
+  `feature/eama-import`, dort ohne Browser). Beim Zusammenführen bleibt diese Fassung.

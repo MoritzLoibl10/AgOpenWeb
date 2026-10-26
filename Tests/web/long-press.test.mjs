@@ -5,7 +5,8 @@
 // TabletExplain (wwwroot/app.js, between explain:begin/end) in a real browser: a long press
 // explains, a short press acts on release, and the buttons that switch steering, sections or
 // outputs are left alone, so they act at once on touch. Needs Playwright with Chromium;
-// skipped where it isn't installed. Run: node --test Tests/web/long-press.test.mjs
+// skipped where it isn't installed, except with AOW_REQUIRE_BROWSER=1 (CI), where that fails.
+// Run: node --test Tests/web/long-press.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -25,7 +26,8 @@ const PAGE = `<!doctype html><body>${IDS.map(id => `<button id="${id}" style="wi
     b.addEventListener('pointerdown', () => { window.hits[b.id] = (window.hits[b.id] || 0) + 1; });
 </script></body>`;
 
-test('long press: actuating buttons act at once, others explain', { skip: !chromium && 'playwright not installed' }, async () => {
+test('long press: actuating buttons act at once, others explain', { skip: !chromium && !process.env.AOW_REQUIRE_BROWSER && 'playwright not installed' }, async () => {
+  assert.ok(chromium, 'playwright not installed');
   const browser = await chromium.launch();
   try {
     const p = await browser.newPage();

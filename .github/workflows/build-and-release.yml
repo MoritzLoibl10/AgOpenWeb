@@ -78,6 +78,14 @@ jobs:
       - name: Bug report Worker tests
         run: node --test Tools/bugreport-worker/test/*.test.js
 
+      # Fork: web client tests (Tests/web). Playwright + Chromium for the browser test
+      # (long-press.test.mjs), installed outside the repo; tests without a browser need neither.
+      - name: Run web client tests
+        run: |
+          npm install --no-save --prefix "$RUNNER_TEMP/pw" playwright@1.63.0
+          "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
+          AOW_REQUIRE_BROWSER=1 NODE_PATH="$RUNNER_TEMP/pw/node_modules" node --test Tests/web/*.test.mjs
+
       - name: Run Model Tests
         run: dotnet test Tests/AgOpenWeb.Models.Tests/ --verbosity normal
 
