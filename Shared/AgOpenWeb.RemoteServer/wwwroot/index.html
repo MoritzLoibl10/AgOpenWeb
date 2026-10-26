@@ -1651,6 +1651,14 @@
       border: 2px solid var(--tui-acc); box-shadow: 0 6px 18px rgba(0,0,0,0.3); font: 800 var(--tui-fs-lbl) system-ui, sans-serif; max-width: calc(100vw - 20px); }
     #tui-work-mini[hidden] { display: none; }
     #tui-work-mini .wm-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* First setup (feature/bedienung-2). */
+    #tui-setup1 .fs1-r { display: grid; grid-template-columns: 30px auto 1fr; gap: 8px; align-items: center; padding: 4px 0; font: 700 var(--tui-fs-lbl) system-ui, sans-serif; }
+    #tui-setup1 .fs1-i { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-weight: 900; background: var(--tui-stop); color: var(--tui-stop-ink); }
+    #tui-setup1 .fs1-r[data-lv="1"] .fs1-i { background: var(--tui-warn); color: var(--tui-warn-ink); }
+    #tui-setup1 .fs1-r[data-lv="2"] .fs1-i { background: #1fa64a; color: #fff; }
+    #tui-setup1 .fs1-v { text-align: right; }
+    #tui-setup1-back { position: fixed; z-index: 36; left: 50%; transform: translateX(-50%); top: calc(var(--tui-sb-h) + 6px + var(--sat, 0px)); box-shadow: 0 6px 18px rgba(0,0,0,0.3); }
+    #tui-setup1-back[hidden] { display: none; }
     #tui-sb-clock { font: 800 var(--tui-fs-val) ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums;
       white-space: nowrap; align-items: center; }
     /* GPS/RTK: the fix quality also as a border pattern (solid = RTK fix, dashed = float,
