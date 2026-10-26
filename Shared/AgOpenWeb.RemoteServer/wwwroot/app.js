@@ -11205,3 +11205,144 @@ const TabletBackup = (() => {
   }, 300);
   return { open, get state() { return status(); }, get selection() { return [...sel]; } };
 })();
+
+// ===== Ready-to-steer light (feature/bedienung-1) =============================================
+// A traffic light in the status bar, left of the steer chip: display only, from states the
+// client already has; it never sends a command and the steering logic is untouched.
+// Red = something steering needs is missing (no data, no RTK fix as the host reports it, steer
+// module not heard, no line). Yellow = steering works but check first: no IMU heard, or with one
+// antenna the direction not yet confirmed on the card "Does the vehicle face the way it drives?"
+// (TabletSteerConfirm; driving forward can't be told from backing with one antenna, so only the
+// confirmation counts). The module flags are the host's own (gpsOk / autoSteerOk / imuOk); RTK
+// fix = NMEA fix quality 4, the host's default minimum (MinFixQuality, not sent to the client).
+// Tap it for the list. In the demo mode (TabletDemo) it says "Demo" instead.
+const TabletReady = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); fn(e); });
+  const pill = el('button'); pill.id = 'tui-sb-ready'; pill.setAttribute('translate', 'no');
+  pill.innerHTML = '<span class="rd-dot"></span><span class="rd-t"></span>';
+  const pop = el('div'); pop.id = 'tui-ready'; pop.hidden = true; pop.setAttribute('translate', 'no');
+  pop.addEventListener('pointerdown', e => e.stopPropagation());
+  document.body.appendChild(pop);
+  const sb = document.getElementById('statusbar'), steer = document.getElementById('tui-sb-steer');
+  if (sb) sb.insertBefore(pill, steer && steer.parentNode === sb ? steer : document.getElementById('sb-fs'));
+  onTap(pill, () => { pop.hidden = !pop.hidden; last = ''; render(); });
+  let last = '';
+
+  const live = () => connState === 'connected' && !!lastTick && performance.now() - lastTick.t < 2000;
+  // [level, label, detail]: level 2 = ok, 1 = check, 0 = missing.
+  function checks() {
+    const s = statusBar || {}, op = tick && tick.op, gps = config && config.gps;
+    if (!live()) return [[0, tr('Connection'), connState === 'connected' ? tr('No current data from the guidance computer.') : tr('No connection to the guidance computer.')]];
+    const out = [];
+    if (s.gpsSentence === 'SIM') out.push([1, tr('GPS'), tr('Simulator: not a real position')]);
+    else if (s.gpsLost || !s.gpsOk) out.push([0, tr('GPS'), tr('No GPS data')]);
+    else out.push([s.fixQuality === 4 ? 2 : 0, tr('GPS'), (s.fixText || '') + (s.fixQuality === 4 ? '' : ' – ' + T(tr('steering needs RTK Fix')))]);
+    out.push([s.autoSteerOk ? 2 : 0, tr('Steer module'), s.autoSteerOk ? tr('connected') : tr('not heard')]);
+    // An IMU module's hello (imuOk), or the steer module's IMU heading in PGN 253 (AiO boards).
+    const sd = s.systemData, imu = !!s.imuOk || !!(sd && typeof sd.imuHeading === 'number' && Number.isFinite(sd.imuHeading));
+    out.push([imu ? 2 : 1, tr('IMU'), imu ? tr('connected') : tr('not heard')]);
+    out.push([op && scene && scene.hasField && op.autoSteerAvail ? 2 : 0, tr('Line'), op && op.autoSteerAvail ? tr('selected') : tr('No line')]);
+    const dual = !!(gps && gps.isDualGps && !s.dualHeadingMissing);
+    const conf = dual || (typeof TabletSteerConfirm !== 'undefined' && TabletSteerConfirm.confirmed);
+    out.push([conf ? 2 : 1, tr('Direction'), dual ? tr('dual antenna') : conf ? tr('confirmed') : tr('not confirmed since the start')]);
+    return out;
+  }
+  function render() {
+    const demo = typeof TabletDemo !== 'undefined' && TabletDemo.active;
+    const cs = checks(), lvl = Math.min(...cs.map(c => c[0]));
+    const word = demo ? tr('Demo') : lvl === 2 ? tr('Ready') : lvl === 1 ? tr('Check') : tr('Not ready');
+    const key = JSON.stringify([demo, cs, pop.hidden, I18n.language]);
+    if (key === last) return;
+    last = key;
+    pill.dataset.lv = demo ? 'demo' : String(lvl);
+    pill.querySelector('.rd-t').textContent = T(word);
+    pill.title = T(tr('Ready to steer'));
+    if (pop.hidden) return;
+    pop.innerHTML = '';
+    pop.appendChild(el('div', 'rd-h', T(tr('Ready to steer')) + ': ' + T(word)));
+    if (demo) pop.appendChild(el('div', 'rd-n', T(tr('Demo: simulator only, no real outputs.'))));
+    for (const [l, k, v] of cs) {
+      const r = el('div', 'rd-r'); r.dataset.lv = String(l);
+      r.append(el('span', 'rd-i', l === 2 ? '✓' : l === 1 ? '!' : '✗'), el('span', 'rd-k', T(k)), el('span', 'rd-v', T(v)));
+      pop.appendChild(r);
+    }
+    pop.appendChild(el('div', 'rd-n', T(tr('Display only. Steering is switched on with the Steer button as before.'))));
+  }
+  setInterval(render, 300);
+  return { render, get level() { return Math.min(...checks().map(c => c[0])); } };
+})();
+
+// ===== Demo mode (feature/bedienung-1) ========================================================
+// For showing the app: the existing simulator as the GPS source, with a striped "DEMO" band that
+// can't be missed. It only starts while no module is heard (GPS, steer, machine): with a module
+// on the network a simulated drive could switch real outputs (the host sends steer and section
+// PGNs in the simulator too). If a module turns up while it runs, steering and sections are
+// switched off and the demo ends. Stops with "End demo"; the flag lives in this tab only.
+const TabletDemo = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); fn(e); });
+  const KEY = 'aow.demo';
+  let active = false, simBefore = false; // simBefore: the simulator was already on; ending leaves it on
+  try { const v = sessionStorage.getItem(KEY); active = !!v; simBefore = v === 'sim'; } catch (_) { /* blocked storage: off */ }
+  const band = el('div'); band.id = 'tui-demo'; band.hidden = true; band.setAttribute('translate', 'no');
+  band.addEventListener('pointerdown', e => e.stopPropagation());
+  const bt = el('span', 'dm-t'), stop = el('button', 'tp-btn');
+  band.append(bt, stop);
+  document.body.appendChild(band);
+  onTap(stop, () => end(''));
+  const save = () => { try { if (active) sessionStorage.setItem(KEY, simBefore ? 'sim' : '1'); else sessionStorage.removeItem(KEY); } catch (_) { /* ignore */ } };
+  // Real GPS = data that isn't the simulator's (as TabletSimGuard); steer and machine modules by the host's flags.
+  const modules = () => { const s = statusBar || {}; return !!((s.gpsOk && s.gpsSentence && s.gpsSentence !== 'SIM') || s.autoSteerOk || s.machineOk); };
+  function allOff() {
+    const op = tick && tick.op;
+    if (op && op.autoSteer) transport.send('autosteer.toggle');
+    if (op && op.sectionAuto) transport.send('section.master');
+    if (op && op.sectionManual) transport.send('section.manual');
+  }
+  function start() {
+    if (connState !== 'connected' || !statusBar) { showToast(T(tr('No connection to the guidance computer.'))); return; }
+    if (!iHoldControl) { showToast(T(tr('Only the device that has control can start the demo.'))); return; }
+    if (modules()) { showToast(T(tr('A module is connected: the demo only runs without modules, so nothing real is switched.'))); return; }
+    active = true; simBefore = !!statusBar.simEnabled; save();
+    if (!statusBar.simEnabled) transport.send('sim.toggleEnable');
+    if (!statusBar.simPanelVisible) transport.send('sim.togglePanel');
+    render();
+  }
+  function end(why) {
+    if (!active) return;
+    allOff();
+    if (statusBar && statusBar.simEnabled && !simBefore) transport.send('sim.toggleEnable');
+    active = false; save();
+    if (why) showToast(T(why));
+    render();
+  }
+  function render() {
+    // A module heard while the demo runs: switch off and end at once.
+    if (active && connState === 'connected' && modules()) end(tr('Demo ended: a module was detected. Steering and sections were switched off.'));
+    if (band.hidden === active) band.hidden = !active;
+    document.documentElement.toggleAttribute('data-tui-demo', active);
+    if (!active) return;
+    bt.textContent = T(tr('DEMO – simulator only, no real outputs'));
+    stop.textContent = T(tr('End demo'));
+  }
+  setInterval(render, 250);
+
+  // --- Menu tile (setup) --------------------------------------------------------------------
+  const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M10 8l4 2-4 2z" fill="currentColor"/><path d="M8 20h8M12 16v4"/></svg>';
+  setInterval(() => {
+    const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
+    const s = m.querySelector('.tui-tiles.tui-s'); if (!s) return;
+    let t = s.querySelector('[data-tile="demo"]');
+    if (!t) {
+      t = el('button', 'tui-tile setup'); t.dataset.tile = 'demo'; t.innerHTML = IC + '<span></span>';
+      onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); if (active) end(''); else start(); });
+      s.appendChild(t);
+    }
+    const lbl = T(active ? tr('End demo') : tr('Demo mode'));
+    if (t.querySelector('span').textContent !== lbl) t.querySelector('span').textContent = lbl;
+  }, 300);
+  return { start, end, get active() { return active; } };
+})();

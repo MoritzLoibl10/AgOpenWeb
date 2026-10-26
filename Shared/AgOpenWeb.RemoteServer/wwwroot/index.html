@@ -1601,6 +1601,37 @@
     #tui-sb-steer[data-st="fault"] { background: var(--tui-stop); color: var(--tui-stop-ink); border: 2px solid var(--tui-stop);
       animation: tui-blink 1s steps(1, end) infinite; }
     @keyframes tui-blink { 50% { filter: brightness(0.75); } }
+    /* Ready-to-steer light (feature/bedienung-1): display only. */
+    #tui-sb-ready { display: none; }
+    :root[data-tui-layout="terminal"] #statusbar #tui-sb-ready { display: inline-flex; align-items: center; gap: 8px; padding: 0 10px;
+      height: calc(var(--tui-sb-h) - 8px); border-radius: 8px; border: 2px solid var(--tui-card-line); background: transparent;
+      font: 800 var(--tui-fs-lbl) system-ui, sans-serif; white-space: nowrap; color: inherit; }
+    #tui-sb-ready .rd-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--tui-stop); flex: none; }
+    #tui-sb-ready[data-lv="1"] .rd-dot { background: var(--tui-warn); }
+    #tui-sb-ready[data-lv="2"] .rd-dot { background: #1fa64a; }
+    #tui-sb-ready[data-lv="demo"] .rd-dot { background: repeating-linear-gradient(-45deg, var(--tui-warn) 0 4px, #222 4px 8px); }
+    #tui-ready { position: fixed; z-index: 30; top: calc(var(--tui-sb-h) + 6px + var(--sat, 0px)); right: 10px; min-width: 300px; max-width: calc(100vw - 20px);
+      background: var(--tui-card, #fff); color: var(--tui-ink, #111); border: 2px solid var(--tui-card-line); border-radius: 12px; padding: 10px 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25); font: 600 var(--tui-fs-lbl)/1.35 system-ui, sans-serif; }
+    #tui-ready[hidden] { display: none; }
+    #tui-ready .rd-h { font-weight: 900; margin-bottom: 6px; }
+    #tui-ready .rd-r { display: grid; grid-template-columns: 28px auto 1fr; gap: 8px; align-items: center; padding: 4px 0; }
+    #tui-ready .rd-i { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; font-weight: 900; background: var(--tui-stop); color: var(--tui-stop-ink); }
+    #tui-ready .rd-r[data-lv="1"] .rd-i { background: var(--tui-warn); color: var(--tui-warn-ink); }
+    #tui-ready .rd-r[data-lv="2"] .rd-i { background: #1fa64a; color: #fff; }
+    #tui-ready .rd-k { font-weight: 800; }
+    #tui-ready .rd-v { text-align: right; }
+    #tui-ready .rd-n { margin-top: 6px; opacity: 0.8; }
+    /* Demo mode (feature/bedienung-1): a striped band and frame that can't be missed. */
+    #tui-demo { position: fixed; z-index: 29; left: 50%; transform: translateX(-50%); bottom: calc(76px + var(--sab, 0px));
+      display: flex; align-items: center; gap: 12px; padding: 6px 8px 6px 16px; border-radius: 10px;
+      background: repeating-linear-gradient(-45deg, var(--tui-warn) 0 14px, #1e1500 14px 28px); box-shadow: 0 4px 16px rgba(0,0,0,0.35); }
+    #tui-demo[hidden] { display: none; }
+    #tui-demo .dm-t { font: 900 var(--tui-fs-val) system-ui, sans-serif; letter-spacing: 0.04em; color: #1e1500; background: var(--tui-warn);
+      padding: 2px 10px; border-radius: 6px; white-space: nowrap; }
+    #tui-demo .tp-btn { background: var(--tui-card); color: var(--tui-ink); border-color: var(--tui-card-line); white-space: nowrap; }
+    :root[data-tui-demo] body::after { content: ''; position: fixed; inset: 0; z-index: 28; pointer-events: none;
+      border: 6px solid transparent; border-image: repeating-linear-gradient(-45deg, var(--tui-warn) 0 14px, #1e1500 14px 28px) 6; }
     #tui-sb-clock { font: 800 var(--tui-fs-val) ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums;
       white-space: nowrap; align-items: center; }
     /* GPS/RTK: the fix quality also as a border pattern (solid = RTK fix, dashed = float,
