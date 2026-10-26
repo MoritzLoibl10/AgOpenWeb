@@ -406,6 +406,21 @@ public sealed class RemoteServerHost
                 new[] { ("Content-Disposition", "attachment"), ("Cache-Control", "no-store") });
         });
 
+        // Profile backups (fork, feature/profil-backup), as a download like the bug reports:
+        // the exports and the automatic backups made before an import. Filename only.
+        server.MapGetPrefix("/backups/", file =>
+        {
+            if (file.Contains('/') || file.Contains('\\') || file.Contains("..")
+                || !(file.StartsWith(AgOpenWeb.Services.Profile.ProfileBackupService.ExportPrefix, StringComparison.Ordinal)
+                     || file.StartsWith(AgOpenWeb.Services.Profile.ProfileBackupService.AutoPrefix, StringComparison.Ordinal))
+                || !file.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                return SimpleWebServer.Response.NotFound;
+            var path = Path.Combine(AgOpenWeb.Services.AppDataRoot.Documents, "Backups", file);
+            if (!File.Exists(path)) return SimpleWebServer.Response.NotFound;
+            return SimpleWebServer.Response.Bytes(File.ReadAllBytes(path), "application/zip",
+                new[] { ("Content-Disposition", "attachment"), ("Cache-Control", "no-store") });
+        });
+
         await server.StartAsync().ConfigureAwait(false);
         _broadcaster.Start();
         _server = server;

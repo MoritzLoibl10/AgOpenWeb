@@ -262,7 +262,8 @@ window.RemoteTransport = {
           const gc = i32(); const logs = new Array(gc);
           for (let k = 0; k < gc; k++) logs[k] = { time: str(), level: i32(), message: str() };
           const bugReportStatus = str();
-          handlers.onAppInfo && handlers.onAppInfo({ version, gitHash, currentLanguage, languages, directories, hotkeys, logs, bugReportStatus });
+          const backupStatus = o < dv.byteLength ? str() : ''; // append-only (fork): profile backup, JSON
+          handlers.onAppInfo && handlers.onAppInfo({ version, gitHash, currentLanguage, languages, directories, hotkeys, logs, bugReportStatus, backupStatus });
           break;
         }
         case TYPE.FIELD_TOOLS: {

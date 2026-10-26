@@ -225,3 +225,59 @@ tatsächlich rechnet. **Nach einem Fix upstream wieder zurücknehmen** (`app.js`
 
 Beim Rebase auf upstream: prüfen, ob upstream das Vorzeichen oder die Beschriftung geändert hat.
 Dann die Umbeschriftung entfernen, sonst stimmt sie doppelt falsch.
+
+
+## 8. Profil-Backup: Export und Import (feature/profil-backup, Oktober 2026)
+
+Host-Ausnahme genehmigt. Umsetzung des Vorschlags `docs/Vorschlag-Profil-Backup.md`. Die Lenk-
+und Steuerlogik ist nicht berührt.
+
+### Geänderte Host-Dateien
+| Datei | Änderung |
+|---|---|
+| `Shared/AgOpenWeb.Services/Profile/ProfileBackupService.cs` (neu) | Packen, Prüfen, Vorschau, Anwenden, automatische Sicherung, Prüfung „Lenkung aus / steht / Schlag nicht offen“ |
+| `Shared/AgOpenWeb.RemoteWiring/RemoteServerWiring.Helpers.cs` | `ApplyBackupCommand`: Befehle `backup.create`, `backup.list`, `backup.preview\|<Datei>`, `backup.apply\|<Datei>\t<Indizes>`; Status als JSON |
+| `Shared/AgOpenWeb.RemoteWiring/RemoteServerWiring.cs` | Befehle an `ApplyBackupCommand`; `backup.apply` ist **Tier-2** (nur das Gerät, das die Bedienung hat) |
+| `Shared/AgOpenWeb.RemoteServer/RemoteServerHost.cs` | Route `GET /backups/<Datei>.zip` (nur Dateiname, nur `backup_…` und `before-import_…` aus `Backups/`) |
+| `Shared/AgOpenWeb.Models/State/ApplicationState.cs` | `BackupStatus` (JSON-Text) |
+| `Shared/AgOpenWeb.RemoteServer/Contracts.cs`, `SceneProjector.cs`, `WireCodec.cs`, `wwwroot/transport.js` | `AppInfoDto.BackupStatus`, hinten angehängt (append-only) |
+| `Tests/AgOpenWeb.Services.Tests/ProfileBackupServiceTests.cs` (neu) | Rundlauf, Abbruch, beschädigte ZIPs, keine Geheimnisse |
+
+### Verhalten
+- **Export:** `Vehicles/*.json` und `Tools/*.json` (mit `.AutoSteer.json`), `Fields/<Schlag>/…` ohne
+  `jobs/` (bearbeitete Fläche). Dazu kommt ein `manifest.json` mit Format, Formatversion 1,
+  App-Version, Datum und jeder Datei mit Größe und SHA-256. Die Datei landet unter
+  `Backups/backup_<Datum>.zip`.
+- **Nicht im Export:** die NTRIP-Profile und die App-Einstellungen (Passwörter, AgShare-Schlüssel).
+  JSON-Eigenschaften, deren Name nach einem Geheimnis aussieht (password, apikey, secret, token,
+  username), werden zusätzlich geleert. Den NTRIP-Zugang gibt man nach dem Wiederherstellen neu ein.
+- **Import:** nur aus `Import/`, nur ZIPs mit einem `manifest.json` dieses Formats. Die ZIP wird
+  vollständig geprüft, bevor etwas geschrieben wird:
+  - jede Datei mit Größe und Prüfsumme;
+  - keine Datei außerhalb des Manifests;
+  - keine Pfade außerhalb von Vehicles/Tools/Fields, kein `..`, kein `jobs/`;
+  - höchstens 1 GB.
+- **Vorschau:** Für jeden Eintrag zeigt sie „neu / überschreibt / gleich“. Bei Fahrzeug und Gerät
+  nennt sie die geänderten Werte (z. B. `vehicle.wheelbase: 3.33 → 2.5`), bei einem Schlag die
+  geänderten Dateien.
+- **Anwenden:**
+  - Vorher wird automatisch `Backups/before-import_<Datum>.zip` angelegt. Sie ist wie ein Export
+    aufgebaut und lässt sich genauso wieder einspielen.
+  - Danach schreibt der Host nur die ausgewählten Einträge, jede Datei über eine Temp-Datei.
+  - Ist das aktive Fahrzeug oder Gerät betroffen, lädt er das Paar neu, ohne vorher zu speichern.
+- **Sperren:**
+  - Client: Verbindung, frische Daten, Bedienung, Lenkung aus, Stillstand.
+  - Host: lehnt `backup.apply` ab, solange die Lenkung an ist, das Fahrzeug ≥ 0,5 km/h fährt oder
+    ein ausgewählter Schlag offen ist.
+- **Felddateien beim Überschreiben:** Dateien aus der Sicherung ersetzen die vorhandenen. Dateien,
+  die nur im jetzigen Schlag liegen, bleiben liegen; die Auftragsabdeckung (`jobs/`) bleibt unberührt.
+
+### Grenzen
+- **iOS:** Den Download von `/backups/` übernimmt nur der System-Browser. iOS hält dabei die App
+  und ihren Webserver an. Anders als bei `/bugreports/` gibt es kein Teilen-Menü (das wäre eine
+  Änderung in `Platforms/AgOpenWeb.iOS`). Android und Desktop laden normal herunter.
+- Auf einem echten Tablet ist der Ablauf noch nicht geprüft, insbesondere die USB-Kopie in `Import/`.
+
+### Beim Rebase auf upstream
+`AppInfoDto` und `transport.js` haben ein angehängtes Feld. Hängt upstream dort selbst etwas an,
+muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
