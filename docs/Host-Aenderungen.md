@@ -315,3 +315,29 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
 - **Keine Änderung** an Vorgewende, Teilbreiten, Lenkung oder anderer Regellogik.
 - **Beim Rebase auf upstream:** Ändert upstream den KML-Import (`_kmlParsedPolygons`,
   `KmlCenterLatitude`, `_selectedKmlFile`), `RemoteFromGeo` anpassen.
+
+## 11. Bedienung-1: Fenster-Vollbild im Desktop-Launcher (feature/bedienung-1, Oktober 2026)
+- **Datei:** `Platforms/AgOpenWeb.Desktop/Launcher/WebViewLauncher.cs`, `OnWebMessage`: die Nachricht
+  `fullscreen|1` / `fullscreen|0` ruft `_window.SetFullScreen(true/false)`. Sonst keine Änderung.
+- **Client:** Der Knopf ⛶ in der Statuszeile schickt im Launcher (Photino, `window.external.sendMessage`)
+  diese Nachricht statt der Fullscreen-API, die dort nur die Web-Ansicht füllt. Im Browser unverändert.
+- **Beim Rebase auf upstream:** eine Abfrage am Anfang von `OnWebMessage`.
+
+## 12. CI: iOS-Build nur noch in der Testversion (Oktober 2026)
+- **Dateien:** `.github/workflows/build-and-release.yml` (Job `build-ios` entfernt, Kommentar am Ende),
+  `.github/workflows/fork-prerelease.yml` (derselbe Job als `ios`, `timeout-minutes: 45`).
+- **Grund:** In der PR-CI wartete `build-ios` jedes Mal 15 Minuten auf einen `macos-26`-Runner und
+  wurde ohne einen einzigen Schritt abgebrochen (#19, #20). Damit war jeder PR rot.
+- **Verhalten:** PRs prüfen iOS nicht mehr. Die Testversion kompiliert iOS weiter (nur Prüfung, kein
+  Artefakt); die Vorabversion wartet nicht auf diesen Job, ein Abbruch dort hält Windows und APK
+  nicht auf.
+- **Beim Merge von upstream:** Ändert upstream `build-ios` in `build-and-release.yml`, gibt es dort einen
+  Konflikt; die Änderung dann in den Job `ios` von `fork-prerelease.yml` übernehmen.
+
+## 13. CI: Web-Tests mit Browser (feature/bedienung-2, Oktober 2026)
+- **Datei:** `.github/workflows/build-and-release.yml`, Job `test`: Schritt „Run web client tests“.
+  Er installiert Playwright 1.63.0 mit Chromium außerhalb des Repos (`$RUNNER_TEMP/pw`) und führt
+  `node --test Tests/web/*.test.mjs` mit `AOW_REQUIRE_BROWSER=1` aus: fehlt der Browser, schlägt
+  `long-press.test.mjs` fehl statt übersprungen zu werden.
+- **Hinweis:** Derselbe Schritt führt auch die eAMA-Tests aus (`geo-at`, `eama-shape`); beim Zusammenführen
+  mit `feature/eama-import` ist diese Fassung geblieben.

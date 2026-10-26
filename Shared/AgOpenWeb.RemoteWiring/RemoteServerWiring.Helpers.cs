@@ -15,26 +15,13 @@ namespace AgOpenWeb.RemoteWiring;
 
 public static partial class RemoteServerWiring
 {
-    private static readonly System.Collections.Generic.HashSet<string> UngatedTrackIds = new()
+    // A browser without control is an observer: it sees everything and changes nothing
+    // (#397). Only these ids run for it; the hub handles control.* and diag.ping itself.
+    // Fail-closed: a new id needs control unless it is added here, and only a request
+    // that changes no setting, data or machine state belongs here.
+    internal static readonly System.Collections.Generic.HashSet<string> ObserverIds = new()
     {
-        "track.drawStraight", "track.drawCurve", "track.drawPoint", "track.drawFinish",
-        "track.drawUndo", "track.drawCancel", "track.aPlus", "track.driveAB",
-        "track.latLonHeading", "track.latLonAB", "track.refSide",
-        "track.recordCurve", "track.finishCurve", "track.setABGps",
-        "track.createFromBoundary", "track.boundaryCurve", "track.boundaryCurveSeg", "track.allEdges",
-        "track.setVisible", "track.toggleRecPaths", "track.editSave",
-        "track.rename", // field data, like editSave / headland.rename; was silently dropped for observers (#111)
-    };
-
-    // Field Builder headland *building* is field-data editing (done while reviewing the
-    // field, not live actuation), so it stays ungated like track creation. The live
-    // headland on/off + section-in-headland toggles (headland.toggle / .sectionToggle)
-    // DO change what the machine does, so they remain gated. Fail-closed: a new
-    // headland.* id defaults to gated until added here.
-    private static readonly System.Collections.Generic.HashSet<string> UngatedHeadlandIds = new()
-    {
-        "headland.fromMapPoints", "headland.wholeBoundary", "headland.setOffset",
-        "headland.delete", "headland.deleteAll", "headland.rename", "headland.editSave",
+        "boundary.refresh", // rebuilds the boundary menu list from the open field
     };
 
     /// <summary>Parse a whole-number setting, rounding a decimal ("12.5" → 13) rather than
@@ -84,7 +71,9 @@ public static partial class RemoteServerWiring
             case "conn.machineConfigured": con.IsMachineConfigured = B(); cfg.SaveAppSettings(); return;
             // --- AgShare cloud settings (ConfigStore.Connections). Persist on change. ---
             case "conn.agShareServer": con.AgShareServer = val; cfg.SaveAppSettings(); return;
-            case "conn.agShareApiKey": con.AgShareApiKey = val; cfg.SaveAppSettings(); return;
+            case "conn.agShareApiKey": // the mask = unchanged (the client never has the key)
+                if (val == AgOpenWeb.RemoteServer.Secrets.Mask) return;
+                con.AgShareApiKey = val; cfg.SaveAppSettings(); return;
             case "conn.agShareEnabled": con.AgShareEnabled = B(); cfg.SaveAppSettings(); return;
             case "conn.rtcmBroadcast": con.RtcmBroadcast = B(); cfg.SaveAppSettings(); return;
             case "conn.sendCorrectedPosition": con.SendCorrectedPosition = B(); cfg.SaveAppSettings(); return;
@@ -106,6 +95,9 @@ public static partial class RemoteServerWiring
             case "vehicle.antennaPivot": if (D(out var d4)) veh.AntennaPivot = d4; return;
             case "vehicle.antennaHeight": if (D(out var d5)) veh.AntennaHeight = d5; return;
             case "vehicle.antennaOffset": if (D(out var d6)) veh.AntennaOffset = d6; return;
+            case "vehicle.imuPivot": if (D(out var di1)) veh.ImuPivot = di1; return;
+            case "vehicle.imuHeight": if (D(out var di2)) veh.ImuHeight = di2; return;
+            case "vehicle.imuOffset": if (D(out var di3)) veh.ImuOffset = di3; return;
             case "vehicle.antennaSide": // L/C/R presets (mirror ConfigurationViewModel)
                 if (val == "center") veh.AntennaOffset = 0;
                 else if (val == "left") veh.AntennaOffset = System.Math.Abs(veh.AntennaOffset) < 0.01 ? -0.5 : -System.Math.Abs(veh.AntennaOffset);
@@ -204,6 +196,7 @@ public static partial class RemoteServerWiring
             case "display.hardwareMessagesEnabled": disp.HardwareMessagesEnabled = B(); cfg.SaveAppSettings(); return;
             case "display.extraGuidelines": disp.ExtraGuidelines = B(); cfg.SaveAppSettings(); return;
             case "display.extraGuidelinesCount": if (I(out var dg)) { disp.ExtraGuidelinesCount = dg; cfg.SaveAppSettings(); } return;
+            case "display.uiScale": if (I(out var us)) { disp.UiScale = us; cfg.SaveAppSettings(); } return;
             case "display.uTurnButtonVisible": disp.UTurnButtonVisible = B(); cfg.SaveAppSettings(); return;
             case "display.lateralButtonVisible": disp.LateralButtonVisible = B(); cfg.SaveAppSettings(); return;
             case "display.autoSteerSound": disp.AutoSteerSound = B(); cfg.SaveAppSettings(); return;
@@ -435,16 +428,18 @@ public static partial class RemoteServerWiring
             case "ntrip.setDefault": // arg = id
                 _ = svc.SetDefaultProfileAsync(arg);
                 return;
-            case "ntrip.test": // arg = host \t port \t mount \t user \t pass [\t ntripVersion]
+            case "ntrip.test": // arg = host 	 port 	 mount 	 user 	 pass 	 id (the mask = id's stored pass) [	 ntripVersion]
             {
                 var t = arg.Split('\t');
                 if (t.Length < 3) return;
+                if (t.Length > 4 && t[4] == AgOpenWeb.RemoteServer.Secrets.Mask)
+                    t[4] = svc.Profiles.FirstOrDefault(p => p.Id == t.ElementAtOrDefault(5))?.Password ?? "";
                 int.TryParse(t.ElementAtOrDefault(1), System.Globalization.NumberStyles.Integer, inv, out var tport);
                 if (tport == 0) tport = 2101;
                 state.Connections.NtripTestStatus = "Testing connection...";
                 _ = TestNtripAndReportAsync(dispatcher, state, t[0], tport, t[2],
                     t.ElementAtOrDefault(3) ?? "", t.ElementAtOrDefault(4) ?? "",
-                    t.ElementAtOrDefault(5) == "2" ? 2 : 1);
+                    t.ElementAtOrDefault(6) == "2" ? 2 : 1); // fork: version after upstream's id
                 return;
             }
             case "ntrip.save": // id \t name \t host \t port \t mount \t user \t pass \t auto \t default \t assoc(csv) [\t ntripVersion]
@@ -465,7 +460,9 @@ public static partial class RemoteServerWiring
                 var profile = new AgOpenWeb.Models.Ntrip.NtripProfile
                 {
                     Name = f[1], CasterHost = f[2], CasterPort = port, MountPoint = f[4],
-                    Username = f[5], Password = f[6],
+                    Username = f[5],
+                    // The editor only has the mask for a stored password: keep that one.
+                    Password = f[6] == AgOpenWeb.RemoteServer.Secrets.Mask ? existing?.Password ?? "" : f[6],
                     AutoConnectOnFieldLoad = f[7] == "1", IsDefault = f[8] == "1",
                     AssociatedFields = assoc,
                     // Optional, so an older client's save keeps the stored version.
@@ -589,6 +586,7 @@ public static partial class RemoteServerWiring
                 var desc = t.ElementAtOrDefault(1) ?? "";
                 var state = services.GetRequiredService<AgOpenWeb.Models.State.ApplicationState>();
                 state.BugReportStatus = "Creating bug report…";
+                BugReportRemote.NewReport(null);
                 try
                 {
                     var dir = System.IO.Path.Combine(
@@ -604,10 +602,14 @@ public static partial class RemoteServerWiring
                         ntripRtcmReport: AgOpenWeb.Services.NtripRtcmReport.Build(
                             services.GetService<INtripClientService>(), services.GetService<IGpsService>()));
                     state.BugReportStatus = "Saved: " + zip;
+                    BugReportRemote.NewReport(zip);
                 }
                 catch (Exception ex) { state.BugReportStatus = "Error: " + ex.Message; }
                 return;
             }
+            case "app.bugReport.send": // arg = zip name \t GitHub user \t email \t title \t description
+                BugReportRemote.Send(arg, services.GetRequiredService<ISettingsService>().Settings.Language ?? "");
+                return;
         }
     }
 

@@ -18,11 +18,19 @@
        chrome never overlaps our UI. On iPad (no notch) only top/bottom are
        non-zero; left/right are included for robustness on notched devices. */
     :root {
-      --sat: env(safe-area-inset-top, 0px);
-      --sab: env(safe-area-inset-bottom, 0px);
-      --sal: env(safe-area-inset-left, 0px);
-      --sar: env(safe-area-inset-right, 0px);
+      --sat: calc(env(safe-area-inset-top, 0px) / var(--ui-zoom));
+      --sab: calc(env(safe-area-inset-bottom, 0px) / var(--ui-zoom));
+      --sal: calc(env(safe-area-inset-left, 0px) / var(--ui-zoom));
+      --sar: calc(env(safe-area-inset-right, 0px) / var(--ui-zoom));
+      /* UI size (Screen & Alerts): every control is zoomed by this, the map is not.
+         zoom multiplies viewport units and the insets above too, so rules inside the
+         zoomed UI use --vw/--vh (one viewport percent divided back) instead of vw/vh. */
+      --ui-zoom: 1;
+      --vw: calc(1vw / var(--ui-zoom));
+      --vh: calc(1vh / var(--ui-zoom));
     }
+    /* The map canvas and the letters pinned to map points stay unscaled. */
+    body > :not(#ck, #maptap-ab, #ab-dot-labels, script) { zoom: var(--ui-zoom); }
     /* ===== Theme palette =====
        Day/Night theme. The dark (night) values below are the ORIGINAL literals the
        stylesheet used, so night is unchanged; [data-theme="day"] swaps the whole
@@ -99,7 +107,10 @@
     #statusbar .dot.flash { animation: sb-flash 1s steps(1, end) infinite; }
     @keyframes sb-flash { 50% { opacity: 0.15; } }
     #sb-pause { font-size: 12px; color: var(--text-2); }
-    .sb-left { position: relative; display: flex; flex-direction: column; justify-content: center; line-height: 1.25; min-width: 360px; }
+    /* 360px wide so the rotating line doesn't jiggle, but it gives way (the line ellipsizes)
+       before the bar pushes the fullscreen button off a narrow or zoomed screen. */
+    .sb-left { position: relative; display: flex; flex-direction: column; justify-content: center; line-height: 1.25;
+      flex: 0 1 360px; min-width: 0; }
     /* Fullscreen: the OS draws an exit "✕" pill at the top-left (e.g. iPad Safari). The
        status bar is laid out so only the non-tappable Operator indicator sits there — nudge
        it clear of the pill so it stays readable. Fullscreen-only (body.fs-on, toggled on
@@ -125,7 +136,7 @@
     .sb-hdg-wrap { display: flex; flex-direction: column; align-items: center; min-width: 76px; }
     #sb-hdg { color: #E91E90; font-size: 24px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
     #sb-hdglabel { color: var(--text-muted); font-size: 10px; font-weight: 500; margin-top: 1px; }
-    #sb-fs { width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 8px;
+    #sb-fs { flex: none; width: 34px; height: 34px; border: 1px solid var(--border); border-radius: 8px;
       background: rgba(var(--ov),0.06); color: var(--text-2); font-size: 18px; cursor: pointer; }
     #sb-fs:hover { background: rgba(var(--ov),0.14); }
     /* GPS-detail card (Phase 5) — popup toggled by the fix dot; mirrors GpsDetailPanel. */
@@ -244,14 +255,18 @@
       filter: drop-shadow(0 1px 3px rgba(0,0,0,0.85)); transition: transform 0.05s; }
     .osb-btn:active { transform: scale(0.9); }
     .osb-btn svg { width: 100%; height: 100%; display: block; pointer-events: none; }
-    /* Auto-U-turn approach indicator — upper-right, symmetric to #onscreenbtns. Display
-       only (click-through). Direction arrow flips for a left turn; distance below it; the
-       turn-type glyph (Sagitta/K-turn) to the right. */
+    /* Auto-U-turn approach indicator — upper-right, symmetric to #onscreenbtns. Click-through
+       except the direction arrow (with its distance), which a tap swaps, as in AgOpenGPS.
+       Direction arrow flips for a left turn; distance below it; the turn-type glyph
+       (Sagitta/K-turn/Keyhole) to the right. */
     #uturn-indicator { position: fixed; top: calc(96px + var(--sat)); right: calc(126px + var(--sar));
       display: flex; align-items: center; gap: 14px; z-index: 20; pointer-events: none;
       filter: drop-shadow(0 1px 3px rgba(0,0,0,0.85)); }
     #uturn-indicator[hidden] { display: none; }
-    .uti-distbox { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    /* Padding widens the tap target towards AgOpenGPS's 160x60 zone; the negative margin
+       keeps the layout as it was. */
+    .uti-distbox { display: flex; flex-direction: column; align-items: center; gap: 3px;
+      padding: 10px 24px; margin: -10px -24px; pointer-events: auto; cursor: pointer; }
     .uti-arrow { width: 60px; height: 24px; display: block; }
     .uti-arrow.left { transform: scaleX(-1); }
     #uti-distval { color: #EDF7E8; font: 700 16px ui-monospace, monospace; text-shadow: 0 1px 2px #000; white-space: nowrap; }
@@ -339,7 +354,10 @@
     /* Left nav (Phase 9) — vertical button bar + non-modal flyout panels. */
     #leftnav { position: fixed; left: var(--sal); top: calc(56px + var(--sat)); display: flex; flex-direction: column;
       gap: 6px; padding: 8px 8px 8px 0; background: var(--float-bg);
-      border: 1px solid var(--border-2); border-left: 0; border-radius: 0 10px 10px 0; z-index: 32; }
+      border: 1px solid var(--border-2); border-left: 0; border-radius: 0 10px 10px 0; z-index: 32;
+      /* At a big UI size the bar can be taller than the screen: it scrolls instead. */
+      max-height: calc(100 * var(--vh) - 90px - var(--sat) - var(--sab)); overflow-y: auto; scrollbar-width: none; }
+    #leftnav::-webkit-scrollbar, #rightnav::-webkit-scrollbar { display: none; }
     /* Transparent light-dismiss scrim behind an open chain panel: map stays visible,
        an outside tap closes the chain and is CONSUMED (no map pan / no background
        actuation) — the blocking safety, minus the dimming. Sits above the map +
@@ -353,7 +371,11 @@
     .ln-btn.active { background: var(--sel); }
     .ln-ic { width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
     .ln-panel { position: fixed; left: calc(80px + var(--sal)); top: calc(56px + var(--sat)); display: none; min-width: 220px;
-      max-width: calc(100vw - 96px); color: var(--text);
+      /* Kept inside the screen (left/top offset, 30px padding + border, 16px gutter) and
+         scrolled when taller: at a bigger UI size the dialogs no longer fit as drawn. */
+      max-width: calc(100 * var(--vw) - 126px - var(--sal) - var(--sar));
+      max-height: calc(100 * var(--vh) - 102px - var(--sat) - var(--sab)); overflow-y: auto;
+      color: var(--text);
       background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px;
       box-shadow: 0 8px 28px rgba(0,0,0,0.5); z-index: 31; }
     /* Lay tall tabs out across the width so they fit a 1200x700 tablet without scroll. */
@@ -380,6 +402,11 @@
       font: 600 12px system-ui, sans-serif; text-align: left; padding: 0 8px;
       display: flex; align-items: center; gap: 6px; }
     .sa-ic { width: 22px; height: 22px; object-fit: contain; flex: none; }
+    .sa-uiscale { grid-template-columns: repeat(4, 1fr); }
+    .sa-scale { height: 40px; border: 1px solid var(--border); border-radius: 6px;
+      background: rgba(var(--ov),0.06); color: var(--text-2); cursor: pointer;
+      font: 600 12px system-ui, sans-serif; }
+    .sa-scale.active { background: #1f6fb2; border-color: #4A90D9; color: #fff; }
     .sa-tgl:hover, .sa-act:hover { background: rgba(var(--ov),0.14); }
     .sa-tgl.active { background: #1f6fb2; border-color: #4A90D9; color: #fff; }
     .sa-act { background: rgba(var(--ov),0.10); }
@@ -389,7 +416,7 @@
     /* #41: grow WIDER not taller so tall tabs fit a 1200x700 landscape tablet without
        scrolling. Capped so it doesn't balloon on a big desktop monitor, and clamped to
        the viewport (minus the left nav) on smaller screens. */
-    .ln-wide { width: min(980px, calc(100vw - 100px)); }
+    .ln-wide { width: min(980px, calc(100 * var(--vw) - 126px - var(--sal) - var(--sar))); }
     .ln-savebtn { margin-top: 14px; width: 100%; height: 40px; border: 0; border-radius: 8px;
       background: #1f6fb2; color: #fff; font: 700 14px system-ui, sans-serif; cursor: pointer; }
     .ln-savebtn:active { background: #195c95; }
@@ -421,6 +448,7 @@
     .cfg-act { padding: 8px 10px; border: 0; border-radius: 6px; background: rgba(var(--ov),0.10);
       color: var(--text); cursor: pointer; font: 600 12px system-ui, sans-serif; flex: 1; }
     .cfg-act:hover { background: rgba(var(--ov),0.18); }
+    .cfg-act:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
     .ln-seg .cfg-act.active, .ln-seg .cfg-act.active:hover { background: #1f6fb2; color: #fff; }
     .cfg-actwide { width: 100%; flex: none; }
     .cfg-slider { width: 100%; accent-color: #4A90D9; }
@@ -526,13 +554,13 @@
     .sw-grey { background: rgba(var(--ov),0.12); color: var(--text); }
     .sw-green { background: #2e9e4f; } .sw-blue { background: #2f6fb0; }
     /* ===== Network IO panel + NTRIP modals ===== */
-    .nio-panel { width: 360px; max-height: calc(100vh - 72px - var(--sat)); overflow-y: auto; box-sizing: border-box; }
+    .nio-panel { width: 360px; max-height: calc(100 * var(--vh) - 72px - var(--sat)); overflow-y: auto; box-sizing: border-box; }
     .nio-modgrid { display: grid; grid-template-columns: auto auto 1fr auto auto; gap: 7px 8px; align-items: center; margin-bottom: 10px; }
     .nio-more { width: 30px; height: 26px; border: 0; border-radius: 6px; background: rgba(var(--ov),0.10); color: var(--text-2);
       font: 700 18px/1 system-ui, sans-serif; cursor: pointer; padding: 0; }
     .nio-more:hover { background: rgba(var(--ov),0.18); }
     /* System Data — chain sub-panel of Network IO (GPS line → arrow). */
-    .nio-sysdata { width: 440px; max-height: calc(100vh - 72px - var(--sat)); overflow-y: auto; box-sizing: border-box; }
+    .nio-sysdata { width: 440px; max-height: calc(100 * var(--vh) - 72px - var(--sat)); overflow-y: auto; box-sizing: border-box; }
     .sd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 20px; margin-bottom: 12px; }
     .sd-row { display: flex; justify-content: space-between; gap: 12px; padding: 1px 0; }
     .sd-k { color: var(--text-muted); font: 400 12px system-ui, sans-serif; }
@@ -559,7 +587,7 @@
     .nio-aged { color: #ef4444; }
     .nio-rtcm { margin-top: 6px; }
     .nio-rtcm summary { color: var(--text-2); font: 500 12px system-ui, sans-serif; cursor: pointer; }
-    .nio-rtcmscroll { max-height: 30vh; overflow-y: auto; }
+    .nio-rtcmscroll { max-height: calc(30 * var(--vh)); overflow-y: auto; }
     .nio-rtcmtbl { width: 100%; border-collapse: collapse; margin-top: 4px; font: 400 11px system-ui, sans-serif; color: var(--text); }
     .nio-rtcmtbl th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 1px 6px 1px 0; }
     .nio-rtcmtbl td { padding: 1px 6px 1px 0; vertical-align: top; }
@@ -568,7 +596,7 @@
     .nio-ntstatus { color: var(--text-2); font: 500 13px system-ui, sans-serif; }
     /* NTRIP chain sub-panels (ln-panels that replace their parent). */
     .nio-ntmodal { width: 520px; }
-    .nio-ntedit { width: 480px; max-height: calc(100vh - 72px); overflow: auto; }
+    .nio-ntedit { width: 480px; max-height: calc(100 * var(--vh) - 72px); overflow: auto; }
     .nio-nttoolbar { display: flex; align-items: center; gap: 6px; background: rgba(var(--ov),0.05);
       border-radius: 8px; padding: 6px; margin-bottom: 12px; }
     .nio-tbtn { width: 40px; height: 40px; border: 0; border-radius: 6px; background: rgba(var(--ov),0.10);
@@ -662,10 +690,15 @@
     .agu-bd.ok { color: #39FF6A; } .agu-bd.no { color: #ff7a6b; }
     /* ===== File / Application Menu ===== */
     .fm-panel { width: 340px; }
+    #bugreport.fm-panel { width: 510px; } /* room to describe the problem */
+    .br-filerow { display: flex; align-items: center; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border);
+      font: 14px system-ui, sans-serif; }
+    .br-filerow .br-fname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .br-filerow .br-fsize { opacity: 0.7; font-size: 12px; }
     .fm-wide { width: 560px; }
     /* View All Settings fills the tablet viewport so every setting shows for a screenshot. */
-    .fm-full { width: calc(100vw - 110px); height: calc(100vh - 84px); box-sizing: border-box; }
-    .fm-full .vs-tree { max-height: calc(100vh - 150px); columns: 280px; column-gap: 22px; }
+    .fm-full { width: calc(100 * var(--vw) - 110px); height: calc(100 * var(--vh) - 84px); box-sizing: border-box; }
+    .fm-full .vs-tree { max-height: calc(100 * var(--vh) - 150px); columns: 280px; column-gap: 22px; }
     .vs-section { break-inside: avoid; -webkit-column-break-inside: avoid; margin-bottom: 12px; }
     .as-dirs { display: flex; flex-direction: column; gap: 6px; }
     .as-dir { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; }
@@ -895,7 +928,7 @@
       font: 700 14px system-ui, sans-serif; }
     .dlg-cancel { background: rgba(var(--ov),0.10); color: var(--text-2); }
     .dlg-ok { background: #1f6fb2; color: #fff; }
-    #dp-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; max-height: 50vh; overflow-y: auto; }
+    #dp-list { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; max-height: calc(50 * var(--vh)); overflow-y: auto; }
     .dp-row { display: grid; grid-template-columns: 1fr auto auto; gap: 14px; align-items: center; min-height: 44px;
       padding: 0 12px; border-radius: 8px; border: 1px solid var(--border); cursor: pointer; }
     .dp-row:active { background: rgba(74,144,217,0.25); }
@@ -916,7 +949,7 @@
     .dlg-btn:disabled { opacity: 0.4; cursor: default; }
     /* Failure notification (#109): a refused/failed action says why. */
     #toast { position: fixed; bottom: calc(90px + var(--sab, 0px)); left: 50%; transform: translateX(-50%);
-      max-width: min(560px, calc(100vw - 32px)); display: none; padding: 10px 20px; border-radius: 10px;
+      max-width: min(560px, calc(100 * var(--vw) - 32px)); display: none; padding: 10px 20px; border-radius: 10px;
       border: 1px solid rgba(255,190,90,0.7); background: rgba(58,38,8,0.94); color: #ffe2b0;
       font: 600 15px system-ui, sans-serif; text-align: center; pointer-events: none; z-index: 70;
       box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
@@ -925,14 +958,14 @@
        the nav and dialogs, no pointer events, so the operator can reach the Modules panel
        or the simulator switch to clear it. */
     #gpslost { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 9;
-      width: min(420px, calc(100vw - 32px)); padding: 26px 24px; border-radius: 14px; display: none;
+      width: min(420px, calc(100 * var(--vw) - 32px)); padding: 26px 24px; border-radius: 14px; display: none;
       background: rgba(190,24,24,0.94); border: 2px solid #ff8a8a; color: #fff; text-align: center;
       pointer-events: none; box-shadow: 0 10px 40px rgba(0,0,0,0.6); }
     #gpslost.show { display: block; }
     #gpslost .gl-title { font: 800 28px system-ui, sans-serif; letter-spacing: 0.02em; margin-bottom: 10px; }
     #gpslost .gl-body { font: 500 16px/1.4 system-ui, sans-serif; }
     #hwmsg { position: fixed; top: calc(96px + var(--sat, 0px)); left: 50%; transform: translateX(-50%);
-      max-width: min(560px, calc(100vw - 32px)); display: none; padding: 8px 18px; border-radius: 8px;
+      max-width: min(560px, calc(100 * var(--vw) - 32px)); display: none; padding: 8px 18px; border-radius: 8px;
       color: #000; font: 700 16px system-ui, sans-serif; text-align: center; pointer-events: none; z-index: 70;
       box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
     #hwmsg.show { display: block; }
@@ -955,6 +988,10 @@
     .qab-heading { display: flex; align-items: center; justify-content: center; gap: 6px; margin-top: 8px;
       color: var(--text-muted); font: 600 13px system-ui, sans-serif; }
     .qab-heading .cfg-num { width: 80px; }
+    .qab-side { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 4px; color: var(--text-muted); font: 600 12px system-ui, sans-serif; }
+    .ln-seg-v { flex-direction: column; }
+    .ln-seg-v .ln-segbtn { padding: 6px 14px; }
     .ll-pt { margin-top: 10px; }
     .ll-hdr { display: flex; align-items: center; justify-content: space-between; font: 700 14px system-ui, sans-serif; }
     .ll-hdr .ll-fill { padding: 6px 10px; font-size: 12px; }
@@ -1061,7 +1098,8 @@
     #rightnav { position: fixed; right: var(--sar); top: calc(56px + var(--sat)); display: none; flex-direction: column;
                 gap: 6px; align-items: stretch; padding: 8px; border-radius: 10px 0 0 10px;
                 background: var(--float-bg); border: 1px solid var(--border-2); border-right: 0;
-                box-shadow: 0 6px 20px rgba(0,0,0,0.5); touch-action: manipulation; }
+                box-shadow: 0 6px 20px rgba(0,0,0,0.5); touch-action: manipulation;
+                max-height: calc(100 * var(--vh) - 90px - var(--sat) - var(--sab)); overflow-y: auto; scrollbar-width: none; }
     .rn-btn { width: 56px; height: 56px; border: 0; border-radius: 8px; padding: 8px; box-sizing: border-box;
       background: rgba(var(--ov),0.08); color: var(--text); font: 600 13px system-ui, sans-serif;
       cursor: pointer; display: flex; flex-direction: column; align-items: center;
@@ -1112,6 +1150,48 @@
       cursor: pointer; padding: 0 4px; line-height: 1; }
     .chart-x:hover { color: var(--text); }
     .chart-cv { display: block; width: 400px; height: 150px; margin: 4px; }
+    /* Virtual terminal card: the ISOBUS implement's own screen (data or alarm mask) with its
+       soft key column, painted from the terminal's draw list by /vtpaint.js. Floating and
+       draggable like the chart cards; shown only when the host has a terminal. */
+    .vt-card { top: calc(70px + var(--sat)); width: auto; --vt: 400px; }
+    .vt-card .vt-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .vt-dot { width: 10px; height: 10px; border-radius: 50%; background: #888; flex: none; }
+    .vt-dot.ok { background: #2ecc71; } .vt-dot.wait { background: #f1c40f; } .vt-dot.bad { background: #e74c3c; }
+    .vt-hbtn { background: none; border: 0; color: var(--text-dim); font-size: 14px; cursor: pointer; padding: 0 4px; }
+    .vt-hbtn:hover { color: var(--text); }
+    .vt-ws { max-width: 180px; height: 22px; font-size: 12px; background: var(--bg-sunken); color: var(--text-2);
+      border: 1px solid var(--border); border-radius: 4px; }
+    .vt-body { position: relative; display: flex; gap: 4px; padding: 4px; }
+    .vt-mask { display: block; width: var(--vt); height: var(--vt); background: #000; touch-action: none; }
+    .vt-keys { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: repeat(6, auto); grid-auto-flow: column;
+      gap: 4px; align-content: start; width: calc(var(--vt) / 3 - 4px); }
+    .vt-keys canvas { display: block; width: 100%; aspect-ratio: 1; touch-action: none; border-radius: 3px; }
+    .vt-keys button { grid-column: 1 / -1; grid-row: 7; height: 28px; border: 1px solid var(--border); border-radius: 4px;
+      background: rgba(var(--ov),0.06); color: var(--text-2); cursor: pointer; }
+    .vt-msg { position: absolute; inset: 4px; display: flex; flex-direction: column; align-items: center;
+      justify-content: center; gap: 10px; color: var(--text-2); font-size: 14px; text-align: center; padding: 16px;
+      background: var(--panel); }
+    .vt-msg input { width: 220px; height: 34px; font-size: 15px; padding: 0 8px; background: var(--bg-sunken);
+      color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+    .vt-msg .vt-sub { color: var(--text-muted); font-size: 12px; }
+    .vt-row { display: flex; gap: 8px; justify-content: center; }
+    .vt-alarm { display: none; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 8px;
+      background: #8e1b1b; color: #fff; font-size: 12px; font-weight: 600; }
+    .vt-alarm.show { display: flex; }
+    .vt-alarm button { border: 0; border-radius: 4px; padding: 3px 10px; background: #fff; color: #8e1b1b;
+      font-weight: 700; cursor: pointer; }
+    .vt-edit { position: absolute; left: 4px; right: 4px; bottom: 4px; display: none; flex-direction: column; gap: 8px;
+      padding: 10px; background: var(--panel); border-top: 1px solid var(--border-2); max-height: 70%; overflow: auto; }
+    .vt-edit.show { display: flex; }
+    .vt-edit input { height: 38px; font-size: 18px; padding: 0 8px; background: var(--bg-sunken); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px; }
+    .vt-edit .vt-sub { color: var(--text-muted); font-size: 12px; }
+    .vt-opts { display: flex; flex-direction: column; gap: 4px; }
+    .vt-opts canvas { display: block; width: 100%; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+    .vt-opts canvas.sel { border-color: #4a90d9; }
+    .vt-ident { position: absolute; inset: 4px; display: none; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.6); color: #fff; font-size: 96px; font-weight: 700; pointer-events: none; }
+    .vt-ident.show { display: flex; }
     .fo-btn:disabled { opacity: 0.4; cursor: default; pointer-events: none; }
     .tl-chartbtn.active { background: rgba(80,160,255,0.28); border-color: #4a90d9; }
     /* Roll Correction panel. */
@@ -1521,6 +1601,64 @@
     #tui-sb-steer[data-st="fault"] { background: var(--tui-stop); color: var(--tui-stop-ink); border: 2px solid var(--tui-stop);
       animation: tui-blink 1s steps(1, end) infinite; }
     @keyframes tui-blink { 50% { filter: brightness(0.75); } }
+    /* Ready-to-steer light (feature/bedienung-1): display only. */
+    #tui-sb-ready { display: none; }
+    :root[data-tui-layout="terminal"] #statusbar #tui-sb-ready { display: inline-flex; align-items: center; gap: 8px; padding: 0 10px;
+      height: calc(var(--tui-sb-h) - 8px); border-radius: 8px; border: 2px solid var(--tui-card-line); background: transparent;
+      font: 800 var(--tui-fs-lbl) system-ui, sans-serif; white-space: nowrap; color: inherit; }
+    #tui-sb-ready .rd-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--tui-stop); flex: none; }
+    #tui-sb-ready[data-lv="1"] .rd-dot { background: var(--tui-warn); }
+    #tui-sb-ready[data-lv="2"] .rd-dot { background: #1fa64a; }
+    #tui-sb-ready[data-lv="demo"] .rd-dot { background: repeating-linear-gradient(-45deg, var(--tui-warn) 0 4px, #222 4px 8px); }
+    #tui-ready { position: fixed; z-index: 30; top: calc(var(--tui-sb-h) + 6px + var(--sat, 0px)); right: 10px; min-width: 300px; max-width: calc(100vw - 20px);
+      background: var(--tui-card, #fff); color: var(--tui-ink, #111); border: 2px solid var(--tui-card-line); border-radius: 12px; padding: 10px 12px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.25); font: 600 var(--tui-fs-lbl)/1.35 system-ui, sans-serif; }
+    #tui-ready[hidden] { display: none; }
+    #tui-ready .rd-h { font-weight: 900; margin-bottom: 6px; }
+    #tui-ready .rd-r { display: grid; grid-template-columns: 28px auto 1fr; gap: 8px; align-items: center; padding: 4px 0; }
+    #tui-ready .rd-i { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; font-weight: 900; background: var(--tui-stop); color: var(--tui-stop-ink); }
+    #tui-ready .rd-r[data-lv="1"] .rd-i { background: var(--tui-warn); color: var(--tui-warn-ink); }
+    #tui-ready .rd-r[data-lv="2"] .rd-i { background: #1fa64a; color: #fff; }
+    #tui-ready .rd-k { font-weight: 800; }
+    #tui-ready .rd-v { text-align: right; }
+    #tui-ready .rd-n { margin-top: 6px; opacity: 0.8; }
+    /* Demo mode (feature/bedienung-1): a striped band and frame that can't be missed. */
+    #tui-demo { position: fixed; z-index: 29; left: 50%; transform: translateX(-50%); bottom: calc(76px + var(--sab, 0px));
+      display: flex; align-items: center; gap: 12px; padding: 6px 8px 6px 16px; border-radius: 10px;
+      background: repeating-linear-gradient(-45deg, var(--tui-warn) 0 14px, #1e1500 14px 28px); box-shadow: 0 4px 16px rgba(0,0,0,0.35); }
+    #tui-demo[hidden] { display: none; }
+    #tui-demo .dm-t { font: 900 var(--tui-fs-val) system-ui, sans-serif; letter-spacing: 0.04em; color: #1e1500; background: var(--tui-warn);
+      padding: 2px 10px; border-radius: 6px; white-space: nowrap; }
+    #tui-demo .tp-btn { background: var(--tui-card); color: var(--tui-ink); border-color: var(--tui-card-line); white-space: nowrap; }
+    :root[data-tui-demo] body::after { content: ''; position: fixed; inset: 0; z-index: 28; pointer-events: none;
+      border: 6px solid transparent; border-image: repeating-linear-gradient(-45deg, var(--tui-warn) 0 14px, #1e1500 14px 28px) 6; }
+    /* Long press = explanation (feature/bedienung-2). */
+    #tui-explain { position: fixed; z-index: 40; padding: 10px 14px; border-radius: 12px; background: var(--tui-card, #fff); color: var(--tui-ink, #111);
+      border: 2px solid var(--tui-acc); box-shadow: 0 8px 24px rgba(0,0,0,0.3); font: 600 var(--tui-fs-lbl)/1.4 system-ui, sans-serif; pointer-events: auto; }
+    #tui-explain[hidden] { display: none; }
+    :is(#rightnav, #bottomnav, #statusbar, .tui-tiles) button { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+    /* Start work (feature/bedienung-2). */
+    #tui-work .tw-step { display: grid; grid-template-columns: 34px auto 1fr; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--tui-card-line);
+      font: 700 var(--tui-fs-lbl) system-ui, sans-serif; opacity: 0.7; }
+    #tui-work .tw-step.cur, #tui-work .tw-step.done { opacity: 1; }
+    #tui-work .tw-n { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--tui-card-line); font-weight: 900; }
+    #tui-work .tw-step.cur .tw-n { border-color: var(--tui-acc); background: var(--tui-acc); color: var(--tui-acc-ink); }
+    #tui-work .tw-step.done .tw-n { border-color: #1fa64a; background: #1fa64a; color: #fff; }
+    #tui-work .tw-t { font-weight: 900; }
+    #tui-work .tw-v { text-align: right; overflow-wrap: anywhere; }
+    #tui-work-mini { position: fixed; z-index: 35; left: 50%; transform: translateX(-50%); top: calc(var(--tui-sb-h) + 6px + var(--sat, 0px));
+      display: flex; gap: 8px; align-items: center; padding: 6px 8px 6px 14px; border-radius: 12px; background: var(--tui-card, #fff); color: var(--tui-ink, #111);
+      border: 2px solid var(--tui-acc); box-shadow: 0 6px 18px rgba(0,0,0,0.3); font: 800 var(--tui-fs-lbl) system-ui, sans-serif; max-width: calc(100vw - 20px); }
+    #tui-work-mini[hidden] { display: none; }
+    #tui-work-mini .wm-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    /* First setup (feature/bedienung-2). */
+    #tui-setup1 .fs1-r { display: grid; grid-template-columns: 30px auto 1fr; gap: 8px; align-items: center; padding: 4px 0; font: 700 var(--tui-fs-lbl) system-ui, sans-serif; }
+    #tui-setup1 .fs1-i { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-weight: 900; background: var(--tui-stop); color: var(--tui-stop-ink); }
+    #tui-setup1 .fs1-r[data-lv="1"] .fs1-i { background: var(--tui-warn); color: var(--tui-warn-ink); }
+    #tui-setup1 .fs1-r[data-lv="2"] .fs1-i { background: #1fa64a; color: #fff; }
+    #tui-setup1 .fs1-v { text-align: right; }
+    #tui-setup1-back { position: fixed; z-index: 36; left: 50%; transform: translateX(-50%); top: calc(var(--tui-sb-h) + 6px + var(--sat, 0px)); box-shadow: 0 6px 18px rgba(0,0,0,0.3); }
+    #tui-setup1-back[hidden] { display: none; }
     #tui-sb-clock { font: 800 var(--tui-fs-val) ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums;
       white-space: nowrap; align-items: center; }
     /* GPS/RTK: the fix quality also as a border pattern (solid = RTK fix, dashed = float,
@@ -2233,10 +2371,11 @@
     </div>
   </div>
   <!-- Auto-U-turn approach indicator (native look) — green direction arrow + distance to
-       trigger + turn-type glyph (Sagitta / K-turn). Upper-right, symmetric to the on-screen
-       U-turn/Lateral buttons. Display only; shown while an auto U-turn is armed. -->
+       trigger + turn-type glyph (Sagitta / K-turn / Keyhole). Upper-right, symmetric to the on-screen
+       U-turn/Lateral buttons. Shown while an auto U-turn is armed; a tap on the arrow swaps
+       the turn's direction. -->
   <div id="uturn-indicator" hidden>
-    <div class="uti-distbox">
+    <div class="uti-distbox" title="Swap U-turn direction">
       <svg id="uti-arrow" class="uti-arrow" viewBox="0 0 60 24" xmlns="http://www.w3.org/2000/svg">
         <g stroke="#5FE85A" stroke-width="5" stroke-linecap="round">
           <line x1="4" y1="12" x2="9" y2="12"/>
@@ -2264,6 +2403,15 @@
     <button id="ln-autosteer" class="ln-btn" title="AutoSteer Configuration"><img class="ln-ic" src="/icons/AutoSteerConf.png" alt="AutoSteer Configuration"></button>
     <button id="ln-fieldops" class="ln-btn" title="Field Operations"><img class="ln-ic" src="/icons/JobActive.png" alt="Field Operations"></button>
     <button id="ln-fieldtools" class="ln-btn" title="Field Tools"><img class="ln-ic" src="/icons/FieldTools.png" alt="Field Tools"></button>
+    <button id="ln-vt" class="ln-btn" title="Virtual Terminal" style="display:none">
+      <svg class="ln-ic" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" style="fill:none;stroke:currentColor">
+        <rect x="5" y="8" width="29" height="30" rx="2" stroke-width="2.5"/>
+        <rect x="37" y="8" width="7" height="6" rx="1" stroke-width="2"/>
+        <rect x="37" y="20" width="7" height="6" rx="1" stroke-width="2"/>
+        <rect x="37" y="32" width="7" height="6" rx="1" stroke-width="2"/>
+        <text x="19.5" y="28" text-anchor="middle" font-size="12" font-weight="700" font-family="system-ui, sans-serif" style="fill:currentColor;stroke:none">VT</text>
+      </svg>
+    </button>
     <button id="ln-network" class="ln-btn" title="Network IO">
       <svg class="ln-ic" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" style="stroke:currentColor;fill:currentColor">
         <line x1="24" y1="24" x2="24" y2="10" stroke-width="2.5"/>
@@ -2294,6 +2442,13 @@
       <button class="sa-tgl" data-key="display.extraGuidelines"><img class="sa-ic" src="/icons/ConD_ExtraGuides.png" alt="">Extra Guides</button>
       <input id="sa-extracount" class="cfg-num" type="number" step="1" min="1" max="50" title="Extra guide count">
       <button class="sa-act" data-cmd="display.cycleResolution">Quality: <span id="sa-quality">—</span></button>
+    </div>
+    <div class="cfg-label">UI Size</div>
+    <div class="sa-grid sa-uiscale">
+      <button class="sa-scale" data-scale="100">100%</button>
+      <button class="sa-scale" data-scale="115">115%</button>
+      <button class="sa-scale" data-scale="130">130%</button>
+      <button class="sa-scale" data-scale="150">150%</button>
     </div>
     <div class="cfg-label">On-Screen Buttons</div>
     <div class="sa-grid">
@@ -2445,6 +2600,14 @@
         <label>Invert roll</label><button class="cfg-tgl" data-key="roll.isRollInvert">Off</button>
       </div>
       <img src="/icons/ConDa_InvertRoll.png" class="vc-diag-wide" alt="Invert roll">
+      <!-- #387: where the IMU sits, measured like the antenna; sent to the modules in PGN 247
+           for the IMU-to-antenna lever arm. All 0 = not entered. -->
+      <div class="cfg-label" style="margin-top:8px">IMU position</div>
+      <div class="cfg-grid">
+        <label>IMU pivot (<span class="u" data-unit="m"></span>)</label><input class="cfg-num" data-unit="m" data-key="vehicle.imuPivot" type="number" step="0.01" inputmode="decimal" title="Ahead of the rear axle (+) or behind it (−)">
+        <label>IMU height (<span class="u" data-unit="m"></span>)</label><input class="cfg-num" data-unit="m" data-key="vehicle.imuHeight" type="number" step="0.01" inputmode="decimal" title="Above the ground">
+        <label>IMU offset (<span class="u" data-unit="m"></span>)</label><input class="cfg-num" data-unit="m" data-key="vehicle.imuOffset" type="number" step="0.01" inputmode="decimal" title="Right of the centerline (+) or left of it (−)">
+      </div>
     </div>
     <button id="vc-save" class="ln-savebtn">Save Profile</button>
   </div>
@@ -2579,6 +2742,7 @@
       <div class="ln-seg cfg-seg-full">
         <button class="cfg-typebtn" data-key="uturn.style" data-val="0">Sagitta</button>
         <button class="cfg-typebtn" data-key="uturn.style" data-val="1">K-turn</button>
+        <button class="cfg-typebtn" data-key="uturn.style" data-val="2">Keyhole</button>
       </div>
       <div class="cfg-diaggrid">
         <div class="vc-diagrow"><img src="/icons/ConU_UturnLength.png" class="vc-diag" alt=""><div class="vc-fieldcol"><label>Extension (<span class="u" data-unit="m"></span>)</label><input class="cfg-num" data-unit="m" data-key="uturn.extension" type="number" step="0.1"></div></div>
@@ -2730,7 +2894,7 @@
         <div id="as-turn" class="cfg-body" data-strip="as-right">
           <div class="as-card">
             <div class="as-cardtitle">Turn Sensor</div>
-            <div class="as-togcard"><img src="/icons/ConSt_TurnSensor.png" alt=""><label>Encoder</label><button class="cfg-tgl" data-key="autosteer.turnSensorEnabled">Off</button></div>
+            <div class="as-togcard"><img src="/icons/ConSt_TurnSensor.png" alt=""><label>Enable</label><button class="cfg-tgl" data-key="autosteer.turnSensorEnabled">Off</button></div>
             <div data-show="turnsensor" class="as-valrow" style="margin-top:8px;margin-bottom:0"><span class="as-valbox cfg-ro" data-for="autosteer.turnSensorCounts" data-fmt="f0">—</span><input class="cfg-slider" data-key="autosteer.turnSensorCounts" data-fmt="f0" type="range" min="0" max="255" step="1"></div>
           </div>
           <div class="as-card">
@@ -2851,7 +3015,7 @@
     <div class="nio-warn" id="nio-subnet-mismatch" hidden></div>
     <div class="cfg-label" style="margin-top:14px">Host IPs</div>
     <div class="nio-hostips" id="nio-hostips">—</div>
-    <label class="nio-bcrow" title="Send the corrected position (PGN 100) on every fix, for seed monitors, rate controllers and GPS_Out">
+    <label class="nio-bcrow" title="Send the position on every fix (PGN 100, and PGN 214 with speed, heading and fix quality), for seed monitors, rate controllers and GPS_Out">
       <input type="checkbox" class="nio-chk" id="nio-pgn100" data-key="conn.sendCorrectedPosition">
       <span class="nio-mod">Send corrected position</span>
     </label>
@@ -3194,6 +3358,23 @@
   </div>
   <!-- Diagnostic chart cards (floating overlays, drawn by renderCharts each frame).
        Each can be open independently; map stays interactive. Drag by the header. -->
+  <!-- VT cards: one per terminal, made from this (Vt in app.js). -->
+  <template id="vt-card-tpl">
+    <div class="chart-card vt-card" style="display:none">
+      <div class="chart-hdr">
+        <span class="vt-title"><span class="vt-dot"></span><span class="vt-name">Virtual Terminal</span><select class="vt-ws" style="display:none"></select></span>
+        <span><button class="vt-size vt-hbtn" title="Size">⤢</button><button class="vt-gear vt-hbtn" title="Gateway">⚙</button><button class="vt-x chart-x" title="Close">✕</button></span>
+      </div>
+      <div class="vt-alarm"><span class="vt-alarm-text"></span><button class="vt-alarm-show">Show</button></div>
+      <div class="vt-body">
+        <canvas class="vt-mask" width="480" height="480"></canvas>
+        <div class="vt-keys"></div>
+        <div class="vt-msg"></div>
+        <div class="vt-edit"></div>
+        <div class="vt-ident"></div>
+      </div>
+    </div>
+  </template>
   <div id="chart-steer" class="chart-card" style="display:none">
     <div class="chart-hdr"><span>Steer</span><button class="chart-x" data-chart="steer" title="Close">✕</button></div>
     <canvas class="chart-cv" width="400" height="150"></canvas>
@@ -3488,16 +3669,33 @@
   <!-- Bug Report. -->
   <div id="bugreport" class="ln-panel fm-panel">
     <div class="ln-hdr"><button class="ln-x fm-back" title="Back">←</button><span class="ln-hdr-title">Bug Report Dump</span><button class="ln-x ln-closex" title="Close">✕</button></div>
-    <div class="sa-hint">Captures settings, state, the field, the job's coverage and the last 5 minutes of GPS data to a zip on the host, which Download then saves on this device. The map stays live with this panel open: keep it open while driving and press the button the moment a problem shows.</div>
+    <div class="sa-hint">Captures settings, state, field, coverage and the last 5 minutes of GPS data to a zip file. Keep this panel open while driving and press the button the moment a problem shows.</div>
+    <div class="sa-hint" style="margin-top:6px">A question rather than a bug? The AgOpenGPS documentation may already answer it.</div>
+    <button class="cfg-act cfg-actwide" id="br-docs" style="margin-top:4px">Open the AgOpenGPS Docs</button>
     <div class="cfg-label" style="margin-top:8px">Title</div>
     <input class="cfg-num fj-tx" id="br-title" placeholder="Short summary">
     <div class="cfg-label" style="margin-top:8px">Description</div>
-    <textarea class="fj-notes" id="br-desc" style="height:90px"></textarea>
+    <textarea class="fj-notes" id="br-desc" style="height:135px" placeholder="What were you doing? What happened? What did you expect?"></textarea>
     <button class="cfg-act cfg-actwide fj-primary" id="br-submit" style="margin-top:10px">Create Bug Report</button>
     <div class="sa-hint" id="br-status" style="margin-top:6px"></div>
+    <div id="br-sendbox" style="display:none">
+      <div class="sa-hint" style="margin-top:8px">Send Report sends this report to the AgOpenWeb maintainers.</div>
+      <div class="cfg-label" style="margin-top:8px">GitHub username</div>
+      <input class="cfg-num fj-tx" id="br-ghuser" autocapitalize="off" autocomplete="off" spellcheck="false">
+      <div class="cfg-label" style="margin-top:8px">or email</div>
+      <input class="cfg-num fj-tx" id="br-email" type="email" autocapitalize="off" autocomplete="email" spellcheck="false">
+      <div class="sa-hint" style="margin-top:4px">We need one of the two to reply. An email goes only to the maintainers with the report, never into the public issue, and is deleted with the report.</div>
+      <div class="cfg-label" style="margin-top:8px">Screenshots or files (optional)</div>
+      <div id="br-files"></div>
+      <button class="cfg-act cfg-actwide" id="br-attach" style="margin-top:4px">Add Screenshot or File</button>
+      <input type="file" id="br-file" multiple hidden>
+      <div class="sa-hint" id="br-attachstatus" style="margin-top:4px">Like the rest of the report, attachments go only to the maintainers.</div>
+      <button class="cfg-act cfg-actwide fj-primary" id="br-send" style="margin-top:8px">Send Report</button>
+      <div class="sa-hint" id="br-need" style="margin-top:6px"></div>
+      <div class="sa-hint" id="br-sendstatus" style="margin-top:6px"></div>
+      <button class="cfg-act cfg-actwide" id="br-openissue" style="margin-top:6px;display:none">Open Issue</button>
+    </div>
     <button class="cfg-act cfg-actwide" id="br-download" style="margin-top:6px;display:none">Download</button>
-    <button class="cfg-act cfg-actwide" id="br-github" style="margin-top:6px;display:none">Report on GitHub</button>
-    <div class="sa-hint" id="br-github-hint" style="margin-top:6px;display:none">Opens a GitHub bug report with the title, description and version filled in. Drag the downloaded zip into its Bug Report Dump box, and that's all it needs.</div>
   </div>
   <!-- Smart WAS Calibration — chain sub-panel of AutoSteer (watch-the-tractor:
        opts OUT of the light-dismiss scrim so you can pan/zoom to watch the tractor
@@ -3752,17 +3950,19 @@
         <button class="dlg-mode" data-qab="aPlus" title="AB line from current position &amp; heading"><img src="/icons/ABTrackAPlus.png" alt=""><span>A+</span></button>
         <button class="dlg-mode" data-qab="driveAB" title="Drive from A to B"><img src="/icons/ABTrackAB.png" alt=""><span>Drive AB</span></button>
         <button class="dlg-mode" data-qab="recordCurve" title="Drive to record a curve"><img src="/icons/ABTrackCurve.png" alt=""><span>Curve</span></button>
+        <!-- Ref side (#345, AgOpenGPS isRefRightSide): a driven line's reference goes to this
+             edge of the implement; the reference line is the edge between passes, so a pass
+             runs where the tractor drove. Only the driven modes use it, so it sits in their
+             row (drawn and boundary lines are an edge already). Right each time it opens. -->
+        <div class="qab-side">First pass
+          <div class="ln-seg ln-seg-v" id="qab-refside"><button class="ln-segbtn" data-side="left">Left</button><button class="ln-segbtn active" data-side="right">Right</button></div>
+        </div>
       </div>
       <!-- A+ heading (#335, AgOpenGPS Quick AB nudHeading): empty = the vehicle's heading,
            shown as the placeholder; a typed value makes A+ use it instead. -->
       <label class="qab-heading">A+ heading
         <input id="qab-aplus-heading" class="cfg-num" type="number" step="0.1" min="0" max="360" inputmode="decimal">°
       </label>
-      <!-- Ref side (#345, AgOpenGPS isRefRightSide): the driven line is the edge of the work;
-           the track is saved half a working width to this side. Right each time it opens. -->
-      <div class="qab-heading">First pass
-        <div class="ln-seg" id="qab-refside"><button class="ln-segbtn" data-side="left">Left</button><button class="ln-segbtn active" data-side="right">Right</button></div>
-      </div>
       <div class="dlg-sub">From Field Boundary</div>
       <div class="dlg-modes">
         <button class="dlg-mode" data-qab="boundaryEdge" title="AB line along the longest boundary edge"><span class="dlg-bigtxt">AB</span><span>Longest Edge</span></button>
