@@ -64,6 +64,9 @@ const GLARE_CSS = 'html{filter:contrast(0.45) brightness(1.45) saturate(0.6)}';
   };
 
   const { page: p } = await L.openPage(browser, { url: args.url, viewport: args.viewport, localStorage: args.ls });
+  // The operator has answered the direction check ("Does the vehicle face the way it drives?"), so
+  // the views stay comparable with earlier runs; the card itself is checked by the simdir flow.
+  await p.evaluate(() => typeof TabletSteerConfirm !== 'undefined' && TabletSteerConfirm.confirm());
   const send = c => p.evaluate(c => transport.send(c), c);
   // Offenes Panel oder offenen Dialog über seinen sichtbaren Schließen-Knopf schließen
   // (echter Klick, weil die Knöpfe auf pointerdown hören).
