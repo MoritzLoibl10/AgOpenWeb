@@ -124,9 +124,9 @@ host does the same for the 100 Hz control loop.
 
 ### Control authority
 Several browsers may be connected; only one holds control (`ControlAuthority`, deadman model).
-Commands that actuate (autosteer, sections, U-turn, simulator) are Tier-2 and dropped unless
-the sender holds fresh control; everything else is Tier-1. A client can't take control from a
-live operator, only fill an empty seat.
+Every command is dropped unless the sender holds fresh control: the others are observers, who
+see everything and change nothing (#397). `ObserverIds` lists the few requests an observer may
+send. A client can't take control from a live operator, only fill an empty seat.
 
 ### Host ↔ client commands
 The client sends `id|arg` strings (`transport.send('track.select|0')`). `RemoteServerWiring`
@@ -249,6 +249,7 @@ Services use interface-based design in `Shared/AgOpenWeb.Services/Interfaces/`:
 - `IGpsService` - GPS data processing and position updates
 - `IUdpCommunicationService` - UDP communication with AgOpenGPS modules
 - `INtripClientService` - NTRIP caster connections for RTK
+- `INetworkWatcher` - the one place that notices network changes (plus a 30 s heartbeat); UDP discovery, NTRIP retry and the bug report outbox subscribe in that order
 - `IFieldService` - Field loading/saving/management
 - `IBoundaryRecordingService` - Recording field boundaries
 - `IMapService` - Historical map hook; every head registers `NullMapService` (the web client renders)
@@ -296,7 +297,7 @@ to the system browser, keep the screen awake, localhost HTTP) is listed in
 ### Adding a web command
 1. In `app.js`, send it: `transport.send('mything.do|' + arg)`.
 2. Route it in `RemoteServerWiring.cs` (or a `config.set` key in `RemoteServerWiring.Helpers.cs`) to a VM method or command.
-3. If it actuates (steering, sections, turns), add it to the Tier-2 list so it needs control.
+3. It needs control automatically; add it to `ObserverIds` only if it changes nothing.
 
 ### Showing new state in the client
 1. Add it to the DTO in `Contracts.cs`, fill it in `SceneProjector` (or the relevant projector).
@@ -342,6 +343,24 @@ the receiver's correction age, warnings and a message table; bug report dumps ca
 `ntrip_rtcm.txt`. Design, bench results and open checks: `Plans/RTCM_FORWARDING_PLAN.md`;
 bench scripts: `Tools/rtcm-bench`.
 
+## ISOBUS virtual terminal (VT card)
+The VT cards show ISOBUS implements' own screens. `Shared/AgOpenWeb.VirtualTerminal`
+(`IVirtualTerminalService`) runs SharpIsoTerm's terminal stack on the implement bus through
+an AOW link gateway (`AppSettings.VtGateway`, port 2323; the HAT's `aow-linkd`) or an slcan USB
+adapter on the device itself (`AppSettings.VtAdapter`, a CANable; not on iOS). Gateways announcing
+themselves by DNS-SD (`_aowlink._tcp`) are listed in the card's gear by name (`AowLinkBrowser`); one
+picked from the list is kept by name too (`VtGatewayName`) and followed to a new address. One to four
+terminals (`AppSettings.VtCount`), as displays in one cab, each implement choosing its terminal in
+its own menu, one card each. Their messages and pictures go to the browsers as `Vt` (with the
+terminal) and `VtImage` frames (`VirtualTerminalRemote`), the painter is in `app.js`, and each
+card sends `vt.*` commands naming its terminal. SharpIsoTerm is not published yet, so the
+terminal is built in only on request (any head: Desktop, Android, iOS device builds) and the
+project is not in the solution:
+`dotnet build Platforms/AgOpenWeb.Desktop/AgOpenWeb.Desktop.csproj -p:SharpIsoTermDir=$HOME/Code/SharpIsoTerm`
+(an absolute path). Without it no terminal is registered and the card never shows. The service
+is disposed with the backend: on Android and iOS the process outlives it, and the library allows
+one stack per process.
+
 ## Debugging Tips
 
 1. **iOS simulator issues**: Use `xcrun simctl` commands directly if `dotnet build -t:Run` fails
@@ -379,7 +398,9 @@ dotnet run --project TestRunner/TestRunner.csproj
 - `AgOpenWeb.RemoteServer.Tests` - web host: Bing tile replies, boundary imagery capture
 - `AgOpenWeb.IntegrationTests` - test-support library (fake settings etc.); not a standalone test run
 
-CI also runs `Tools/i18n-extract.py --check` so `en.json` stays current, and `Tools/license-headers.py --check` for the licence headers.
+CI also runs `Tools/i18n-extract.py --check` so `en.json` stays current, `Tools/license-headers.py --check` for the licence headers, and `Tools/i18n-limits.py --check` (job `translations-fit`) so every translated label fits the English layout.
+
+**Hot-path budgets** (job `hot-path-budgets`, `Tests/AgOpenWeb.Services.Tests/Performance`): a 300 × 500 m field, with a headland and with only the outer boundary, is driven through the real GPS cycle and the 100 Hz control tick, and every cycle is held to a budget of `WorkCounters` (polygon edges, coverage lookups, offset points, bytes allocated). Counts don't depend on the machine, so CI can enforce them. A failure means new work runs every cycle: do it once and keep the result. `HotPathBudgetTests.Report` (explicit) prints the counts. Run locally: `dotnet test Tests/AgOpenWeb.Services.Tests/ -c Release --filter TestCategory=HotPath`.
 
 ## U-Turn System
 
