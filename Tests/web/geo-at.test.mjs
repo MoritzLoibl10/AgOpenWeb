@@ -66,3 +66,19 @@ test('matches pyproj: grid inside, Helmert outside; < 0.1 m', async () => {
     assert.ok(max < 0.1, `${name}: ${max} m`);
   }
 });
+
+// EPSG:3416 → EPSG:4258 with pyproj (projection only, no datum change).
+const ETRS_LAMBERT = [
+  [130000, 406000, 47.4979197053, 9.7473935348],
+  [470000, 490000, 48.3058624909, 14.2771973258],
+  [639000, 524000, 48.5706830745, 16.5733621650],
+  [663000, 528000, 48.5971727238, 16.9007726523],
+  [603000, 313000, 46.6859879293, 15.9880656914],
+];
+test('ETRS89 / Austria Lambert matches pyproj; not marked approximate', () => {
+  for (const [e, n, lat, lon] of ETRS_LAMBERT) {
+    const r = GeoAT.etrsLambertToEtrs89(e, n);
+    assert.ok(metres(r.lat, r.lon, lat, lon) < 0.001, `${e} ${n}`);
+    assert.equal(r.approx, false);
+  }
+});
