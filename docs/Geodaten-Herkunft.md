@@ -8,7 +8,7 @@
   (cdn.proj.org war aus der Bauumgebung nicht erreichbar). PROJ hat das NTv2-Gitter des BEV
   in GeoTIFF umgewandelt.
 - **Urheber:** BEV – Bundesamt für Eich- und Vermessungswesen.
-- **Lizenz:** Creative Commons Namensnennung 4.0 (CC BY 4.0), laut `at_bev_README.txt` in PROJ-data.
+- **Lizenz:** CC BY 4.0 (Namensnennung 4.0), laut `at_bev_README.txt` in PROJ-data.
 - **SHA-256:** `852d58612498f7ef08541e65f25f52f2a7f35f6020fd7e8250f7fa6eaa5ac599` (217 878 Byte).
   Die App prüft die Summe beim Laden; `Tests/web/geo-at.test.mjs` prüft sie ebenfalls.
 - **Transformation:** EPSG „MGI to ETRS89 (5)“, Genauigkeit laut EPSG 0,15 m.
