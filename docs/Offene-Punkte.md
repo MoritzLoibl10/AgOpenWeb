@@ -51,6 +51,7 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 | 30 | Kleinigkeiten nach dem Upstream-Merge (#350, #352) | niedrig | teils | teils: #350 erledigt, #352 offen |
 | 31 | 7 Zoll, Handschuh: Bildschirmknöpfe verdecken die Vorgewende-Anzeige | mittel | nein | vorgemerkt für die nächste UI-Runde |
 | 32 | IMU-Kurs aus PGN 253: eine 0 der AiO-Firmware gilt als gültiger Kurs (upstream #357) | hoch | ja | Firmware geprüft: v4 (auch v4.5) sendet 9999, v26 sendet 0; Anzeige im Einrichtungsmodus; Issue-Text an upstream |
+| 33 | Eine Antenne: rückwärts zuerst gefahren → Richtung verkehrt gelernt; Lenkung rechnet falsch herum, Simulator pendelt | hoch | ja | Fork: Hinweis im Simulator, Richtungskarte vor dem ersten Lenken, Hinweis „Echtes GPS aktiv“, Hilfe; Issue-Text an upstream (dringend) (fix/simulator-richtung) |
 
 ---
 
@@ -471,3 +472,14 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
   - Der englische Issue-Text an upstream ist geschrieben.
   - Vor dem ersten Lenken auf dem Prüfstand die Kurs-Prüfung ansehen.
 - **Host-Änderung nötig:** ja (Lenklogik, nur upstream)
+
+### 33. Eine Antenne: rückwärts zuerst gefahren → Richtung verkehrt gelernt
+- **Priorität:** hoch (Sicherheit; Lenklogik, deshalb im Fork nur angezeigt, nicht geändert)
+- **Befund:** Tablet-Test moritz.13. SIM zuerst rückwärts: negative km/h, aber „vorwärts“ angezeigt; danach umgekehrt; beim Einlenken pendelt die Lenkung.
+- **Ursache:** `GpsHeadingFusionService.TryStartHeading` lernt die erste Richtung aus der ersten Fahrt, als wäre sie vorwärts. Das gilt mit IMU, ohne IMU, mit echtem GPS und im Simulator. Der Simulator lenkt zusätzlich auch bei pausierter Lenkung mit. Bericht mit Code-Stellen: `docs/Bericht-Simulator-Richtung.md`.
+- **Im Fork umgesetzt (nur `wwwroot`):**
+  - Hinweiskarte im Simulator mit Knopf „Richtung zurücksetzen“ (bestehender Befehl, nur auf Tippen);
+  - nach jedem Verbinden, vor dem ersten Lenken (Einzelantenne): Karte „Zeigt das Fahrzeug in Fahrtrichtung?“ mit Live-Skizze, „Ja“ / „Nein – Richtung neu lernen“; sperrt nichts;
+  - Hinweis „Echtes GPS aktiv – Simulator pausiert“;
+  - Hilfe-Seite „Fahrzeug zeigt in die falsche Richtung“.
+- **Offen:** Host-Seite, Issue-Text `docs/Upstream-Issues.md` Punkt 4 (dringend). Prüfstand-Schritt, der den Fall absichtlich nachstellt: Teil 3 (Prüfstand-Checkliste).
