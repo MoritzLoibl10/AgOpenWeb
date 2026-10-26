@@ -67,6 +67,10 @@ jobs:
             node --check "Shared/AgOpenWeb.RemoteServer/wwwroot/$f"
           done
 
+      # Fork: client-side geodesy (GeoAT, eAMA import) against PROJ reference points.
+      - name: Run web client tests
+        run: node --test Tests/web/*.test.mjs
+
       - name: Run Model Tests
         run: dotnet test Tests/AgOpenWeb.Models.Tests/ --verbosity normal
 

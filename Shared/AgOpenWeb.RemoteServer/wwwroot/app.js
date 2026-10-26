@@ -10209,3 +10209,150 @@ const TabletBackup = (() => {
   }, 300);
   return { open, get state() { return status(); }, get selection() { return [...sel]; } };
 })();
+
+// ── GeoAT (fork, eAMA import): MGI / Austria Lambert (EPSG:31287) → ETRS89 ──────────────────
+// Inside the BEV grid: "MGI to ETRS89 (5)" (EPSG accuracy 0.15 m), NTv2 grid AT_GIS_GRID 2014 as
+// PROJ ships it (at_bev_AT_GIS_GRID.tif; BEV, CC BY 4.0; embedded in index.html as base64,
+// SHA-256 in GeoAT.GRID_SHA256). Outside it: "MGI to ETRS89 (1)", 7-parameter Helmert, EPSG
+// accuracy 1.5 m, also in the grid's zero-filled margin (see shift()); the result then carries
+// grid: false and the UI must say so. Same steps as PROJ:
+// inverse LCC 2SP on Bessel 1841, then hgridshift (bilinear) or Helmert with height 0.
+// Tested against pyproj by Tests/web/geo-at.test.mjs (begin/end markers are read by that test).
+// geo-at:begin
+const GeoAT = (() => {
+  const GRID_SHA256 = '852d58612498f7ef08541e65f25f52f2a7f35f6020fd7e8250f7fa6eaa5ac599';
+  const D2R = Math.PI / 180;
+
+  // Austria Lambert on Bessel 1841
+  const A = 6377397.155, INVF = 299.1528128, E2 = (2 - 1 / INVF) / INVF, E = Math.sqrt(E2);
+  const LAT0 = 47.5, LON0 = 13 + 20 / 60, LAT1 = 49, LAT2 = 46, FE = 400000, FN = 400000;
+  const mf = p => Math.cos(p) / Math.sqrt(1 - E2 * Math.sin(p) ** 2);
+  const tf = p => { const es = E * Math.sin(p); return Math.tan(Math.PI / 4 - p / 2) / ((1 - es) / (1 + es)) ** (E / 2); };
+  const N = (Math.log(mf(LAT1 * D2R)) - Math.log(mf(LAT2 * D2R))) / (Math.log(tf(LAT1 * D2R)) - Math.log(tf(LAT2 * D2R)));
+  const F = mf(LAT1 * D2R) / (N * tf(LAT1 * D2R) ** N);
+  const RHO0 = A * F * tf(LAT0 * D2R) ** N;
+
+  // Easting/northing → MGI latitude/longitude, radians.
+  function inverseLambert(e, n) {
+    const dx = e - FE, dy = RHO0 - (n - FN);
+    const rho = Math.sign(N) * Math.hypot(dx, dy);
+    const t = (rho / (A * F)) ** (1 / N);
+    let phi = Math.PI / 2 - 2 * Math.atan(t);
+    for (let i = 0; i < 15; i++) {
+      const es = E * Math.sin(phi);
+      const next = Math.PI / 2 - 2 * Math.atan(t * ((1 - es) / (1 + es)) ** (E / 2));
+      if (Math.abs(next - phi) < 1e-14) { phi = next; break; }
+      phi = next;
+    }
+    return [phi, Math.atan2(dx, dy) / N + LON0 * D2R];
+  }
+
+  // "MGI to ETRS89 (1)": position-vector Helmert, Bessel → GRS80, height 0 on Bessel.
+  function helmert(phi, lam) {
+    const s = Math.sin(phi), nu = A / Math.sqrt(1 - E2 * s * s);
+    const x = nu * Math.cos(phi) * Math.cos(lam), y = nu * Math.cos(phi) * Math.sin(lam), z = nu * (1 - E2) * s;
+    const sec = D2R / 3600, rx = 5.137 * sec, ry = 1.474 * sec, rz = 5.297 * sec, k = 1 + 2.4232e-6;
+    const X = 577.326 + k * (x - rz * y + ry * z), Y = 90.129 + k * (rz * x + y - rx * z), Z = 463.919 + k * (-ry * x + rx * y + z);
+    const a = 6378137, f = 1 / 298.257222101, e2 = f * (2 - f), p = Math.hypot(X, Y);
+    let lat = Math.atan2(Z, p * (1 - e2));
+    for (let i = 0; i < 10; i++) {
+      const sl = Math.sin(lat), next = Math.atan2(Z + e2 * (a / Math.sqrt(1 - e2 * sl * sl)) * sl, p);
+      if (Math.abs(next - lat) < 1e-14) { lat = next; break; }
+      lat = next;
+    }
+    return [lat / D2R, Math.atan2(Y, X) / D2R];
+  }
+
+  // Minimal GeoTIFF reader for this one file: little-endian, tiled, planar, float32, Adobe
+  // deflate, floating-point predictor (3), PixelIsPoint. Anything else is rejected.
+  async function readGrid(bytes) {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (dv.getUint16(0, false) !== 0x4949 || dv.getUint16(2, true) !== 42) throw new Error('grid: not a little-endian TIFF');
+    const ifd = dv.getUint32(4, true), tags = {};
+    const SIZE = { 1: 1, 2: 1, 3: 2, 4: 4, 12: 8, 16: 8 };
+    for (let i = 0, cnt = dv.getUint16(ifd, true); i < cnt; i++) {
+      const o = ifd + 2 + i * 12, tag = dv.getUint16(o, true), type = dv.getUint16(o + 2, true), count = dv.getUint32(o + 4, true);
+      const sz = SIZE[type]; if (!sz) continue;
+      const at = sz * count > 4 ? dv.getUint32(o + 8, true) : o + 8, vals = [];
+      for (let j = 0; j < count && type !== 2; j++) {
+        const p = at + j * sz;
+        vals.push(type === 3 ? dv.getUint16(p, true) : type === 4 ? dv.getUint32(p, true) : type === 12 ? dv.getFloat64(p, true) : type === 16 ? Number(dv.getBigUint64(p, true)) : dv.getUint8(p));
+      }
+      tags[tag] = vals;
+    }
+    const v = t => (tags[t] || [])[0];
+    const w = v(256), h = v(257), tw = v(322), th = v(323), offs = tags[324], lens = tags[325];
+    if (v(259) !== 8 || v(317) !== 3 || v(284) !== 2 || v(277) !== 2 || (tags[258] || []).some(b => b !== 32)
+        || (tags[339] || []).some(f => f !== 3) || !offs || offs.length !== lens.length) throw new Error('grid: unsupported TIFF layout');
+    const keys = tags[34735] || [];
+    for (let i = 4; i < keys.length; i += 4) if (keys[i] === 1025 && keys[i + 3] !== 2) throw new Error('grid: not PixelIsPoint');
+    const scale = tags[33550], tie = tags[33922];
+    const across = Math.ceil(w / tw), down = Math.ceil(h / th), perPlane = across * down;
+    const planes = [new Float32Array(w * h), new Float32Array(w * h)];
+    for (let k = 0; k < offs.length; k++) {
+      const plane = Math.floor(k / perPlane), tx = (k % perPlane) % across, ty = Math.floor((k % perPlane) / across);
+      const z = new Uint8Array(await new Response(new Blob([bytes.subarray(offs[k], offs[k] + lens[k])]).stream()
+        .pipeThrough(new DecompressionStream('deflate'))).arrayBuffer());
+      const rowBytes = tw * 4, out = new DataView(new ArrayBuffer(rowBytes));
+      for (let r = 0; r < th; r++) {
+        const row = z.subarray(r * rowBytes, (r + 1) * rowBytes);
+        for (let i = 1; i < rowBytes; i++) row[i] = (row[i] + row[i - 1]) & 0xff; // undo byte differencing
+        for (let i = 0; i < tw; i++) for (let b = 0; b < 4; b++) out.setUint8(i * 4 + b, row[b * tw + i]); // MSB-first byte planes
+        const gy = ty * th + r; if (gy >= h) break;
+        for (let i = 0; i < tw; i++) { const gx = tx * tw + i; if (gx < w) planes[plane][gy * w + gx] = out.getFloat32(i * 4, false); }
+      }
+    }
+    // Band 0 latitude offset, band 1 longitude offset (positive east), both arc-seconds.
+    return { w, h, lon0: tie[3], lat0: tie[4], dlon: scale[0], dlat: scale[1], dLat: planes[0], dLon: planes[1] };
+  }
+
+  let grid = null, loading = null;
+  async function sha256Hex(bytes) {
+    const d = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    return [...d].map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  // Decodes the embedded grid once. Resolves to true, or false when it is missing, damaged or
+  // its checksum does not match (then every point uses the Helmert fallback, marked grid: false).
+  function load(base64) {
+    if (grid) return Promise.resolve(true);
+    if (!loading) loading = (async () => {
+      try {
+        const src = base64 ?? document.getElementById('geo-at-gis-grid')?.textContent ?? '';
+        const bin = atob(src.replace(/\s+/g, '')), bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        if (await sha256Hex(bytes) !== GRID_SHA256) throw new Error('grid: checksum mismatch');
+        grid = await readGrid(bytes);
+        return true;
+      } catch (e) { console.warn('GeoAT:', e.message); loading = null; return false; }
+    })();
+    return loading;
+  }
+
+  // Bilinear grid shift at an MGI position (degrees), or null outside the grid.
+  function shift(latDeg, lonDeg) {
+    if (!grid) return null;
+    const fx = (lonDeg - grid.lon0) / grid.dlon, fy = (grid.lat0 - latDeg) / grid.dlat;
+    if (!(fx >= 0 && fy >= 0 && fx <= grid.w - 1 && fy <= grid.h - 1)) return null;
+    const x = Math.min(Math.floor(fx), grid.w - 2), y = Math.min(Math.floor(fy), grid.h - 2), u = fx - x, t = fy - y;
+    const at = (b, i, j) => b[(y + j) * grid.w + x + i];
+    // Outside Austria the grid holds 0/0 instead of no-data (the real shift is about 110 m
+    // everywhere). PROJ interpolates those zeros; a cell with such a corner counts as outside.
+    for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) if (at(grid.dLat, i, j) === 0 && at(grid.dLon, i, j) === 0) return null;
+    const bil = b => (1 - u) * (1 - t) * at(b, 0, 0) + u * (1 - t) * at(b, 1, 0) + (1 - u) * t * at(b, 0, 1) + u * t * at(b, 1, 1);
+    const sLat = bil(grid.dLat), sLon = bil(grid.dLon);
+    return Number.isFinite(sLat) && Number.isFinite(sLon) ? [sLat / 3600, sLon / 3600] : null;
+  }
+
+  // EPSG:31287 easting/northing (m) → ETRS89 { lat, lon } in degrees; grid: false means the
+  // 1.5 m Helmert fallback was used (outside the grid, or grid not loaded).
+  function toEtrs89(e, n) {
+    const [phi, lam] = inverseLambert(e, n);
+    const s = shift(phi / D2R, lam / D2R);
+    if (s) return { lat: phi / D2R + s[0], lon: lam / D2R + s[1], grid: true };
+    const [lat, lon] = helmert(phi, lam);
+    return { lat, lon, grid: false };
+  }
+
+  return { load, toEtrs89, GRID_SHA256 };
+})();
+// geo-at:end
