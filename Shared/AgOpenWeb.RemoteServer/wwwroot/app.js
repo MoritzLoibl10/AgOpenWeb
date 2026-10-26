@@ -7684,6 +7684,9 @@ const TabletProfiles = (() => {
     if (!name) return tr('Please enter a name.');
     if (name.length > 60) return tr('The name is too long.');
     if (/[\t\\/:*?"<>|]/.test(name)) return tr('Please do not use these characters: \\ / : * ? " < > |');
+    // Point 23: names Windows can't use as a file name (the profile is saved as <name>.json).
+    if (/[. ]$/.test(name)) return tr('The name must not end with a dot or a space.');
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i.test(name)) return tr('This name is reserved on Windows. Please choose another one.');
     if (listOf(kind).some(p => sameName(p.name, name) && !(except && sameName(except, name)))) return tr('A profile with this name already exists.');
     return '';
   }
@@ -7793,7 +7796,9 @@ const TabletProfiles = (() => {
       if (lockReason()) return;
       if (pending) { openRecover(); return; } // the host would save the half-applied values first
       transport.send('profile.load|' + sel.vehicle + '\t' + sel.tool); // saves the outgoing pair first (host)
-      msg = tr('Loaded: {vehicle} + {tool}', { vehicle: sel.vehicle, tool: sel.tool });
+      // Point 23: "Loaded" only once the host's profile list names this pair as active.
+      loadWait = { vehicle: sel.vehicle, tool: sel.tool, t: Date.now() };
+      msg = tr('Loading: {vehicle} + {tool} …', { vehicle: sel.vehicle, tool: sel.tool });
     });
     foot.append(classic, el('span', 'tp-grow'), load);
   }
@@ -7996,7 +8001,7 @@ const TabletProfiles = (() => {
   // Section width boxes follow the count. Sections that exist keep their width; added ones start
   // with the default width, as the host gives them (ConfigurationStore.NumSections).
   function syncWidths() {
-    const n = Math.max(1, Math.min(64, parseInt(W.nSec.inp.value, 10) || 0));
+    const n = Math.max(1, Math.min(64, Math.round(parseFloat(W.nSec.inp.value)) || 0));
     const def = W.f.defaultSectionWidth.inp.value;
     for (let i = 0; i < Math.max(n, W.widths.length); i++) {
       if (i >= n) { if (W.widths[i]) W.widths[i].wrap.hidden = true; continue; }
@@ -8018,7 +8023,7 @@ const TabletProfiles = (() => {
     }
   }
   function sumWidthM() {
-    const n = Math.max(1, Math.min(64, parseInt(W.nSec.inp.value, 10) || 0));
+    const n = Math.max(1, Math.min(64, Math.round(parseFloat(W.nSec.inp.value)) || 0));
     let s = 0;
     for (let i = 0; i < n; i++) { const v = W.widths[i] ? metricOf(W.widths[i].inp) : NaN; if (!Number.isFinite(v)) return NaN; s += v; }
     return s / 100; // cm → m, as ActualToolWidth
@@ -8047,7 +8052,7 @@ const TabletProfiles = (() => {
       dash(280, 30, 280, 345) + '<rect class="sk-a" x="306" y="48" width="40" height="14" rx="5"/>' + extra + '</svg>';
   }
   function sectionsView() {
-    const n = Math.max(1, Math.min(64, parseInt(W.nSec.inp.value, 10) || 1)), shown = Math.min(n, 16);
+    const n = Math.max(1, Math.min(64, Math.round(parseFloat(W.nSec.inp.value)) || 1)), shown = Math.min(n, 16);
     const ws = []; for (let i = 0; i < shown; i++) { const v = W.widths[i] ? metricOf(W.widths[i].inp) : NaN; ws.push(Number.isFinite(v) && v > 0 ? v : 1); }
     const tot = ws.reduce((a, b) => a + b, 0), x0 = 40, x1 = 520;
     let x = x0, segs = '';
@@ -8278,7 +8283,7 @@ const TabletProfiles = (() => {
       const shown = hitchFields();
       for (const k of ['hitchLength', 'trailingHitchLength', 'tankTrailingHitchLength', 'length']) if (shown.includes(W.f[k])) num(W.f[k]);
       num(W.f.offset); num(W.f.overlap); num(W.f.defaultSectionWidth);
-      const n = Math.max(1, Math.min(64, parseInt(W.nSec.inp.value, 10) || 0));
+      const n = Math.max(1, Math.min(64, Math.round(parseFloat(W.nSec.inp.value)) || 0));
       if (n !== W.nSec.base) out.push({ key: 'tool.numSections', send: n, val: n, label: tr('Number of sections'), from: W.nSec.base, kindOf: 'int' });
       for (let i = 0; i < n; i++) {
         const w = W.widths[i];
@@ -8296,7 +8301,7 @@ const TabletProfiles = (() => {
     if (isMetric() !== W.metric) p.push(T(tr('The units were changed. Please cancel and start the assistant again.')));
     for (const c of changes()) if (c.kindOf == null && !Number.isFinite(c.val)) p.push(tr('{field}: please enter a number.', { field: T(c.label) }));
     if (W.kind === 'tool') {
-      const n = parseInt(W.nSec.inp.value, 10);
+      const n = Math.round(parseFloat(W.nSec.inp.value));
       if (!(n >= 1 && n <= 64)) p.push(T(tr('Number of sections: 1 to 64.')));
       // The host stores these as max(0, value): a negative entry would never be confirmed.
       for (const k of ['hitchLength', 'length']) if (W.f[k].value() < 0) p.push(tr('{field}: 0 or more.', { field: T(W.f[k].f.label) }));
@@ -8696,8 +8701,14 @@ const TabletProfiles = (() => {
     else if (view === 'recover') renderRecover();
     else if (W) renderWizard();
   }
+  let loadWait = null;
   setInterval(() => {
     watchJob();
+    if (loadWait && profiles) {
+      if (sameName(activeName('vehicle'), loadWait.vehicle) && sameName(activeName('tool'), loadWait.tool)) {
+        msg = tr('Loaded: {vehicle} + {tool}', loadWait); loadWait = null;
+      } else if (Date.now() - loadWait.t > 8000) { msg = tr('Not loaded: the host did not confirm. Please check and try again.'); loadWait = null; }
+    }
     if (!isOpen()) return;
     if (view === 'pick') {
       const k = JSON.stringify([profiles, sel, msg, lockReason(), config && config.tool && config.tool.totalWidth, config && config.vehicle && config.vehicle.type, I18n.language, !!pending]);
