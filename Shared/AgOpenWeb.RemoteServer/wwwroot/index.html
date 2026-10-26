@@ -1462,6 +1462,14 @@
     /* In steer-bar style #lb carries the steer-angle error (degrees), which the readout does not show. */
     :root[data-tui-xte]:not([data-tui-steerbar]) #lb { display: none !important; }
     #onscreenbtns, #uturn-indicator { top: max(calc(96px + var(--tui-dy) + var(--sat)), var(--tui-xte-b, 0px)); }
+    #onscreenbtns { top: max(calc(96px + var(--tui-dy) + var(--sat)), var(--tui-xte-b, 0px), var(--tui-osb-y, 0px)); }
+    /* Point 12: no data from the host: no frozen fix, light bar, roll or on/off states. */
+    :root[data-tui-stale] #sb-fix { display: none; }
+    :root[data-tui-stale] #sb-fixbtn::after { content: attr(data-stale); font-weight: 700; color: var(--text-2); }
+    :root[data-tui-stale] #sb-fixdot { background: #6b7280 !important; }
+    :root[data-tui-stale] :is(#lb, #rollgauge) { visibility: hidden; }
+    :root[data-tui-stale] .tui-rn-st { visibility: hidden; }
+    :root[data-tui-stale] .rn-btn.tui-on { border-color: var(--border-2); background: none; }
     /* With the cross-track readout shown, the U-turn indicator sits to its right, on the same line. */
     :root[data-tui-xte] #uturn-indicator { top: var(--tui-xte-t); left: var(--tui-xte-r); right: auto; }
     #tui-col { pointer-events: none; }
@@ -1846,6 +1854,34 @@
     .tp-sk .sk-d path { fill: var(--tp-dim); }
     .tp-sk .sk-dl { fill: var(--tp-dim); font: 800 22px system-ui, sans-serif; paint-order: stroke; stroke: var(--panel); stroke-width: 6px; }
     .tp-sk .sk-sec { fill: var(--tui-acc-soft); stroke: var(--tui-acc); stroke-width: 2; }
+    /* Tool measurements (tablet-feedback-1): the focused length in the accent, the others faint. */
+    .tp-sk-tool { max-height: 40vh; }
+    /* Dialog sketches take the place of the PNG and leave the field column its room. */
+    #tui-tc-sk, .tui-tc-pivot-w { flex: 0 1 46%; min-width: 0; max-width: 420px; }
+    #tui-tc-sk, #tui-tc-pivot { padding: 6px; }
+    #tui-tc-pivot-n { margin-top: 6px; }
+    /* Help: the real button symbol inline (tablet-feedback-1). */
+    .tb-steps .tb-ic { display: inline-block; height: 1.9em; width: auto; vertical-align: middle; margin: 0 4px; padding: 2px; border-radius: 6px;
+      background: var(--tui-card-2); border: 1px solid var(--tui-card-line); }
+    .tb-steps .tb-ic-svg svg { height: 1.4em; width: 1.4em; vertical-align: middle; }
+    .tp-sk .sk-on .sk-d line, .tp-sk .sk-on .sk-x { stroke: var(--tui-acc); }
+    .tp-sk .sk-on .sk-d path { fill: var(--tui-acc); }
+    .tp-sk .sk-on .sk-dl { fill: var(--tui-acc); }
+    .tp-sk .sk-off { opacity: 0.45; }
+    .tp-sk .sk-wp { fill: var(--tp-dim); }
+    .tp-sk .sk-small { font-size: 17px; }
+    /* Coupling type tiles: pictogram, everyday name, norm small. */
+    .tp-hitch { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-top: 6px; }
+    .tp-ht { display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: calc(var(--tui-tile-h) * 1.15); padding: 6px 6px 8px;
+      border: 2px solid var(--border-2); border-radius: 12px; background: rgba(var(--ov),0.04); color: var(--text); cursor: pointer; }
+    .tp-ht b { font: 700 var(--tui-fs-lbl)/1.2 system-ui, sans-serif; text-align: center; }
+    .tp-ht small { font: 600 12px/1.2 system-ui, sans-serif; color: var(--text-muted); min-height: 14px; }
+    .tp-ht.on { border: 3px solid var(--tui-acc); box-shadow: 0 0 0 3px var(--tui-acc-soft); background: var(--tui-acc-soft); }
+    .tp-htp { width: 110px; height: 66px; }
+    .tp-htp .ht-b { fill: none; stroke: var(--text); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+    .tp-htp .ht-g { stroke: var(--text-muted); stroke-width: 2; }
+    .tp-htp .ht-q { fill: var(--tui-acc); font: 800 26px system-ui, sans-serif; }
+    :root[data-theme="day"][data-tui-sun] .tp-ht { border-color: #000; }
     .tp-sk .sk-sec.alt { fill: rgba(var(--ov),0.12); }
     .tp-fields { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
     .tp-fld { border: 2px solid var(--border-2); border-radius: 12px; padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; }
