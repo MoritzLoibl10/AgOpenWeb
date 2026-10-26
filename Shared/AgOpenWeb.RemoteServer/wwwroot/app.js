@@ -8445,7 +8445,15 @@ const TabletProfiles = (() => {
     && r.ch.every(c => c && typeof c.key === 'string' && c.send !== undefined && c.send !== null);
   try { const r = JSON.parse(lsGet(PEND_KEY, '') || 'null'); if (recOk(r)) pending = r; } catch (_) { /* unreadable: none */ }
   if (pending) job = { rec: pending, state: 'lost', reloaded: true };
-  function setPending(r) { pending = r; lsSet(PEND_KEY, r ? JSON.stringify(r) : null); syncBand(); }
+  // Point 22: read it back; if the browser keeps nothing (blocked storage), the band says so.
+  let pendKept = true;
+  function setPending(r) {
+    pending = r;
+    const v = r ? JSON.stringify(r) : null;
+    lsSet(PEND_KEY, v);
+    pendKept = !r || lsGet(PEND_KEY, null) === v;
+    syncBand();
+  }
   const wjob = () => (job && W && W.rec && job.rec === W.rec ? job : null); // this assistant's save
 
   function makeRec() {
@@ -8665,11 +8673,13 @@ const TabletProfiles = (() => {
   onTap(band, () => openRecover());
   function syncBand() {
     const show = !!pending && !(job && job.state === 'sending');
-    if (band.hidden === !show && band.dataset.mode === (pending ? pending.mode : '')) return;
+    const k = (pending ? pending.mode : '') + (pendKept ? '' : '!');
+    if (band.hidden === !show && band.dataset.mode === k) return;
     band.hidden = !show;
-    band.dataset.mode = pending ? pending.mode : '';
+    band.dataset.mode = k;
     band.querySelector('.tp-pend-t').textContent = T(tr('Profile not completely saved – check the values'));
-    band.querySelector('.tp-pend-s').textContent = T(pending && pending.mode === 'edit' ? tr('Tap: send again or restore') : tr('Tap: send again'));
+    band.querySelector('.tp-pend-s').textContent = T(pending && pending.mode === 'edit' ? tr('Tap: send again or restore') : tr('Tap: send again'))
+      + (pendKept ? '' : ' · ' + T(tr('This tablet cannot keep this note over a restart.')));
   }
   syncBand();
   function refreshJob(full) {
