@@ -10606,11 +10606,13 @@ const EamaShape = (() => {
 
 // ── TabletEama (fork): "Fields from eAMA" ─────────────────────────────────────────────────────
 // Reads an eAMA Shapefile ZIP picked on this device (EamaShape), converts with GeoAT. All in the
-// browser; the host only gets the finished fields. Also the help for the QGIS → KML route.
+// browser; the host gets the finished rings (field.fromGeo) and creates each field like From KML.
+// Also the help for the QGIS → KML route.
 const TabletEama = (() => {
   const T = k => I18n.text(k);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
   const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
+  const STILL_MPS = 0.15;
   const ERR = {
     'zip:notzip': tr('The file is not a readable ZIP file.'),
     'zip:zip64': tr('This ZIP file uses a format the app cannot read (ZIP64, encryption or an unusual compression).'),
@@ -10630,7 +10632,116 @@ const TabletEama = (() => {
   };
   const ACCURACY = tr('eAMA boundaries are drawn on aerial photos for the subsidy application, not measured with RTK. Before using automatic U-turns or section control at the boundary, drive the boundary with RTK.');
   const APPROX = tr('Accuracy about 1.5 m');
-  let state = { busy: false, file: '', err: '', layers: null, grid: null }, help = false;
+  const RES = { ok: tr('created'), skip: tr('skipped, name exists'), fail: tr('failed') };
+  let st = { busy: false, file: '', err: '', layers: null, grid: null };
+  let kind = 'sl', items = [], conflict = 'skip', run = null, help = false;
+
+  // Columns: provisional guesses until a real eAMA export confirms the names.
+  function columns(fields) {
+    const find = re => (fields.find(f => re.test(f.name)) || {}).name;
+    return {
+      fs: find(/^(FS_?(NR|NUMMER|KENNUNG)|FELDSTUECK|FS)$/i) || find(/^FS/i),
+      sl: find(/^(SL_?(NR|NUMMER)|SCHLAG_?NR|SCHLAG|SL)$/i),
+      use: find(/SNAR|NUTZ|KULTUR|BEZ/i),
+      area: find(/FL(AECHE)?.*HA|_HA$|^HA$/i),
+    };
+  }
+  const val = (row, c) => (c && row[c] && row[c].raw) || '';
+  const clean = s => s.replace(/[\\/:*?"<>|\t\r\n]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const area2 = r => { let s = 0; for (let i = 0, j = r.length - 1; i < r.length; j = i++) s += (r[j][0] + r[i][0]) * (r[j][1] - r[i][1]); return s / 2; };
+
+  function buildItems() {
+    items = [];
+    for (const l of st.layers || []) {
+      if (!l.prj.ok) continue;
+      const c = columns(l.fields);
+      l.shapes.forEach((sh, i) => {
+        if (!sh) return;
+        const row = l.rows[i];
+        sh.parts.forEach((part, j) => {
+          const bits = kind === 'sl'
+            ? [val(row, c.fs) && 'FS ' + val(row, c.fs), val(row, c.sl) && 'S ' + val(row, c.sl)].filter(Boolean).join(' · ') // "/" can't be in a folder name
+            : (val(row, c.fs) && 'FS ' + val(row, c.fs));
+          let name = clean([bits, val(row, c.use)].filter(Boolean).join(' ')) || clean(l.name + ' ' + (i + 1));
+          if (sh.parts.length > 1) name += ' ' + T(tr('part')) + ' ' + (j + 1);
+          // Shapefile rings: outer clockwise, holes counter-clockwise. The field takes them the
+          // KML way round (outer counter-clockwise), so only the order of the points is reversed.
+          const conv = r => r.slice().reverse().map(([x, y]) => l.prj.datum === 'MGI' ? GeoAT.toEtrs89(x, y) : GeoAT.etrsLambertToEtrs89(x, y));
+          const rings = [conv(part.outer), ...part.holes.map(conv)];
+          items.push({
+            name, sel: true, rec: i, part: j, parts: sh.parts.length, src: part,
+            use: val(row, c.use), fileArea: val(row, c.area), areaM2: area2(part.outer) - part.holes.reduce((s, h) => s + Math.abs(area2(h)), 0),
+            rings, approx: rings.some(r => r.some(p => p.approx)), holes: part.holes.length,
+          });
+        });
+      });
+    }
+  }
+
+  function lockReason() {
+    if (connState !== 'connected') return tr('No connection to the guidance computer.');
+    if (!lastTick || performance.now() - lastTick.t > 2000) return tr('No current data from the guidance computer.');
+    if (!iHoldControl) return tr('Only the device that has control can import.');
+    if (tick && tick.op && tick.op.autoSteer) return tr('Steering is on. Switch steering off to import.');
+    if (Math.abs(lastTick.speed || 0) > STILL_MPS) return tr('The vehicle is moving. Stop to import.');
+    return '';
+  }
+  const existing = () => new Set(((fieldOps && fieldOps.fields) || []).map(f => String(f.name || f).toLowerCase()));
+
+  // Final names: never overwrite. A name that exists (or repeats in this import) is skipped,
+  // or gets " (2)", " (3)" … when that was chosen.
+  function plan() {
+    const taken = existing(), out = [];
+    for (const it of items) {
+      if (!it.sel) continue;
+      let name = it.name, k = 2;
+      if (taken.has(name.toLowerCase())) {
+        if (conflict === 'skip') { out.push({ it, name, skip: true }); continue; }
+        while (taken.has((name + ' (' + k + ')').toLowerCase())) k++;
+        name = name + ' (' + k + ')';
+      }
+      taken.add(name.toLowerCase()); out.push({ it, name, skip: false });
+    }
+    return out;
+  }
+
+  // Sends one field as ≤ 900-byte commands (the host reads 1 KB frames), then waits until the
+  // host has created and opened it.
+  async function sendField(name, rings) {
+    const enc = new TextEncoder();
+    transport.send('field.fromGeo|begin');
+    rings.forEach((r, k) => {
+      let buf = [];
+      const flush = () => { if (buf.length) transport.send('field.fromGeo|ring\t' + k + '\t' + buf.join(';')); buf = []; };
+      for (const p of r) {
+        const s = p.lat + ',' + p.lon;
+        if (enc.encode('field.fromGeo|ring\t' + k + '\t' + buf.concat(s).join(';')).length > 900) flush();
+        buf.push(s);
+      }
+      flush();
+    });
+    transport.send('field.fromGeo|create\t' + name);
+    const t0 = performance.now();
+    while (performance.now() - t0 < 20000) {
+      await new Promise(r => setTimeout(r, 250));
+      if (fieldOps && fieldOps.activeField === name && existing().has(name.toLowerCase())) return true;
+    }
+    return false;
+  }
+  async function create() {
+    const todo = plan();
+    run = { busy: true, i: 0, n: todo.length, res: [] }; render();
+    for (const p of todo) {
+      if (p.skip) { run.res.push({ name: p.name, r: 'skip' }); continue; }
+      const why = lockReason();
+      if (why) { run.res.push({ name: p.name, r: 'fail', why }); break; }
+      run.i++; render();
+      const ok = await sendField(p.name, p.it.rings);
+      run.res.push({ name: p.name, r: ok ? 'ok' : 'fail', approx: p.it.approx });
+      if (!ok) break; // the host did not confirm: stop rather than pile up commands
+    }
+    run.busy = false; render();
+  }
 
   // --- Sheet --------------------------------------------------------------------------------
   const sheet = el('div', 'tui-sheet tb-sheet tbk-sheet');
@@ -10641,7 +10752,7 @@ const TabletEama = (() => {
   document.body.append(scrim, sheet, input);
   for (const n of [sheet, scrim]) n.addEventListener('pointerdown', e => e.stopPropagation());
   const shT = sheet.querySelector('.t'), shB = sheet.querySelector('.tui-sh-body');
-  const close = () => { sheet.classList.remove('open'); scrim.classList.remove('open'); };
+  const close = () => { if (run && run.busy) return; sheet.classList.remove('open'); scrim.classList.remove('open'); };
   onTap(sheet.querySelector('.x'), close); onTap(scrim, close);
   const isOpen = () => sheet.classList.contains('open');
   function open() {
@@ -10653,48 +10764,130 @@ const TabletEama = (() => {
   input.addEventListener('change', async () => {
     const f = input.files && input.files[0]; input.value = '';
     if (!f) return;
-    state = { busy: true, file: f.name, err: '', layers: null, grid: null }; render();
+    st = { busy: true, file: f.name, err: '', layers: null, grid: null }; items = []; run = null; render();
     try {
       const { layers } = await EamaShape.load(new Uint8Array(await f.arrayBuffer()));
       const grid = layers.some(l => l.prj.ok && l.prj.datum === 'MGI') ? await GeoAT.load() : null;
-      state = { busy: false, file: f.name, err: '', layers, grid };
+      st = { busy: false, file: f.name, err: '', layers, grid };
+      buildItems();
     } catch (e) {
       const code = String(e && e.message || e);
-      state = { busy: false, file: f.name, err: T(ERR[code] || DAMAGED).replace('{f}', code), layers: null, grid: null };
+      st = { busy: false, file: f.name, err: T(ERR[code] || DAMAGED).replace('{f}', code), layers: null, grid: null };
     }
     render();
   });
 
+  function sketch(src) {
+    const all = src.outer.concat(...src.holes);
+    const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
+    const x0 = Math.min(...xs), y1 = Math.max(...ys), sc = 44 / Math.max(Math.max(...xs) - x0, y1 - Math.min(...ys), 1e-9);
+    const d = [src.outer, ...src.holes].map(r => 'M' + r.map(p => ((p[0] - x0) * sc + 2).toFixed(1) + ' ' + ((y1 - p[1]) * sc + 2).toFixed(1)).join('L') + 'Z').join('');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 48 48'); svg.setAttribute('width', '48'); svg.setAttribute('height', '48');
+    svg.innerHTML = '<path fill-rule="evenodd" fill="currentColor" fill-opacity="0.25" stroke="currentColor" stroke-width="1.5"/>';
+    svg.firstChild.setAttribute('d', d);
+    return svg;
+  }
+
   function render() {
     if (!isOpen()) return;
     shT.textContent = T(tr('Fields from eAMA'));
+    const top = shB.scrollTop;
     shB.innerHTML = '';
     const box = el('div', 'tb-box');
     box.appendChild(el('div', '', T(tr('Import the boundaries of your fields from an eAMA Shapefile export (ZIP), straight from this device, e.g. from Downloads.'))));
     box.appendChild(el('div', 'tp-note warn', T(ACCURACY)));
     const row = el('div', 'tb-row');
     const pick = el('button', 'tp-btn pri big', T(tr('Choose ZIP file')));
-    pick.disabled = state.busy;
+    pick.disabled = st.busy || !!(run && run.busy);
     onTap(pick, () => input.click());
     row.appendChild(pick);
-    if (state.busy) row.appendChild(el('span', 'tp-note', T(tr('Reading the file…'))));
+    if (st.busy) row.appendChild(el('span', 'tp-note', T(tr('Reading the file…'))));
     box.appendChild(row);
-    if (state.file) { const fn = el('div', 'tp-note'); fn.textContent = state.file; box.appendChild(fn); }
-    if (state.err) box.appendChild(el('div', 'tp-note bad', state.err));
-    for (const l of state.layers || []) {
-      const lb = el('div', 'tb-box');
-      lb.appendChild(el('div', 'tb-lbl', l.name));
-      if (!l.prj.ok) { lb.appendChild(el('div', 'tp-note bad', T(PRJ[l.prj.err]).replace('{f}', l.prj.name || '?'))); box.appendChild(lb); continue; }
-      lb.appendChild(el('div', '', l.prj.datum === 'MGI' ? T(tr('Coordinate system: MGI / Austria Lambert, converted with the BEV grid')) : T(tr('Coordinate system: ETRS89 / Austria Lambert'))));
-      if (l.prj.datum === 'MGI' && state.grid === false) lb.appendChild(el('div', 'tp-note warn', T(tr('The BEV grid could not be loaded.')) + ' ' + T(APPROX)));
-      lb.appendChild(el('div', '', tr('{n} areas', { n: l.shapes.length })));
-      const cols = el('div', 'tp-note'); cols.textContent = T(tr('Columns')) + ': ' + l.fields.map(f => f.name).join(', ') + ' · ' + l.encoding;
-      lb.appendChild(cols);
+    if (st.file) { const fn = el('div', 'tp-note'); fn.textContent = st.file; box.appendChild(fn); }
+    if (st.err) box.appendChild(el('div', 'tp-note bad', st.err));
+    for (const l of st.layers || []) {
+      const lb = el('div', 'tp-note');
+      if (!l.prj.ok) { lb.className = 'tp-note bad'; lb.textContent = l.name + ': ' + T(PRJ[l.prj.err]).replace('{f}', l.prj.name || '?'); box.appendChild(lb); continue; }
+      lb.textContent = l.name + ' · ' + (l.prj.datum === 'MGI' ? T(st.grid ? tr('Coordinate system: MGI / Austria Lambert, converted with the BEV grid') : tr('Coordinate system: MGI / Austria Lambert')) : T(tr('Coordinate system: ETRS89 / Austria Lambert')))
+        + ' · ' + tr('{n} areas', { n: l.shapes.length }) + ' · ' + T(tr('Columns')) + ': ' + l.fields.map(f => f.name).join(', ') + ' · ' + l.encoding;
       box.appendChild(lb);
+      if (l.prj.datum === 'MGI' && st.grid === false) box.appendChild(el('div', 'tp-note warn', T(tr('The BEV grid could not be loaded.')) + ' ' + T(APPROX)));
     }
     shB.appendChild(box);
 
-    // Help: the route without this import (QGIS → KML → "From KML")
+    if (items.length) {
+      const lb = el('div', 'tb-box');
+      // Feldstücke / Schläge: provisional; the real export decides which columns name a field.
+      const kr = el('div', 'tb-row');
+      kr.appendChild(el('span', 'tb-lbl', T(tr('The file contains'))));
+      for (const [k, t] of [['sl', tr('Fields (Schläge)')], ['fs', tr('Plots (Feldstücke)')]]) {
+        const b = el('button', 'tp-btn' + (kind === k ? ' pri' : ''), T(t));
+        b.disabled = !!(run && run.busy);
+        onTap(b, () => { kind = k; buildItems(); run = null; render(); });
+        kr.appendChild(b);
+      }
+      lb.appendChild(kr);
+      const sr = el('div', 'tb-row');
+      const nSel = items.filter(i => i.sel).length;
+      const all = el('button', 'tp-btn quiet', nSel === items.length ? T(tr('Select none')) : T(tr('Select all')));
+      onTap(all, () => { const on = nSel !== items.length; items.forEach(i => { i.sel = on; }); render(); });
+      sr.appendChild(all);
+      sr.appendChild(el('span', 'tp-note', tr('{n} of {m} selected', { n: nSel, m: items.length })));
+      lb.appendChild(sr);
+      const taken = existing(), list = el('div', 'tbk-list');
+      items.forEach(it => {
+        const r = el('div', 'tbk-it' + (it.sel ? ' on' : ''));
+        const ck = el('button', 'tbk-ck', it.sel ? '✓' : '');
+        onTap(ck, () => { it.sel = !it.sel; render(); });
+        r.appendChild(ck);
+        const nm = el('span', 'tbk-nm');
+        const inp = el('input', 'tp-in'); inp.value = it.name; inp.setAttribute('translate', 'no'); inp.style.cssText = 'width:100%;text-align:left;font:inherit;font-weight:700';
+        inp.addEventListener('change', () => { it.name = clean(inp.value) || it.name; render(); });
+        nm.appendChild(inp);
+        const info = [it.use, it.fileArea && T(tr('file')) + ' ' + it.fileArea + ' ha', T(tr('boundary')) + ' ' + fmtArea(it.areaM2)];
+        if (it.holes) info.push(tr('Inner boundaries: {n}', { n: it.holes }));
+        if (it.parts > 1) info.push(tr('area in {n} parts: each part becomes a field', { n: it.parts }));
+        nm.appendChild(el('small', '', info.filter(Boolean).join(' · ')));
+        if (taken.has(it.name.toLowerCase())) nm.appendChild(el('small', 'tbk-ch', T(tr('A field with this name exists.'))));
+        if (it.approx) nm.appendChild(el('small', 'tbk-ch', T(APPROX)));
+        r.appendChild(nm);
+        r.appendChild(sketch(it.src));
+        list.appendChild(r);
+      });
+      lb.appendChild(list);
+      if (items.some(it => it.sel && taken.has(it.name.toLowerCase()))) {
+        const cr = el('div', 'tb-row');
+        cr.appendChild(el('span', 'tp-note', T(tr('Name exists:'))));
+        for (const [k, t] of [['skip', tr('skip')], ['suffix', tr('create as "… (2)"')]]) {
+          const b = el('button', 'tp-btn' + (conflict === k ? ' pri' : ''), T(t));
+          onTap(b, () => { conflict = k; render(); });
+          cr.appendChild(b);
+        }
+        lb.appendChild(cr);
+        lb.appendChild(el('div', 'tp-note', T(tr('Existing fields are never overwritten.'))));
+      }
+      const why = lockReason();
+      const gr = el('div', 'tb-row');
+      const go = el('button', 'tp-btn pri big', T(tr('Create as fields')));
+      go.disabled = !nSel || !!why || !!(run && run.busy);
+      onTap(go, create);
+      gr.appendChild(go);
+      if (why) gr.appendChild(el('span', 'tp-note warn', T(why)));
+      lb.appendChild(gr);
+      lb.appendChild(el('div', 'tp-note', T(tr('Each new field is opened once while it is created; the field open before is saved and closed.'))));
+      if (run) {
+        if (run.busy) lb.appendChild(el('div', 'tp-note', tr('Creating field {i} of {n}…', { i: run.i, n: run.n })));
+        for (const x of run.res) {
+          const d = el('div', 'tp-note' + (x.r === 'fail' ? ' bad' : ''));
+          d.textContent = x.name + ': ' + T(RES[x.r]) + (x.why ? ' – ' + T(x.why) : '') + (x.r === 'ok' && x.approx ? ' · ' + T(APPROX) : '');
+          lb.appendChild(d);
+        }
+      }
+      shB.appendChild(lb);
+    }
+
+    // Help: the export in eAMA, and the route without this import (QGIS → KML → "From KML")
     const hb = el('div', 'tb-box');
     const ht = el('button', 'tp-btn quiet', (help ? '▾ ' : '▸ ') + T(tr('Help: export from eAMA, or the route via QGIS')));
     onTap(ht, () => { help = !help; render(); });
@@ -10707,10 +10900,17 @@ const TabletEama = (() => {
         tr('Without this import: open the ZIP in QGIS, select one field, Export → Save selected features as → KML with CRS EPSG:4326. Copy the KML into the Import folder and use Fields → From KML. One file per field; a KML with several fields becomes one field with holes.'),
       ]) ol.appendChild(el('li', '', T(s)));
       hb.appendChild(ol);
-      hb.appendChild(el('div', 'tp-note', T(tr('Coordinate conversion with the grid AT_GIS_GRID of the BEV (Bundesamt für Eich- und Vermessungswesen), licence CC BY 4.0.'))));
     }
+    hb.appendChild(el('div', 'tp-note', T(tr('Coordinate conversion with the grid AT_GIS_GRID of the BEV (Bundesamt für Eich- und Vermessungswesen), licence CC BY 4.0.'))));
     shB.appendChild(hb);
+    shB.scrollTop = top;
   }
+  // Lock state and field list change without a tap here; re-render only then, and not while typing.
+  setInterval(() => {
+    if (!isOpen() || document.activeElement?.closest?.('#tui-eama')) return;
+    const key = JSON.stringify([lockReason(), ((fieldOps && fieldOps.fields) || []).map(f => f.name), I18n.language]);
+    if (key !== render.key) { render.key = key; render(); }
+  }, 1000);
 
   // --- Menu tile (setup) --------------------------------------------------------------------
   const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></svg>';

@@ -297,3 +297,21 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
 - **Grund:** Der Host liefert aus wwwroot nur fest eingetragene Pfade aus. Das Gitter (217 KB) wird
   nur beim Import geladen, statt `index.html` bei jedem Laden zu vergrößern.
 - **Beim Rebase auf upstream:** Die Zeile steht vor der Route `/backpic.png`; sonst unabhängig.
+
+## 10. eAMA-Import: Befehl `field.fromGeo` (feature/eama-import, Oktober 2026)
+- **Dateien:**
+  - `Shared/AgOpenWeb.ViewModels/MainViewModel.Commands.Fields.cs`: `RemoteFromGeo` (≈ 33 Zeilen).
+  - `Shared/AgOpenWeb.RemoteWiring/RemoteServerWiring.Helpers.cs`: eine Zeile in `ApplyFieldCommand`.
+  - `Shared/AgOpenWeb.RemoteWiring/RemoteServerWiring.cs`: `case "field.fromGeo":` an die vorhandene
+    Zeile der Feld-Befehle angehängt (sonst erreicht der Befehl `ApplyFieldCommand` nicht).
+- **Ablauf:** `field.fromGeo|begin`, dann `field.fromGeo|ring\t<k>\t<lat,lon;…>` (k = 0 außen, dann
+  innere Grenzen; mehrere Stücke je Ring), dann `field.fromGeo|create\t<Name>`. Stücke unter 1 KB,
+  weil der Host Befehle in 1-KB-Rahmen liest (Offene-Punkte #7). Koordinaten in ETRS89, volle
+  Genauigkeit (JS-Zahl als Text, `InvariantCulture`).
+- **Anlegen:** derselbe Weg wie „Aus KML“ (`ConfirmKmlImportDialogCommand`): Ursprung = Mittel aller
+  Grenzpunkte, Außengrenze + innere Grenzen, vorhandener Schlag wird nie überschrieben, der neue
+  Schlag wird geöffnet. Tier 1 wie „Aus KML“; der Client sperrt das Anlegen zusätzlich ohne
+  Steuerrecht, bei eingeschalteter Lenkung und in Fahrt.
+- **Keine Änderung** an Vorgewende, Teilbreiten, Lenkung oder anderer Regellogik.
+- **Beim Rebase auf upstream:** Ändert upstream den KML-Import (`_kmlParsedPolygons`,
+  `KmlCenterLatitude`, `_selectedKmlFile`), `RemoteFromGeo` anpassen.

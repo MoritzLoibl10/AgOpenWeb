@@ -546,7 +546,7 @@ public static partial class RemoteServerWiring
                                 // are confirmed client-side. Tier-1 (data management, not actuation). ---
                                 case "field.openOnly": case "field.startJob": case "field.resumeJob":
                                 case "field.deleteField": case "field.deleteJob": case "field.new":
-                                case "field.fromExisting": case "field.fromIsoXml": case "field.fromKml":
+                                case "field.fromExisting": case "field.fromIsoXml": case "field.fromKml": case "field.fromGeo":
                                     ApplyFieldCommand(vm, cmd, arg);
                                     return;
                                 case "field.resumeLast": ExecCmd(vm.ResumeLastJobCommand); return;

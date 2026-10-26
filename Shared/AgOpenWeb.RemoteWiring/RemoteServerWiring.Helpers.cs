@@ -514,6 +514,7 @@ public static partial class RemoteServerWiring
         }
         if (cmd == "field.fromIsoXml") { if (a.Length >= 2) vm.RemoteCreateFromIsoXml(a[0], a[1]); return; } // file \t newName
         if (cmd == "field.fromKml") { if (a.Length >= 2) vm.RemoteCreateFromKml(a[0], a[1]); return; }       // file \t newName
+        if (cmd == "field.fromGeo") { vm.RemoteFromGeo(arg); return; } // fork, eAMA: begin | ring \t k \t lat,lon;… | create \t name
         var sw = vm.EnsureRemoteStartWorkSession();
         sw.SelectedField = sw.Fields.FirstOrDefault(f =>
             string.Equals(f.Name, a[0], System.StringComparison.OrdinalIgnoreCase));
