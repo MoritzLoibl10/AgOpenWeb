@@ -296,3 +296,14 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
 - **Client:** Der Knopf ⛶ in der Statuszeile schickt im Launcher (Photino, `window.external.sendMessage`)
   diese Nachricht statt der Fullscreen-API, die dort nur die Web-Ansicht füllt. Im Browser unverändert.
 - **Beim Rebase auf upstream:** eine Abfrage am Anfang von `OnWebMessage`.
+
+## 12. CI: iOS-Build nur noch in der Testversion (Oktober 2026)
+- **Dateien:** `.github/workflows/build-and-release.yml` (Job `build-ios` entfernt, Kommentar am Ende),
+  `.github/workflows/fork-prerelease.yml` (derselbe Job als `ios`, `timeout-minutes: 45`).
+- **Grund:** In der PR-CI wartete `build-ios` jedes Mal 15 Minuten auf einen `macos-26`-Runner und
+  wurde ohne einen einzigen Schritt abgebrochen (#19, #20). Damit war jeder PR rot.
+- **Verhalten:** PRs prüfen iOS nicht mehr. Die Testversion kompiliert iOS weiter (nur Prüfung, kein
+  Artefakt); die Vorabversion wartet nicht auf diesen Job, ein Abbruch dort hält Windows und APK
+  nicht auf.
+- **Beim Merge von upstream:** Ändert upstream `build-ios` in `build-and-release.yml`, gibt es dort einen
+  Konflikt; die Änderung dann in den Job `ios` von `fork-prerelease.yml` übernehmen.

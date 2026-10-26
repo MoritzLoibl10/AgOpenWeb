@@ -198,30 +198,5 @@ jobs:
       - name: Compile Android
         run: dotnet build Platforms/AgOpenWeb.Android/AgOpenWeb.Android.csproj -c Release
 
-  build-ios:
-    runs-on: macos-26
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Select Xcode 26.4.1
-        # The .NET for iOS workload is pinned to 26.4.x via dotnet-ios-rollback.json to match
-        # Xcode_26.4.1.app on macos-26 (the runner's 26.5 beta has no downloaded iOS platform).
-        run: sudo xcode-select -s /Applications/Xcode_26.4.1.app
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Install iOS workload (pinned to 26.4.x)
-        run: |
-          for i in 1 2 3; do
-            dotnet workload install ios \
-              --from-rollback-file .github/workflows/dotnet-ios-rollback.json \
-              && break
-            echo "Attempt $i failed, retrying in 10s..."
-            sleep 10
-          done
-
-      - name: Compile iOS
-        run: dotnet build Platforms/AgOpenWeb.iOS/AgOpenWeb.iOS.csproj -c Debug -f net10.0-ios -r iossimulator-arm64
+  # Fork: build-ios runs only in fork-prerelease.yml (job ios). In PRs it waited 15 min for a
+  # macos-26 runner and was cancelled every time (docs/Host-Aenderungen.md §12).
