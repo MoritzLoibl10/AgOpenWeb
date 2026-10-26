@@ -13,7 +13,7 @@ Block nimmt `Tools/license-headers.py` von der Prüfung auf fremde Lizenznamen a
 | .NET-Laufzeit | `deploy/windows/package.sh` (`--self-contained true`) | nicht im Cache geprüft |
 
 ## Offen
-1. **CanvasKit:** Lizenztext (BSD-3-Clause von Skia/Google) im Repo ablegen und Version festhalten.
+1. **CanvasKit:** Lizenztext (BSD-3 von Skia/Google) im Repo ablegen und Version festhalten.
 2. **StbImageSharp 2.30.15:** Das Paket nennt keine Lizenz. Beim Projekt nachsehen und eintragen.
 3. **.NET-Laufzeit:** Lizenz (MIT) an den Paketdaten der Laufzeit bestätigen.
 4. **Android und iOS:** Indirekte Pakete (AndroidX, Mono-Laufzeit u. a.) sind nicht aufgelistet;
