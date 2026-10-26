@@ -289,3 +289,10 @@ und Steuerlogik ist nicht berührt.
 ### Beim Rebase auf upstream
 `AppInfoDto` und `transport.js` haben ein angehängtes Feld. Hängt upstream dort selbst etwas an,
 muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
+
+## 11. Bedienung-1: Fenster-Vollbild im Desktop-Launcher (feature/bedienung-1, Oktober 2026)
+- **Datei:** `Platforms/AgOpenWeb.Desktop/Launcher/WebViewLauncher.cs`, `OnWebMessage`: die Nachricht
+  `fullscreen|1` / `fullscreen|0` ruft `_window.SetFullScreen(true/false)`. Sonst keine Änderung.
+- **Client:** Der Knopf ⛶ in der Statuszeile schickt im Launcher (Photino, `window.external.sendMessage`)
+  diese Nachricht statt der Fullscreen-API, die dort nur die Web-Ansicht füllt. Im Browser unverändert.
+- **Beim Rebase auf upstream:** eine Abfrage am Anfang von `OnWebMessage`.

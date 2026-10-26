@@ -4758,7 +4758,18 @@ if (fsBtn) {
   // Use 'click' (not pointerdown): requestFullscreen needs a durable user activation
   // that pointerdown doesn't reliably grant on Android Chrome (entering took 2–3 taps).
   // exitFullscreen needs no activation, so that always worked first tap.
+  // fork (feature/bedienung-1): in the desktop launcher (Photino) the Fullscreen API only fills the
+  // web view; the launcher switches the window itself on a "fullscreen|1/0" message.
+  const photino = () => !!(window.external && typeof window.external.sendMessage === 'function');
+  let winFs = null; // the launcher's state as last asked; starts as App Settings › Start Fullscreen
   fsBtn.addEventListener('click', () => {
+    if (photino()) {
+      if (winFs === null) winFs = !!(config && config.display && config.display.startFullscreen);
+      winFs = !winFs;
+      window.external.sendMessage('fullscreen|' + (winFs ? '1' : '0'));
+      fsBtn.textContent = winFs ? '🗗' : '⛶';
+      return;
+    }
     if (fsEl()) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
     const el = document.documentElement, req = el.requestFullscreen || el.webkitRequestFullscreen;
     if (req) { try { const p = req.call(el); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
@@ -10370,6 +10381,11 @@ const TabletBrand = (() => {
       tr('Stop, tap the vehicle on the map ("Reset direction"), then drive forward above 1.5 km/h.'),
       tr('So after switching on, drive forward first if you can. With two antennas (Dual GPS) this does not happen.'),
       tr('On the test bench, Menu → Bench checklist → "Reverse start" reproduces this case on purpose.')] },
+    { id: 'demo', t: tr('Demo mode'), steps: [
+      tr('Demo only without the kit connected.'),
+      tr('Menu → "Demo mode" starts the simulator; a striped "DEMO" band shows it runs.'),
+      tr('If a module is detected, steering and sections are switched off and the demo ends.'),
+      tr('"End demo" on the band or in the menu stops it.')] },
     { id: 'usb', t: tr('Back up profiles by USB copy'), warn: tr('Not checked on a real tablet yet.'), steps: [
       tr('Easier: Setup → Menu → "Back up and restore" makes one file and restores it from the Import folder.'),
       tr('Close the app. Connect the tablet to a PC by USB and choose "File transfer" on the tablet.'),
