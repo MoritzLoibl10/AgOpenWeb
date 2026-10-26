@@ -1659,6 +1659,15 @@
     #tui-setup1 .fs1-v { text-align: right; }
     #tui-setup1-back { position: fixed; z-index: 36; left: 50%; transform: translateX(-50%); top: calc(var(--tui-sb-h) + 6px + var(--sat, 0px)); box-shadow: 0 6px 18px rgba(0,0,0,0.3); }
     #tui-setup1-back[hidden] { display: none; }
+    /* Notice at first start (feature/auslieferung). */
+    #tui-legal { position: fixed; z-index: 60; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(640px, calc(100vw - 24px));
+      max-height: calc(100vh - 24px); overflow: auto; box-sizing: border-box; padding: 18px 20px; border-radius: 14px;
+      background: var(--tui-card, #fff); color: var(--tui-ink, #111); border: 2px solid var(--tui-warn); box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+      font: 600 var(--tui-fs-lbl)/1.45 system-ui, sans-serif; }
+    #tui-legal[hidden] { display: none; }
+    #tui-legal .lg-t { font: 900 calc(var(--tui-fs-lbl) + 4px) system-ui, sans-serif; margin-bottom: 8px; }
+    #tui-legal .lg-l { margin: 0 0 14px; padding-left: 22px; }
+    #tui-legal .lg-l li { margin: 6px 0; }
     #tui-sb-clock { font: 800 var(--tui-fs-val) ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums;
       white-space: nowrap; align-items: center; }
     /* GPS/RTK: the fix quality also as a border pattern (solid = RTK fix, dashed = float,
