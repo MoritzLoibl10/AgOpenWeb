@@ -5,6 +5,7 @@
 // Helpers for RemoteServerWiring.Wire — moved verbatim from the Desktop App class so
 // every host (Desktop/headless/iOS/Android) shares one web-command→VM/service mapping.
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using AgOpenWeb.Services.Interfaces;
@@ -604,6 +605,137 @@ public static partial class RemoteServerWiring
                     state.BugReportStatus = "Saved: " + zip;
                 }
                 catch (Exception ex) { state.BugReportStatus = "Error: " + ex.Message; }
+                return;
+            }
+        }
+    }
+
+    // --- Profile backup (fork, feature/profil-backup) ------------------------------------------
+    // State for the client as one JSON string in ApplicationState.BackupStatus (sent in the
+    // app-info frame): { seq, op, busy, ok, err, arg, file, list[], preview{file, items[]},
+    // applied{auto, written[]} }. err is a code the client translates. The ZIP work runs off the
+    // host loop; apply runs on it, after the host's own check (standing, steering off).
+    private static readonly System.Text.Json.Nodes.JsonObject Backup = new() { ["seq"] = 0 };
+
+    private static void BackupState(IServiceProvider services, Action<System.Text.Json.Nodes.JsonObject> set)
+    {
+        lock (Backup)
+        {
+            set(Backup);
+            Backup["seq"] = (int)Backup["seq"]! + 1;
+            services.GetRequiredService<AgOpenWeb.Models.State.ApplicationState>().BackupStatus = Backup.ToJsonString();
+        }
+    }
+
+    private static string AppVersion()
+    {
+        var info = System.Reflection.Assembly.GetEntryAssembly()?
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion;
+        return info ?? "";
+    }
+
+    private static void ApplyBackupCommand(IServiceProvider services, AgOpenWeb.ViewModels.MainViewModel vm, IUiDispatcher dispatcher,
+        IConfigurationService cfg, string cmd, string arg)
+    {
+        var root = AgOpenWeb.Services.AppDataRoot.Documents;
+        var backups = System.IO.Path.Combine(root, "Backups");
+        var import = System.IO.Path.Combine(root, "Import");
+        void Fail(string op, Exception ex) => BackupState(services, b =>
+        {
+            b["op"] = op; b["busy"] = false; b["ok"] = false;
+            if (ex is AgOpenWeb.Services.Profile.ProfileBackupService.BackupException be) { b["err"] = be.Code; b["arg"] = be.Detail; }
+            else { b["err"] = "io"; b["arg"] = ex.Message; }
+        });
+        void Start(string op) => BackupState(services, b => { b["op"] = op; b["busy"] = true; b["ok"] = false; b["err"] = null; b["arg"] = null; });
+        switch (cmd)
+        {
+            case "backup.create":
+                Start("create");
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        var zip = AgOpenWeb.Services.Profile.ProfileBackupService.Create(root, backups, AppVersion());
+                        BackupState(services, b => { b["busy"] = false; b["ok"] = true; b["file"] = System.IO.Path.GetFileName(zip); });
+                    }
+                    catch (Exception ex) { Fail("create", ex); }
+                });
+                return;
+            case "backup.list":
+                try
+                {
+                    System.IO.Directory.CreateDirectory(import);
+                    var l = AgOpenWeb.Services.Profile.ProfileBackupService.List(import);
+                    BackupState(services, b =>
+                    {
+                        b["op"] = "list"; b["busy"] = false; b["ok"] = true; b["err"] = null;
+                        b["list"] = new System.Text.Json.Nodes.JsonArray(l.Select(x => (System.Text.Json.Nodes.JsonNode?)x).ToArray());
+                    });
+                }
+                catch (Exception ex) { Fail("list", ex); }
+                return;
+            case "backup.preview": // arg = file name in the import folder
+                Start("preview");
+                Task.Run(() =>
+                {
+                    try
+                    {
+                        var items = AgOpenWeb.Services.Profile.ProfileBackupService.Preview(
+                            AgOpenWeb.Services.Profile.ProfileBackupService.ImportPath(import, arg), root);
+                        var arr = new System.Text.Json.Nodes.JsonArray();
+                        foreach (var i in items)
+                            arr.Add(new System.Text.Json.Nodes.JsonObject
+                            {
+                                ["k"] = i.Kind, ["n"] = i.Name, ["s"] = i.State.ToString().ToLowerInvariant(),
+                                ["c"] = new System.Text.Json.Nodes.JsonArray(i.Changes.Select(c => (System.Text.Json.Nodes.JsonNode?)c).ToArray()),
+                            });
+                        BackupState(services, b => { b["busy"] = false; b["ok"] = true; b["preview"] = new System.Text.Json.Nodes.JsonObject { ["file"] = arg, ["items"] = arr }; });
+                    }
+                    catch (Exception ex) { Fail("preview", ex); }
+                });
+                return;
+            case "backup.apply": // arg = file \t indices into the preview list, comma-separated
+            {                    // (indices, not names: a command has to fit in 1 KB)
+                var a = arg.Split('\t');
+                List<string> sel;
+                try
+                {
+                    var items = AgOpenWeb.Services.Profile.ProfileBackupService.Preview(
+                        AgOpenWeb.Services.Profile.ProfileBackupService.ImportPath(import, a[0]), root);
+                    sel = (a.ElementAtOrDefault(1) ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(x => int.TryParse(x, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var i) ? i : -1)
+                        .Where(i => i >= 0 && i < items.Count).Distinct().Select(i => items[i].Key).ToList();
+                }
+                catch (Exception ex) { Fail("apply", ex); return; }
+                var refuse = AgOpenWeb.Services.Profile.ProfileBackupService.CheckApply(
+                    vm.IsAutoSteerEngaged, vm.SpeedKmh, vm.IsFieldOpen ? vm.CurrentFieldName : null, sel);
+                if (refuse != null)
+                {
+                    BackupState(services, b => { b["op"] = "apply"; b["busy"] = false; b["ok"] = false; b["err"] = refuse; b["arg"] = refuse == "fieldopen" ? vm.CurrentFieldName : ""; });
+                    return;
+                }
+                try
+                {
+                    var store = services.GetRequiredService<AgOpenWeb.Models.Configuration.ConfigurationStore>();
+                    var r = AgOpenWeb.Services.Profile.ProfileBackupService.Apply(
+                        AgOpenWeb.Services.Profile.ProfileBackupService.ImportPath(import, a[0]), root, sel, backups, AppVersion());
+                    // The active pair from the new files: load without saving the outgoing pair,
+                    // which would write the old values back over the import.
+                    var v = store.ActiveVehicleProfileName; var t = store.ActiveToolProfileName;
+                    if (r.Written.Contains("vehicle:" + v, StringComparer.OrdinalIgnoreCase) || r.Written.Contains("tool:" + t, StringComparer.OrdinalIgnoreCase))
+                        cfg.LoadProfiles(v, t);
+                    BackupState(services, b =>
+                    {
+                        b["op"] = "apply"; b["busy"] = false; b["ok"] = true; b["err"] = null;
+                        b["applied"] = new System.Text.Json.Nodes.JsonObject
+                        {
+                            ["auto"] = System.IO.Path.GetFileName(r.AutoBackup),
+                            ["written"] = new System.Text.Json.Nodes.JsonArray(r.Written.Select(x => (System.Text.Json.Nodes.JsonNode?)x).ToArray()),
+                        };
+                    });
+                }
+                catch (Exception ex) { Fail("apply", ex); }
                 return;
             }
         }

@@ -580,6 +580,12 @@ public static partial class RemoteServerWiring
                                 case "app.resetHotkeys": case "app.bugReport":
                                     ApplyAppCommand(services, cmd, arg);
                                     return;
+                                // --- Profile backup (fork, feature/profil-backup): create, list and
+                                // preview are Tier-1 (read / write a new file); apply is Tier-2 and
+                                // checked again on the host (standing, steering off). ---
+                                case "backup.create": case "backup.list": case "backup.preview": case "backup.apply":
+                                    ApplyBackupCommand(services, vm, dispatcher, configService, cmd, arg);
+                                    return;
                             }
 
                             System.Windows.Input.ICommand? c = cmd switch
@@ -705,7 +711,8 @@ public static partial class RemoteServerWiring
                         || id == "net.subnet" // restarts every module → gate it
                         || id == "prompt.answer" // a confirm can delete data or restart modules
                         || id == "recpath.play" // drives the vehicle along the path → actuation
-                        || id == "heading.resetDirection"; // changes the heading the steering uses
+                        || id == "heading.resetDirection" // changes the heading the steering uses
+                        || id == "backup.apply"; // overwrites profiles and fields: the operating device only (fork)
 
                     // One operator, via the browser. When the control session ends —
                     // release, disconnect, or deadman — the machine must not keep

@@ -2081,6 +2081,20 @@
     .tbn-note { width: 100%; box-sizing: border-box; font: 600 calc(var(--tui-fs-lbl) + 1px)/1.3 system-ui, sans-serif; color: var(--text);
       background: rgba(var(--ov),0.04); border: 2px solid var(--border-2); border-radius: 10px; padding: 8px 10px; resize: vertical; }
     .tbn-nav { justify-content: space-between; }
+    /* Back up and restore (feature/profil-backup): the preview, one row per entry. */
+    .tbk-list { display: flex; flex-direction: column; gap: 6px; }
+    .tbk-it { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; text-align: left; min-height: var(--tp-btn-h);
+      padding: 6px 12px; border-radius: 12px; border: 2px solid var(--border-2); background: rgba(var(--ov),0.04); color: var(--text); cursor: pointer; }
+    .tbk-it.on { border-color: var(--tui-acc); background: var(--tui-acc-soft); }
+    .tbk-it:disabled { opacity: 0.6; cursor: default; }
+    .tbk-ck { display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; border: 2px solid var(--border-2); font-weight: 900; }
+    .tbk-it.on .tbk-ck { background: var(--tui-acc); border-color: var(--tui-acc); color: var(--tui-acc-ink); }
+    .tbk-nm { display: flex; flex-direction: column; gap: 2px; min-width: 0; font: 600 var(--tui-fs-lbl)/1.25 system-ui, sans-serif; }
+    .tbk-nm small { color: var(--text-muted); font-size: calc(var(--tui-fs-lbl) - 1px); }
+    .tbk-nm b { font: 800 calc(var(--tui-fs-lbl) + 3px)/1.2 system-ui, sans-serif; overflow-wrap: anywhere; }
+    .tbk-ch { overflow-wrap: anywhere; }
+    .tbk-st { font: 800 var(--tui-fs-lbl) system-ui, sans-serif; padding: 3px 8px; border-radius: 8px; background: rgba(var(--ov),0.1); white-space: nowrap; }
+    .tbk-it.overwrites .tbk-st { background: var(--tui-warn); color: var(--tui-warn-ink); }
   </style>
 </head>
 <body>

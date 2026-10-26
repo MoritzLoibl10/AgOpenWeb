@@ -1,6 +1,8 @@
 # Vorschlag: Profil-Backup (Export und Import) – braucht eine Host-Änderung
 
-Stand: nur Vorschlag, nicht gebaut. Wird ein eigener PR. Ziel: Fahrzeug-, Geräte- und
+Stand: **gebaut** in `feature/profil-backup`, siehe `docs/Host-Aenderungen.md` Abschnitt 8. Abweichungen vom Vorschlag: keine NTRIP-Profile im Export (auch nicht „mit Zugangsdaten“), Route `/backups/`, `backup.apply` mit Indizes der Vorschau statt Namen (ein Befehl muss in 1 KB passen), Status im App-Info-Frame statt eigenem Frame, Abdeckung (`jobs/`) nicht gesichert, keine Verschlüsselung.
+
+Ursprünglicher Vorschlag: Ziel: Fahrzeug-, Geräte- und
 Schlagprofile als **eine Datei** sichern und wiederherstellen, z. B. beim Tablet-Tausch beim
 Kunden.
 
