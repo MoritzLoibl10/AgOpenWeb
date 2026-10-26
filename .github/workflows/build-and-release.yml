@@ -57,6 +57,10 @@ jobs:
         run: |
           git fetch --no-tags --depth=2 origin ${{ github.sha }}
           changed=$(git diff --name-only HEAD^1 HEAD -- 'Shared/AgOpenWeb.RemoteServer/wwwroot/i18n/*.json' | grep -v -E '/(en|de)\.json$' || true)
+          # Fork: a file identical to upstream's develop came in with an upstream merge (Weblate there).
+          if [ -n "$changed" ] && git fetch --no-tags --depth=1 https://github.com/AgOpenGPS-Official/AgOpenWeb develop; then
+            changed=$(for f in $changed; do git diff --quiet FETCH_HEAD HEAD -- "$f" || echo "$f"; done)
+          fi
           if [ -n "$changed" ]; then
             echo "::error::Language files are maintained on Weblate (Docs/TRANSLATIONS.md); only en.json (in this fork also de.json) changes in a PR:"
             echo "$changed"
