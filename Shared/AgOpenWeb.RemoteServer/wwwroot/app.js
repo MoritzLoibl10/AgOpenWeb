@@ -7515,7 +7515,7 @@ const TabletPolish = (() => {
     ['[data-cmd="track.snapRight"]', tr('Track right'), false],
     ['[data-cmd="track.snapPivot"]', tr('Line to me'), false],
     ['#bn-tram', tr('Tram lines'), true],
-    ['#bn-abmenu', tr('AB line'), false],
+    ['#bn-abmenu', tr('AB Line'), false],
   ];
   const bar = document.querySelector('#bottomnav .bn-bar');
   if (bar) for (const [sel, label, moved] of BN_LABEL) {
@@ -7824,7 +7824,7 @@ const TabletProfiles = (() => {
   function remove(kind) {
     const n = sel[kind];
     if (!n || n === activeName(kind)) return;
-    confirmAsk(T(tr('Delete profile')), tr('Delete the profile "{name}"? This cannot be undone.', { name: n }), T(tr('Delete')), () => {
+    confirmAsk(T(tr('Delete Profile')), tr('Delete the profile "{name}"? This cannot be undone.', { name: n }), T(tr('Delete')), () => {
       if (lockReason()) return;
       transport.send('profile.delete|' + kind + '\t' + n);
       if (kind === 'tool') lsSet(iconKey(n), null);
@@ -8311,7 +8311,7 @@ const TabletProfiles = (() => {
         if (m) w.push([st.f.label, m]);
       }
       const a = config && config.autosteer ? +config.autosteer.maxSteerAngle : NaN;
-      if (Number.isFinite(a) && (a < 20 || a > 60)) w.push([tr('Max steer angle'), tr('Unusual value (expected {min} to {max}). Please measure again; it is saved as entered.', { min: '20°', max: '60°' })]);
+      if (Number.isFinite(a) && (a < 20 || a > 60)) w.push([tr('Max Steer Angle'), tr('Unusual value (expected {min} to {max}). Please measure again; it is saved as entered.', { min: '20°', max: '60°' })]);
     } else {
       const s = sumWidthM();
       if (Number.isFinite(s) && (s < 1 || s > 60))
@@ -8379,12 +8379,12 @@ const TabletProfiles = (() => {
         row(st.f.label, fmtVal(st.f, v), c2 && fmtVal(st.f, c2.from), !!c2, warnFor(st.f, v));
       }
       const a = config && config.autosteer ? config.autosteer.maxSteerAngle : null;
-      row(tr('Max steer angle'), a == null ? '—' : a + '°', null, false, Number.isFinite(+a) && (a < 20 || a > 60) ? 'x' : '');
+      row(tr('Max Steer Angle'), a == null ? '—' : a + '°', null, false, Number.isFinite(+a) && (a < 20 || a > 60) ? 'x' : '');
       card.appendChild(Object.assign(el('div', 'tp-note'), { textContent: T(tr('The max steer angle is set under AutoSteer and is not changed here.')) }));
     } else {
       const c = chOf('tool.type');
       row(tr('Attach'), fmtChange({ kindOf: 'ttype' }, W.type.cur), c && fmtChange(c, c.from), !!c);
-      const n = Math.max(1, Math.min(64, parseInt(W.nSec.inp.value, 10) || 0)), cn = chOf('tool.numSections');
+      const n = Math.max(1, Math.min(64, Math.round(parseFloat(W.nSec.inp.value)) || 0)), cn = chOf('tool.numSections');
       row(tr('Number of sections'), String(n), cn && String(cn.from), !!cn);
       const s = sumWidthM();
       row(tr('Working width'), fmtM(s, 'm'), null, ch.some(x => x.key === 'tool.sectionWidth') || !!cn, Number.isFinite(s) && (s < 1 || s > 60) ? 'x' : '');
@@ -9191,8 +9191,8 @@ const TabletHeadingCheck = (() => {
     if (devSince && now - devSince >= DEV_SECONDS * 1000)
       w.push(tr('The IMU heading differs from the GPS heading by {d}°.', { d: tuiNum(dev, 0) }));
     const rows = [
-      [T(tr('GPS heading')), live ? deg(gps) : '—'],
-      [T(tr('IMU heading (as received)')), !live ? '—' : fin(raw) ? deg(raw) : T(tr('none'))],
+      [T(tr('GPS Heading')), live ? deg(gps) : '—'],
+      [T(tr('IMU heading (as received)')), !live ? '—' : fin(raw) ? deg(raw) : T(tr('None'))],
       [T(tr('IMU heading (with offset)')), live ? deg(corr) : '—'],
       [T(tr('Difference')), live && fin(dev) ? tuiNum(dev, 1) + '°' : '—'],
     ];
