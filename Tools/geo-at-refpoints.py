@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# AgOpenWeb
+# Copyright (C) 2024-2026 AgOpenWeb Contributors
 # SPDX-License-Identifier: Apache-2.0
 """Reference points for Tests/web/geo-at.test.mjs: EPSG:31287 -> ETRS89 with PROJ (pyproj),
 pinned to the operations GeoAT (app.js) implements:

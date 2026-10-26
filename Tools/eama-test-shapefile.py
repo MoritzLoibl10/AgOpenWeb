@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# AgOpenWeb
+# Copyright (C) 2024-2026 AgOpenWeb Contributors
 # SPDX-License-Identifier: Apache-2.0
 """Synthetic test data for Tests/web/eama-shape.test.mjs (made up, no real field data):
 three parcels near Mistelbach in EPSG:31287 (one with a hole, one in two parts, one with an
