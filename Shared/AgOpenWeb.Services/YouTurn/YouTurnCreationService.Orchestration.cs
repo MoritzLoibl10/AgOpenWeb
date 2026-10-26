@@ -49,13 +49,14 @@ public partial class YouTurnCreationService
 
     /// <summary>
     /// Maps the persisted <see cref="GuidanceConfig.UTurnStyle"/> integer onto the
-    /// creation <see cref="YouTurnType"/>. 0 = Sagitta (default), 1 = K-style.
+    /// creation <see cref="YouTurnType"/>. 0 = Sagitta (default), 1 = K-style, 2 = Keyhole.
     /// Unknown values — including the retired Albin/Dubins style and any old
     /// numbering — fall back to Sagitta.
     /// </summary>
     private static YouTurnType MapTurnStyle(int uTurnStyle) => uTurnStyle switch
     {
         (int)YouTurnType.KStyle => YouTurnType.KStyle,
+        (int)YouTurnType.KeyholeStyle => YouTurnType.KeyholeStyle,
         _ => YouTurnType.SagittaStyle,
     };
 
@@ -352,8 +353,10 @@ public partial class YouTurnCreationService
 
         double headlandWidthForTurn = Math.Max(totalHeadlandWidth - toolWidth, toolWidth);
 
+        // Asked for every candidate path point: the turn line's strip index, built once per plan.
+        var turnArea = PolygonSlabIndex.Build(turnBoundaryVec3);
         Func<Vec3, int> isPointInsideTurnArea = point =>
-            GeometryMath.IsPointInPolygon(turnBoundaryVec3, point) ? 0 : 1;
+            turnArea != null && turnArea.Contains(point.Easting, point.Northing) ? 0 : 1;
 
         var pivotPosition = new Vec3(currentPosition.Easting, currentPosition.Northing, headingRadians);
 
@@ -375,7 +378,7 @@ public partial class YouTurnCreationService
             : DensifyAbLine(track.Points);
 
         double widthMinusOverlap = toolWidth - config.Tool.Overlap;
-        double offsetDistance = guidance.HowManyPathsAway * widthMinusOverlap + guidance.NudgeOffset;
+        double offsetDistance = Models.Track.PassGeometry.Offset(track, guidance.HowManyPathsAway, widthMinusOverlap, guidance.NudgeOffset);
         List<Vec3> offsetCurve = Math.Abs(offsetDistance) < 0.01
             ? new List<Vec3>(basePoints)
             : CurveProcessing.CreateOffsetCurve(basePoints, offsetDistance);
@@ -430,6 +433,7 @@ public partial class YouTurnCreationService
             // nudged next pass, matching the current pass built above (and AgOpen, whose
             // BuildNewOffsetList distAway includes track.nudgeDistance).
             NudgeDistance = guidance.NudgeOffset,
+            PassEdgeOffset = Models.Track.PassGeometry.EdgeOffset(track, toolWidth - config.Tool.Overlap),
             TrackMode = 0,
 
             MakeUTurnCounter = turn.YouTurnCounter + 10,
@@ -491,7 +495,7 @@ public partial class YouTurnCreationService
 
         var config = _configStore;
         double widthMinusOverlap = config.ActualToolWidth - config.Tool.Overlap;
-        double offsetDistance = guidance.HowManyPathsAway * widthMinusOverlap;
+        double offsetDistance = Models.Track.PassGeometry.Offset(track, guidance.HowManyPathsAway, widthMinusOverlap);
 
         List<Vec3> searchPoints = Math.Abs(offsetDistance) < 0.01
             ? track.Points
@@ -551,7 +555,7 @@ public partial class YouTurnCreationService
 
         var config = _configStore;
         double widthMinusOverlap = config.ActualToolWidth - config.Tool.Overlap;
-        double offsetDistance = guidance.HowManyPathsAway * widthMinusOverlap;
+        double offsetDistance = Models.Track.PassGeometry.Offset(track, guidance.HowManyPathsAway, widthMinusOverlap);
 
         Models.Track.Track currentOffsetTrack;
         if (Math.Abs(offsetDistance) < 0.01)
@@ -701,7 +705,7 @@ public partial class YouTurnCreationService
     /// position carried its cross-track error into the path — a turn created right after
     /// engaging, before the tractor had converged, came out shifted by that error (#174:
     /// 2 m). Move the anchor sideways onto the pass being followed (the offset
-    /// <c>HowManyPathsAway × width + NudgeOffset</c>, positive right of the AB heading, as
+    /// <c>PassGeometry.Offset</c>, positive right of the AB heading, as
     /// guidance uses). AB lines only: the fallback's geometry is straight along abHeading.
     /// </summary>
     internal Position OntoPassLine(Position pos, Models.Track.Track? track, double abHeading, GuidanceWorkingState guidance)
@@ -709,7 +713,7 @@ public partial class YouTurnCreationService
         if (track == null || track.Points.Count != 2) return pos;
         var a = track.Points[0];
         double width = _configStore.ActualToolWidth - _configStore.Tool.Overlap;
-        double passOffset = guidance.HowManyPathsAway * width + guidance.NudgeOffset;
+        double passOffset = Models.Track.PassGeometry.Offset(track, guidance.HowManyPathsAway, width, guidance.NudgeOffset);
         double rightE = Math.Cos(abHeading), rightN = -Math.Sin(abHeading);
         double perp = (pos.Easting - a.Easting) * rightE + (pos.Northing - a.Northing) * rightN;
         double shift = passOffset - perp;

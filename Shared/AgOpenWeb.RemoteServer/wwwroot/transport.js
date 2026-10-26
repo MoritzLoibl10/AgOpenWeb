@@ -28,7 +28,7 @@ window.RemoteTransport = {
     const url = `${proto}//${location.host}/ws`;
     let ws = null, stopped = false;
 
-    const TYPE = { SCENE: 1, TICK: 2, COVERAGE_INIT: 3, COVERAGE_CELLS: 4, STATUS: 5, CONTROL_STATE: 6, HELLO: 7, CONFIG: 8, PROFILES: 9, WIZARD: 10, NTRIP_PROFILES: 11, FIELD_OPS: 12, AGSHARE: 13, APP_INFO: 14, FIELD_TOOLS: 15, RECORDED_PATH: 16, BOUNDARY: 17, SOUND: 18, PONG: 19, COVERAGE_EDGE: 20, VIEW_PREFS: 21, PROMPT: 22, TOAST: 23, DRIVE_PICK: 24, HW_MSG: 25 };
+    const TYPE = { SCENE: 1, TICK: 2, COVERAGE_INIT: 3, COVERAGE_CELLS: 4, STATUS: 5, CONTROL_STATE: 6, HELLO: 7, CONFIG: 8, PROFILES: 9, WIZARD: 10, NTRIP_PROFILES: 11, FIELD_OPS: 12, AGSHARE: 13, APP_INFO: 14, FIELD_TOOLS: 15, RECORDED_PATH: 16, BOUNDARY: 17, SOUND: 18, PONG: 19, COVERAGE_EDGE: 20, VIEW_PREFS: 21, PROMPT: 22, TOAST: 23, DRIVE_PICK: 24, HW_MSG: 25, VT: 26, VT_IMAGE: 27 };
     const td = new TextDecoder();
 
     function decode(buffer) {
@@ -261,9 +261,9 @@ window.RemoteTransport = {
           for (let k = 0; k < hc; k++) hotkeys[k] = { action: str(), key: str(), label: str() };
           const gc = i32(); const logs = new Array(gc);
           for (let k = 0; k < gc; k++) logs[k] = { time: str(), level: i32(), message: str() };
-          const bugReportStatus = str();
-          const backupStatus = o < dv.byteLength ? str() : ''; // append-only (fork): profile backup, JSON
-          handlers.onAppInfo && handlers.onAppInfo({ version, gitHash, currentLanguage, languages, directories, hotkeys, logs, bugReportStatus, backupStatus });
+          const bugReportStatus = str(), bugReportSendStatus = str();
+          const backupStatus = o < dv.byteLength ? str() : ''; // append-only (fork): profile backup, JSON, after upstream's fields
+          handlers.onAppInfo && handlers.onAppInfo({ version, gitHash, currentLanguage, languages, directories, hotkeys, logs, bugReportStatus, bugReportSendStatus, backupStatus });
           break;
         }
         case TYPE.FIELD_TOOLS: {
@@ -301,6 +301,7 @@ window.RemoteTransport = {
           const vehicle = {
             name: str(), type: i32(), hitchType: i32(), hitchLength: f64(), wheelbase: f64(),
             trackWidth: f64(), antennaPivot: f64(), antennaHeight: f64(), antennaOffset: f64(),
+            imuPivot: f64(), imuHeight: f64(), imuOffset: f64(),
           };
           const gps = {
             isDualGps: !!u8(), dualHeadingOffset: f64(), dualReverseDistance: f64(),
@@ -335,7 +336,7 @@ window.RemoteTransport = {
             uTurnButtonVisible: !!u8(), lateralButtonVisible: !!u8(),
             autoSteerSound: !!u8(), uTurnSound: !!u8(), hydraulicSound: !!u8(), sectionsSound: !!u8(),
             keyboardEnabled: !!u8(), startFullscreen: !!u8(), elevationLogEnabled: !!u8(),
-            resolutionMultiplier: f64(), isDayMode: !!u8(),
+            resolutionMultiplier: f64(), isDayMode: !!u8(), uiScale: i32(),
           };
           // AutoSteer config — full 9-tab surface (positional, matches WireCodec).
           const autosteer = {
@@ -433,6 +434,20 @@ window.RemoteTransport = {
         case TYPE.HW_MSG: { // module hardware message, PGN 221 (#110)
           const text = str(), seconds = i32(), warning = !!u8();
           handlers.onHardwareMessage && handlers.onHardwareMessage(text, seconds, warning);
+          break;
+        }
+        case TYPE.VT: {
+          // Virtual terminal (VT cards): the terminal (255: the link, for all of them), then one
+          // JSON message, as the terminal wrote it.
+          const t = u8();
+          handlers.onVt && handlers.onVt(JSON.parse(str()), t === 255 ? -1 : t);
+          break;
+        }
+        case TYPE.VT_IMAGE: {
+          // A VT picture: id, width, height, then RGBA rows (copied: the buffer is the frame's).
+          const id = dv.getUint32(o, true); o += 4;
+          const w = i32(), h = i32();
+          handlers.onVtImage && handlers.onVtImage(id, w, h, new Uint8Array(buffer.slice(o, o + w * h * 4)));
           break;
         }
         case TYPE.TOAST: {
