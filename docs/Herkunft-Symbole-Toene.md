@@ -10,23 +10,21 @@ Stand 27.10.2026. **Methode:** Jede Datei wurde über ihren Git-Inhalt (Blob-Has
 ## Ergebnis
 | | Anzahl | Herkunft | Lizenz |
 |---|---|---|---|
-| Töne | 10 von 11 | byte-gleich in AgOpenGPS `develop` (`SourceCode/GPS/Resources/`) | Apache 2.0 (AgOpenGPS) |
-| Ton `Headland.wav` | 1 | byte-gleich mit AgOpenGPS v6.4.0; in `develop` inzwischen eine andere Fassung | **offen**: v6.4.0 stand nicht unter Apache 2.0 |
+| Töne | 11 von 11 | byte-gleich in AgOpenGPS `develop` (`SourceCode/GPS/Resources/`); `Headland.wav` am 27.10.2026 durch die heutige Fassung von dort ersetzt (vorher die aus v6.4.0) | Apache 2.0 (AgOpenGPS) |
 | Symbole | 164 von 190 | byte-gleich in AgOpenGPS `develop` (`SourceCode/GPS/…`, meist `btnImages/`) | Apache 2.0 (AgOpenGPS) |
 | Symbole aus der Projektarbeit | 22 | erstmals im AgOpenWeb-/AgValoniaGPS-Repo, nicht in AgOpenGPS gefunden; Autor laut Commit | wie das Projekt, Apache 2.0; vor dem 17.05.2026 hinzugefügte fallen unter die Zustimmung der Autoren aus upstream `Plans/LICENSE_HEADERS_PLAN.md` |
-| Symbole mit offener Quelle | 2 | `ST_NerdAdv.png`, `AutoSteerGray.png` aus der „button images library“ (`3c389d19`) ohne Quellenangabe | **offen** |
-| Fork-eigene Symbole | 2 | `brand-192.png`, `brand-512.png` (Fork, Commit `7ac7cd3e`) | Apache 2.0 |
+| Symbole mit offener Quelle | 2 | `ST_NerdAdv.png` (eine abweichende Datei gleichen Namens liegt im AgOpenGPS-v6.4-Abbild unter `GPS/btnImages/Steer/`), `AutoSteerGray.png`; beide aus der „button images library“ (`3c389d19`) ohne Quellenangabe | **offen**; die App nutzt sie nicht mehr (Ersatz unten), die Dateien bleiben für upstream im Repo |
+| Fork-eigene Symbole | 4 | `brand-192.png`, `brand-512.png` (Commit `7ac7cd3e`); `fork-SteerWizard.png` (ersetzt `ST_NerdAdv.png`: Reiter „Deadzone / Timing“ und Knopf „Lenk-Assistent“ in der Lenkungs-Einrichtung) und `fork-AutoSteerGray.png` (ersetzt `AutoSteerGray.png`: Lenken-Knopf ohne Linie), beide im Fork neu gezeichnet (27.10.2026) | Apache 2.0 |
 
-**Offen bleibt:** `Headland.wav` (die alte Fassung ist in AgOpenGPS `develop` nicht mehr enthalten;
-ob AgOpenGPS sie auch unter Apache 2.0 veröffentlicht hat, ist nicht belegt; Ersatz: die heutige
-Datei aus AgOpenGPS `develop` übernehmen); die Quelle der zwei Symbole aus der „button images
-library“; die Zustimmung der Autoren für Dateien vor dem 17.05.2026 (upstream-Aufgabe).
+**Offen bleibt:** die Quelle der zwei Symbole aus der „button images library“ (die App nutzt
+stattdessen Fork-eigene Ersatzsymbole); die Zustimmung der Autoren für Dateien vor dem 17.05.2026
+(upstream-Aufgabe). Erledigt: `Headland.wav` ist die heutige Fassung aus AgOpenGPS `develop`.
 
 ## Alle Dateien
 | Datei | Herkunft | Stand gegenüber AgOpenGPS `develop` |
 |---|---|---|
 | `sounds/Alarm10.wav` | AgOpenGPS `SourceCode/GPS/Resources/Alarm10.wav` | gleich |
-| `sounds/Headland.wav` | AgOpenGPS `SourceCode/GPS/Resources/Headland.wav` | v6.4-Fassung; in develop geändert |
+| `sounds/Headland.wav` | AgOpenGPS `SourceCode/GPS/Resources/Headland.wav` | gleich (ersetzt am 27.10.2026, vorher v6.4-Fassung) |
 | `sounds/HydDown.wav` | AgOpenGPS `SourceCode/GPS/Resources/HydDown.wav` | gleich |
 | `sounds/HydUp.wav` | AgOpenGPS `SourceCode/GPS/Resources/HydUp.wav` | gleich |
 | `sounds/SectionOff.wav` | AgOpenGPS `SourceCode/GPS/Resources/SectionOff.wav` | gleich |
@@ -226,3 +224,5 @@ library“; die Zustimmung der Autoren für Dateien vor dem 17.05.2026 (upstream
 | `icons/vehiclePageArticulated.png` | AgOpenGPS `SourceCode/GPS/btnImages/vehiclePageArticulated.png` | gleich |
 | `icons/vehiclePageHarvester.png` | AgOpenGPS `SourceCode/GPS/btnImages/vehiclePageHarvester.png` | gleich |
 | `icons/vehiclePageTractor.png` | AgOpenGPS `SourceCode/GPS/btnImages/vehiclePageTractor.png` | gleich |
+| `icons/fork-AutoSteerGray.png` | Fork: neu gezeichnet (27.10.2026), Ersatz für `AutoSteerGray.png` | — |
+| `icons/fork-SteerWizard.png` | Fork: neu gezeichnet (27.10.2026), Ersatz für `ST_NerdAdv.png` | — |
