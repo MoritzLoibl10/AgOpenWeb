@@ -11299,7 +11299,7 @@ const TabletReady = (() => {
     pop.appendChild(el('div', 'rd-n', T(tr('Display only. Steering is switched on with the Steer button as before.'))));
   }
   setInterval(render, 300);
-  return { render, checks, get level() { return Math.min(...checks().map(c => c[0])); } };
+  return { checks, get level() { return Math.min(...checks().map(c => c[0])); } };
 })();
 
 // ===== Demo mode (feature/bedienung-1) ========================================================
@@ -11464,7 +11464,7 @@ const TabletExplain = (() => {
   window.addEventListener('pointermove', e => { if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > MOVE_PX) release(e, false); }, true);
   window.addEventListener('click', e => { if (swallowClick) { swallowClick = false; e.stopImmediatePropagation(); e.preventDefault(); } }, true);
   window.addEventListener('contextmenu', e => { if (e.target instanceof Element && e.target.closest(SEL)) e.preventDefault(); }, true);
-  return { show, matches: node => !!node.closest(SEL) };
+  return { show };
 })();
 // explain:end
 
@@ -11578,7 +11578,7 @@ const TabletWork = (() => {
     onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); start(); });
     f.insertBefore(t, f.firstChild);
   }, 300);
-  return { start, get running() { return running; } };
+  return { start };
 })();
 
 // ===== First setup (feature/bedienung-2) ======================================================
