@@ -316,3 +316,17 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
   `long-press.test.mjs` fehl statt übersprungen zu werden.
 - **Hinweis:** Auf diesem Branch gab es den Schritt noch nicht (er liegt sonst nur in
   `feature/eama-import`, dort ohne Browser). Beim Zusammenführen bleibt diese Fassung.
+
+## 14. Host-Paket A: eindeutige Aus-Befehle (feature/host-paket, Oktober 2026)
+- **Dateien:** `Shared/AgOpenWeb.ViewModels/MainViewModel.SwitchOff.cs` (neu: `AutoSteerOff()`,
+  `AllSectionsOff()`), `Shared/AgOpenWeb.RemoteWiring/RemoteServerWiring.cs` (zwei `case`-Zeilen
+  `autosteer.off`, `sections.alloff`). Test: `Tests/AgOpenWeb.ViewModels.Tests/SwitchOffTests.cs`.
+- **Verhalten:** Nur ausschalten, nie einschalten. `AutoSteerOff` ruft den vorhandenen Lenkknopf-Befehl
+  nur, wenn die Lenkung an ist (derselbe Weg wie beim Abgeben der Bedienung). `AllSectionsOff` ruft
+  ebenso die vorhandenen Befehle für Handbetrieb und Automatik nur, wenn sie an sind, und für eine
+  einzeln eingeschaltete Teilbreite (#316) `SetAllSections(Off)` wie bei GPS-Verlust. Ist nichts an,
+  passiert nichts; Wiederholen ist harmlos. Regelung, Wende und Sicherheitsabschaltungen unverändert.
+- **Bedienung:** Beide Befehle brauchen die Bedienung wie jeder andere (nicht in `ObserverIds`).
+- **Client:** `TabletDemo` sendet beim Beenden beide Befehle statt nichts (vorher: Umschaltbefehle,
+  dann gar keine). Andere Client-Stellen, die „aus“ meinen, gibt es nicht; die Knöpfe bleiben Umschalter.
+- **Beim Merge von upstream:** neue Datei, zwei Zeilen im `switch`; ohne Konflikt zu erwarten.

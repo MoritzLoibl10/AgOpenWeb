@@ -3,8 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // TabletDemo (wwwroot/app.js, between demo:begin/end): ending the demo, by "End demo" or because
-// a module was detected, never sends a command that toggles steering or sections. The host only
-// has toggles for them, and one sent from a stale tick could switch them on.
+// a module was detected, switches steering and sections off with the explicit off commands
+// (autosteer.off, sections.alloff) and never sends a toggle: one sent from a stale tick could
+// switch them on.
 // Run: node --test Tests/web/demo.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -54,7 +55,7 @@ test('demo: "End demo" sends no steering or section toggle', () => {
   ctx.TabletDemo.end('');
   assert.equal(ctx.TabletDemo.active, false);
   assert.deepEqual(sent.filter(c => TOGGLES.includes(c.split('|')[0])), []);
-  assert.deepEqual(sent, ['sim.toggleEnable']); // only the simulator it switched on itself
+  assert.deepEqual(sent, ['autosteer.off', 'sections.alloff', 'sim.toggleEnable']); // and the simulator it switched on itself
 });
 
 test('demo: a detected module ends it with a warning and no toggle', () => {
@@ -66,6 +67,7 @@ test('demo: a detected module ends it with a warning and no toggle', () => {
   tickAll();
   assert.equal(ctx.TabletDemo.active, false);
   assert.deepEqual(sent.filter(c => TOGGLES.includes(c.split('|')[0])), []);
+  assert.ok(sent.includes('autosteer.off') && sent.includes('sections.alloff'));
   assert.equal(toasts.at(-1)[0], 'Demo ended – kit detected. Check steering and sections.');
 });
 

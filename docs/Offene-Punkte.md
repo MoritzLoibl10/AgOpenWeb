@@ -53,7 +53,7 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 | 32 | IMU-Kurs aus PGN 253: eine 0 der AiO-Firmware gilt als gültiger Kurs (upstream #357) | hoch | ja | Firmware geprüft: v4 (auch v4.5) sendet 9999, v26 sendet 0; Anzeige im Einrichtungsmodus; Issue-Text an upstream |
 | 33 | Eine Antenne: rückwärts zuerst gefahren → Richtung verkehrt gelernt; Lenkung rechnet falsch herum, Simulator pendelt | hoch | ja | Fork: Hinweis im Simulator, Richtungskarte vor dem ersten Lenken, Hinweis „Echtes GPS aktiv“, Hilfe; Issue-Text an upstream (dringend) (fix/simulator-richtung) |
 | 34 | Gezogene Geräte: Drehpunkt-Abstand wirkt umgekehrt zur Beschriftung; TBT: „Arbeitsmitte“ wirkt nicht | mittel | ja | Fork: Anzeige an das Host-Verhalten angepasst (`docs/Host-Aenderungen.md` Punkt 7); Host offen |
-| 35 | Vorführmodus: Host hat keine eindeutigen Aus-Befehle für Lenkung und Teilbreiten | hoch | ja | Fork: Vorführung sendet beim Beenden keine Umschaltbefehle mehr, nur Warnung (feature/bedienung-1); Host offen |
+| 35 | Vorführmodus: Host hat keine eindeutigen Aus-Befehle für Lenkung und Teilbreiten | hoch | ja | Erledigt in feature/host-paket: `autosteer.off`, `sections.alloff` (`docs/Host-Aenderungen.md` 14) |
 
 ---
 
@@ -498,3 +498,4 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 - **Im Fork (nur `wwwroot`):** Beim Beenden geht kein Umschaltbefehl mehr raus. Wird ein Modul erkannt, endet die Vorführung mit der Meldung „Vorführung beendet – Kit erkannt. Lenkung und Teilbreiten prüfen.“ Test: `Tests/web/demo.test.mjs`.
 - **Vorschlag Host:** eindeutige Befehle `autosteer.off` (Lenkung aus, wenn an; sonst nichts) und `section.allOff` (Automatik und Handbetrieb aus); die Vorführung würde dann nur diese senden.
 - **Host-Änderung nötig:** ja
+- **Stand:** erledigt in `feature/host-paket` (`docs/Host-Aenderungen.md` Abschnitt 14); die Vorführung sendet beim Beenden nur diese Befehle.

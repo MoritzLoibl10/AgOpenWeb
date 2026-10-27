@@ -621,7 +621,7 @@
   "Hydraulic lift": "Hubwerk",
   "Hydraulic stall detection": "Hydraulik-Blockiererkennung",
   "If no print dialog opened, this app view cannot print; use a browser on a PC.": "Ist kein Druckfenster erschienen, kann diese App-Ansicht nicht drucken; dann einen Browser am PC verwenden.",
-  "If a module is detected, the demo ends: then check steering and sections yourself.": "Wird ein Modul erkannt, endet die Vorführung: dann Lenkung und Teilbreiten selbst prüfen.",
+  "If a module is detected, the demo ends and steering and sections are switched off: check them anyway.": "Wird ein Modul erkannt, endet die Vorführung, und Lenkung und Teilbreiten werden ausgeschaltet: trotzdem prüfen.",
   "If that first travel is backwards, it is learned the wrong way round: reversing shows as forward, and forward shows \"REVERSE\".": "Ist diese erste Fahrt rückwärts, wird sie verkehrt herum gelernt: Rückwärts erscheint als Vorwärts, und vorwärts zeigt „RÜCKWÄRTS“.",
   "If you back up first (e.g. out of the shed), it learns the direction the wrong way round: the steering then runs for the wrong direction.": "Fährst du zuerst rückwärts (z. B. aus der Halle), lernt es die Richtung verkehrt herum: Die Lenkung arbeitet dann für die falsche Richtung.",
   "Imperial": "Zoll/Fuß",

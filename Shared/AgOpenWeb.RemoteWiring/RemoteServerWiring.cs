@@ -91,6 +91,9 @@ public static partial class RemoteServerWiring
                                     if (int.TryParse(arg, System.Globalization.NumberStyles.Integer, inv, out var zi))
                                         vm.ToggleZone(zi);
                                     return;
+                                // Fork (feature/host-paket): explicit off, never on; harmless when repeated.
+                                case "autosteer.off": vm.AutoSteerOff(); return;
+                                case "sections.alloff": vm.AllSectionsOff(); return;
                                 case "fielddata.resetTrip": // Tier-1; the card's trip Reset (#321)
                                     vm.ResetTrip();
                                     return;

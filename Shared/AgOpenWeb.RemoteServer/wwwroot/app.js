@@ -10399,7 +10399,7 @@ const TabletBrand = (() => {
     { id: 'demo', t: tr('Demo mode'), steps: [
       tr('Demo only without the kit connected.'),
       tr('Menu → "Demo mode" starts the simulator; a striped "DEMO" band shows it runs.'),
-      tr('If a module is detected, the demo ends: then check steering and sections yourself.'),
+      tr('If a module is detected, the demo ends and steering and sections are switched off: check them anyway.'),
       tr('"End demo" on the band or in the menu stops it.')] },
     { id: 'usb', t: tr('Back up profiles by USB copy'), warn: tr('Not checked on a real tablet yet.'), steps: [
       tr('Easier: Setup → Menu → "Back up and restore" makes one file and restores it from the Import folder.'),
@@ -11311,9 +11311,9 @@ const TabletReady = (() => {
 // on the network a simulated drive could switch real outputs (the host sends steer and section
 // PGNs in the simulator too). If a module turns up while it runs, the demo ends with a warning
 // to check steering and sections. Stops with "End demo"; the flag lives in this tab only.
-// Ending never sends a command that switches steering or sections: the host only has toggles
-// for them (autosteer.toggle, section.master, section.manual), and a toggle sent from a stale
-// tick could switch them on. Explicit off commands would need a host change (docs/).
+// Ending switches steering and sections off with the host's explicit off commands
+// (autosteer.off, sections.alloff: off only, harmless when nothing is on), never with a toggle,
+// which sent from a stale tick could switch them on.
 // demo:begin
 const TabletDemo = (() => {
   const T = k => I18n.text(k);
@@ -11342,6 +11342,7 @@ const TabletDemo = (() => {
   }
   function end(why) {
     if (!active) return;
+    transport.send('autosteer.off'); transport.send('sections.alloff');
     if (statusBar && statusBar.simEnabled && !simBefore) transport.send('sim.toggleEnable');
     active = false; save();
     if (why) showToast(T(why), 15000);
