@@ -56,4 +56,22 @@ public partial class MainViewModel
         StatusMessage = message;
         FailureReported?.Invoke(message);
     }
+
+    /// <summary>A failure text with values in it, as a translation key with <c>{name}</c>
+    /// placeholders. <see cref="FailureReported"/> gets the English text as before; while it runs,
+    /// <see cref="LastFailureKey"/> holds the key and values, so the web wiring can send them and
+    /// the client translates the sentence around the values.</summary>
+    public void ReportFailure(string key, params (string Name, string Value)[] args)
+    {
+        var text = key;
+        foreach (var (n, v) in args) text = text.Replace("{" + n + "}", v);
+        StatusMessage = text;
+        LastFailureKey = (key, args);
+        try { FailureReported?.Invoke(text); }
+        finally { LastFailureKey = null; }
+    }
+
+    /// <summary>The key and values of the failure being reported (see the keyed
+    /// <see cref="ReportFailure(string, (string Name, string Value)[])"/>), else null.</summary>
+    public (string Key, (string Name, string Value)[] Args)? LastFailureKey { get; private set; }
 }

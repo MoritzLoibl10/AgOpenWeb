@@ -450,7 +450,10 @@ window.RemoteTransport = {
         }
         case TYPE.TOAST: {
           // One-shot refusal/failure notification (#109).
-          handlers.onToast && handlers.onToast(str());
+          const msg = str();
+          // Append-only: translation key with {name} placeholders + values (JSON).
+          const key = o < dv.byteLength ? str() : '', args = o < dv.byteLength ? str() : '';
+          handlers.onToast && handlers.onToast(msg, key, args);
           break;
         }
         case TYPE.DRIVE_PICK: {

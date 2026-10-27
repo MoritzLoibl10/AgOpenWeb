@@ -440,7 +440,7 @@ const transport = RemoteTransport.create({
   onControlState(s) { lastControl = s; updateControlUi(); claimSeatIfFree(); Vt.render(); },
   onSound(id) { Sounds.play(id); },
   onPrompt(p) { hostPrompt = p; renderHostPrompt(); },
-  onToast(msg) { showToast(msg); },
+  onToast(msg, key, args) { showToast(key ? hostFailureText(msg, key, args) : msg); },
   onHardwareMessage(text, seconds, warning) { showHardwareMessage(text, seconds, warning); },
   onDrivePick(fields) { showDrivePick(fields); },
   onVt(m, t) { Vt.message(m, t); },
@@ -534,6 +534,22 @@ function syncGpsLost(s) {
   document.getElementById('gpslost').classList.toggle('show', !!s.gpsLost);
 }
 let toastMsg = '';
+// The host's failure texts with values (MainViewModel's keyed ReportFailure), sent as a key with
+// {name} placeholders and the values: the sentence is translated, the values (error messages, file
+// names, counts) stay as they are. Listed here so Tools/i18n-extract.py finds the keys.
+const HOST_FAILURE_KEYS = new Set([
+  tr('Error creating boundary: {error}'), tr('Error deleting field: {error}'), tr('Error creating field: {error}'),
+  tr('Error importing KML: {error}'), tr('Error importing ISO-XML: {error}'), tr('Debug dump failed: {error}'),
+  tr('Bug report capture failed: {error}'), tr('Bug report saved (no details): {path}'), tr('Bug report failed: {error}'),
+  tr('Need at least 3 points for a curve (have {n})'), tr('Need at least 2 points (have {n})'), tr('Save failed: {error}'),
+  tr('Failed to load: {file}'), tr('Failed to load: {error}'), tr('Import failed: {error}'),
+  tr('Need at least 3 points for contour (have {n})'), tr('Failed to open field: {error}'), tr('Error parsing KML: {error}'),
+  tr('Error importing KML boundary: {error}')]);
+function hostFailureText(msg, key, args) {
+  let a = null; try { a = JSON.parse(args); } catch (_) { /* no values */ }
+  return HOST_FAILURE_KEYS.has(key) && a && typeof a === 'object' ? tr(key, a) : msg;
+}
+
 function showToast(msg, ms = 4000) {
   const t = document.getElementById('toast');
   toastMsg = msg; // what was asked for; the element's text may be a translation

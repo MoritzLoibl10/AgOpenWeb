@@ -828,7 +828,18 @@ public static partial class RemoteServerWiring
                     };
 
                     // Refusals and failures (#109): shown as a short notification on the web.
-                    vm.FailureReported += msg => server.ShowToast(msg);
+                    // A keyed failure goes with its key and values, so the client translates the
+                    // sentence; the English text stays the fallback.
+                    vm.FailureReported += msg =>
+                    {
+                        if (vm.LastFailureKey is { } k)
+                        {
+                            var args = new System.Text.Json.Nodes.JsonObject();
+                            foreach (var (n, v) in k.Args) args[n] = v;
+                            server.ShowToast(msg, k.Key, args.ToJsonString());
+                        }
+                        else server.ShowToast(msg);
+                    };
 
                     // AiO board messages (PGN 221), when "AiO Board Msgs" is on (#110).
                     if (services.GetService<IAutoSteerService>() is { } hwSteer)

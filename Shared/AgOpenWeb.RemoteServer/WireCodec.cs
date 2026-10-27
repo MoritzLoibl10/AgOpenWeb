@@ -96,12 +96,18 @@ public static class WireCodec
         return frame;
     }
 
-    public static byte[] EncodeToast(string message)
+    public static byte[] EncodeToast(string message) => EncodeToast(message, "", "");
+
+    /// <summary>Append-only: after the English text, the translation key with {name} placeholders
+    /// and the values as a JSON object ("" when the text has none).</summary>
+    public static byte[] EncodeToast(string message, string key, string argsJson)
     {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms);
         w.Write(Toast);
         WriteStr(w, message);
+        WriteStr(w, key);
+        WriteStr(w, argsJson);
         return ms.ToArray();
     }
 

@@ -134,7 +134,7 @@ public partial class MainViewModel
                 }
                 catch (Exception ex)
                 {
-                    ReportFailure($"Error creating boundary: {ex.Message}");
+                    ReportFailure("Error creating boundary: {error}", ("error", ex.Message));
                 }
             }
 
@@ -844,7 +844,7 @@ public partial class MainViewModel
         }
         catch (Exception ex)
         {
-            ReportFailure($"Error creating boundary: {ex.Message}");
+            ReportFailure("Error creating boundary: {error}", ("error", ex.Message));
         }
     }
 
