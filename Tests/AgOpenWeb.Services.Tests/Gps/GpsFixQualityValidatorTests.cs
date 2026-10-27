@@ -92,4 +92,26 @@ public class GpsFixQualityValidatorTests
             Assert.That(reason, Is.Null);
         });
     }
+
+    // The GGA scale is not ordered by quality: compare by goodness.
+    [TestCase(4, 4, true)]
+    [TestCase(5, 4, false)]   // RTK float is not RTK fixed
+    [TestCase(6, 4, false)]   // estimated (dead reckoning)
+    [TestCase(7, 4, false)]   // manual input
+    [TestCase(8, 4, false)]   // simulation
+    [TestCase(4, 5, true)]    // RTK fixed is better than the RTK float minimum
+    [TestCase(5, 5, true)]
+    [TestCase(2, 5, false)]
+    [TestCase(5, 2, true)]
+    [TestCase(3, 2, true)]    // PPS counts as DGPS
+    [TestCase(6, 2, false)]
+    [TestCase(1, 2, false)]
+    [TestCase(0, 0, true)]    // no minimum: every fix
+    [TestCase(8, 0, true)]
+    public void Fix_quality_is_compared_by_goodness(int fixQuality, int minimum, bool accepted)
+    {
+        ConfigurationStore.Instance.Connections.MinFixQuality = minimum;
+        bool ok = GpsFixQualityValidator.IsAcceptable(fixQuality, 0.8, 1.0, out _, ConfigurationStore.Instance);
+        Assert.That(ok, Is.EqualTo(accepted));
+    }
 }

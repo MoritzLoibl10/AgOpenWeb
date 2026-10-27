@@ -18,7 +18,8 @@ public static class GpsFixQualityValidator
     /// <summary>
     /// Evaluate a parsed fix against <see cref="ConnectionConfig"/> thresholds.
     /// </summary>
-    /// <param name="fixQuality">GGA fix-quality value (0 = invalid … 4 = RTK fixed).</param>
+    /// <param name="fixQuality">GGA fix-quality value (0 = invalid … 4 = RTK fixed); compared with
+    /// the minimum by <see cref="Rank"/>.</param>
     /// <param name="hdop">Horizontal dilution of precision.</param>
     /// <param name="differentialAge">Age of differential corrections, seconds.
     /// Zero means no differential, which passes the age check.</param>
@@ -30,7 +31,9 @@ public static class GpsFixQualityValidator
     {
         var config = configStore.Connections;
 
-        if (fixQuality < config.MinFixQuality)
+        // By goodness, not by number: the GGA scale is not ordered (5 = RTK float is worse than
+        // 4 = RTK fixed; 6–8 are estimated, manual and simulated positions).
+        if (Rank(fixQuality) < Rank(config.MinFixQuality))
         {
             rejectionReason = $"Fix quality {fixQuality} below minimum {config.MinFixQuality}";
             return false;
@@ -54,4 +57,12 @@ public static class GpsFixQualityValidator
         rejectionReason = null;
         return true;
     }
+
+    /// <summary>
+    /// How good a GGA fix quality is: RTK fixed (4) > RTK float (5) > DGPS (2) and PPS (3) >
+    /// estimated (6) > autonomous GPS (1) > none (0); manual (7), simulation (8) and unknown
+    /// values rank as none. The order for 0–6 is the one NmeaParserServiceFast already uses to
+    /// pick the best GNS mode; a minimum of 0 still accepts every fix.
+    /// </summary>
+    public static int Rank(int fixQuality) => fixQuality switch { 4 => 5, 5 => 4, 2 => 3, 3 => 3, 6 => 2, 1 => 1, _ => 0 };
 }
