@@ -63,6 +63,14 @@ public static class ServiceCollectionExtensions
             new AndroidLocalNetworkInfoProvider(
                 global::Android.App.Application.Context
                 ?? throw new InvalidOperationException("Android application context is unavailable.")));
+        // One watcher for network changes; UDP, NTRIP and the bug report outbox subscribe (#385).
+        services.AddSingleton<AgOpenWeb.Services.Network.INetworkWatcher>(sp =>
+        {
+            var watcher = new AgOpenWeb.Services.Network.NetworkWatcher(
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<AgOpenWeb.Services.Network.NetworkWatcher>>());
+            AgOpenWeb.Android.Services.AndroidNetworkEvents.Register(global::Android.App.Application.Context, watcher);
+            return watcher;
+        });
         services.AddSingleton<IUdpCommunicationService, UdpCommunicationService>();
 
         // Core services
@@ -105,6 +113,10 @@ public static class ServiceCollectionExtensions
 
         // ISOBUS task controller link: PGN 240 heartbeat in, PGN 241 section control out
         services.AddSingleton<IIsobusTaskControllerService, AgOpenWeb.Services.Isobus.IsobusTaskControllerService>();
+#if AGISOSTACK
+        // ISOBUS virtual terminal for the VT card (built in only with SharpIsoTermDir)
+        services.AddSingleton<IVirtualTerminalService, AgOpenWeb.VirtualTerminal.VirtualTerminalService>();
+#endif
 
         // Smart WAS calibration (statistical WAS zero analyzer)
         services.AddSingleton<ISmartWasCalibrationService, SmartWasCalibrationService>();

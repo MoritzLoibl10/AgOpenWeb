@@ -61,6 +61,8 @@ public static class ServiceCollectionExtensions
 
         // Register Services
         services.AddSingleton<ILocalNetworkInfoProvider, SystemLocalNetworkInfoProvider>();
+        // One watcher for network changes; UDP, NTRIP and the bug report outbox subscribe (#385).
+        services.AddSingleton<AgOpenWeb.Services.Network.INetworkWatcher, AgOpenWeb.Services.Network.NetworkWatcher>();
         services.AddSingleton<IUdpCommunicationService, UdpCommunicationService>();
 
         // Core services
@@ -103,6 +105,10 @@ public static class ServiceCollectionExtensions
 
         // ISOBUS task controller link: PGN 240 heartbeat in, PGN 241 section control out
         services.AddSingleton<IIsobusTaskControllerService, AgOpenWeb.Services.Isobus.IsobusTaskControllerService>();
+#if AGISOSTACK
+        // ISOBUS virtual terminal for the VT card (built in only with SharpIsoTermDir)
+        services.AddSingleton<IVirtualTerminalService, AgOpenWeb.VirtualTerminal.VirtualTerminalService>();
+#endif
 
         // Smart WAS calibration (statistical WAS zero analyzer)
         services.AddSingleton<ISmartWasCalibrationService, SmartWasCalibrationService>();

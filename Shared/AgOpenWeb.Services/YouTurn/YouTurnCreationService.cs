@@ -153,7 +153,7 @@ namespace AgOpenWeb.Services.YouTurn
             // Dubins omega (CreateCurveOmegaTurn) for the straight-connector case.
             // Dubins is kept ONLY as that internal wide-turn fallback — it is no longer
             // a selectable style, because its shortest-path solution loops on close rows.
-            return CreateCurveSagittaTurn(input, turnOffset);
+            return CreateCurveSagittaTurn(input, turnOffset, keyhole: input.TurnType == YouTurnType.KeyholeStyle);
         }
 
         private bool CreateCurveOmegaTurn(YouTurnCreationInput input, double turnOffset)
@@ -328,7 +328,7 @@ namespace AgOpenWeb.Services.YouTurn
             // Offset the BASE reference by the SAME formula every other consumer uses for a
             // pass — current pass, displayed line, STEERING line
             // (GpsPipelineService.CalculateTrackGuidance) and the pass driven after the turn:
-            //   widthMinusOverlap * pathsAway + nudge.
+            //   widthMinusOverlap * pathsAway + edge offset + nudge (PassGeometry).
             // One definition, no per-turn measurement, so the exit leg is byte-aligned with
             // the cyan line and the line the tractor actually steers after completion.
             //
@@ -337,11 +337,17 @@ namespace AgOpenWeb.Services.YouTurn
             // point's stored heading; when the recorded curve ends before the headland the arc
             // seats on the tangent extension and a noisy end-point heading skewed the measured
             // offset by metres, plotting the exit leg off the next pass the tractor drives.)
+            //
+            // The pass count comes from the planned turn's width (TurnOffset), not the skip
+            // setting: snake, alternative and skip-worked turns pick their own target pass,
+            // and skip-and-fill forces the skip to at least 1, so an adjacent target used to
+            // get an exit leg two passes over, outside the field (#411).
             double widthMinusOverlap = input.ToolWidth - input.ToolOverlap;
-            int passDelta = (input.IsTurnLeft ^ input.IsHeadingSameWay)
-                ? (input.RowSkipsWidth + 1)
-                : -(input.RowSkipsWidth + 1);
-            double distAway = widthMinusOverlap * (input.HowManyPathsAway + passDelta) + input.NudgeDistance;
+            int passes = input.TurnOffset > 0 && widthMinusOverlap > 0
+                ? Math.Max(1, (int)Math.Round(input.TurnOffset / widthMinusOverlap))
+                : input.RowSkipsWidth + 1;
+            int passDelta = (input.IsTurnLeft ^ input.IsHeadingSameWay) ? passes : -passes;
+            double distAway = widthMinusOverlap * (input.HowManyPathsAway + passDelta) + input.PassEdgeOffset + input.NudgeDistance;
 
             // Create the next line
             nextCurve = BuildNewOffsetCurveList(input, distAway);
@@ -432,7 +438,8 @@ namespace AgOpenWeb.Services.YouTurn
         /// (<see cref="GetOffsetSemicirclePoints"/>) so the path meets the row
         /// tangentially instead of stepping curvature from 0 to 1/R.
         /// </summary>
-        private bool CreateCurveSagittaTurn(YouTurnCreationInput input, double turnOffset)
+        // keyhole: the counter-arc mirrored at the end too (YouTurnType.KeyholeStyle).
+        private bool CreateCurveSagittaTurn(YouTurnCreationInput input, double turnOffset, bool keyhole = false)
         {
             // Keep from making turns constantly - wait 1.5 seconds
             if (input.MakeUTurnCounter < 4)
@@ -497,7 +504,9 @@ namespace AgOpenWeb.Services.YouTurn
                 if (currentPos.Heading >= TWO_PI) currentPos.Heading -= TWO_PI;
                 head = currentPos.Heading;
 
-                ytList = SagittaTurnGeometry.BuildOffsetArc(currentPos, head, isTurningRight, input.TurnRadius, sagittaPullback, Math.PI);
+                ytList = keyhole
+                    ? SagittaTurnGeometry.BuildKeyhole(currentPos, head, isTurningRight, input.TurnRadius, Math.Abs(turnOffset))
+                    : SagittaTurnGeometry.BuildOffsetArc(currentPos, head, isTurningRight, input.TurnRadius, sagittaPullback, Math.PI);
                 if (ytList.Count == 0)
                 {
                     FailCreate();
@@ -667,7 +676,7 @@ namespace AgOpenWeb.Services.YouTurn
                     double widthMinusOverlap = input.ToolWidth - input.ToolOverlap;
                     double distAway = widthMinusOverlap * (input.HowManyPathsAway + ((input.IsTurnLeft ^ input.IsHeadingSameWay) ? input.RowSkipsWidth : -input.RowSkipsWidth))
                         + (input.IsHeadingSameWay ? input.ToolOffset : -input.ToolOffset) + input.NudgeDistance;
-                    distAway += (0.5 * widthMinusOverlap);
+                    distAway += input.PassEdgeOffset;
 
                     nextCurve = BuildNewOffsetCurveList(input, distAway);
 

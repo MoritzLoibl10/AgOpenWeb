@@ -53,6 +53,8 @@ public sealed class GpsPipelineService : IGpsPipelineService
     private readonly ITrackGuidanceService _trackGuidanceService;
     private readonly ISectionControlService _sectionControlService;
     private readonly ICoverageMapService _coverageMapService;
+    // The coverage test the U-turn planner reads worked passes from; one delegate, not one per cycle.
+    private readonly Func<double, double, bool> _isPointCovered;
     private readonly IAutoSteerService _autoSteerService;
     private readonly YouTurnGuidanceService _youTurnGuidanceService;
     private readonly YouTurnStateMachine _youTurnStateMachine;
@@ -193,6 +195,7 @@ public sealed class GpsPipelineService : IGpsPipelineService
 
     // ── Headland proximity ──────────────────────────────────────────────
     private readonly HeadlandDetectionService _headlandDetector = new();
+    private readonly PolygonIndexCache _headlandIndex = new(); // the hydraulic lift's test
 
     // ── RTK quality tracking ────────────────────────────────────────────
     private int _previousFixQuality;
@@ -229,6 +232,7 @@ public sealed class GpsPipelineService : IGpsPipelineService
         _trackGuidanceService = trackGuidanceService;
         _sectionControlService = sectionControlService;
         _coverageMapService = coverageMapService;
+        _isPointCovered = coverageMapService.IsPointCovered;
         _autoSteerService = autoSteerService;
         _youTurnGuidanceService = youTurnGuidanceService;
         _youTurnStateMachine = youTurnStateMachine;
@@ -646,6 +650,10 @@ public sealed class GpsPipelineService : IGpsPipelineService
             // Rebuilt by the state machine on the next turn (HandleSnakeCreation).
             _youTurn.SnakeSequence = null;
             _youTurn.SnakeIndex = -1;
+            // A planned turn aims at the pass the old skip chose: drop it so the next tick
+            // plans for the new one (AgOpenGPS cboxpRowWidth: ResetCreatedYouTurn unless
+            // triggered, #410). A turn already being driven is left alone.
+            if (!_youTurn.IsExecuting) YouTurnStateMachine.DiscardPlannedTurn(_youTurn);
         }
 
         // Boundary-follow curve (NoPassOffset): only SUPPRESS the free-drive nearest-pass snap
@@ -877,7 +885,8 @@ public sealed class GpsPipelineService : IGpsPipelineService
             isSkipWorkedMode,
             headlandCalculatedWidth,
             headlandDistanceConfig,
-            isAlternateSkipMode);
+            isAlternateSkipMode,
+            _isPointCovered);
 
         // Manual trigger — runs even when the auto gate would fail (e.g., YouTurn
         // toggle off). TriggerManual enforces its own preconditions (autosteer +
@@ -976,7 +985,8 @@ public sealed class GpsPipelineService : IGpsPipelineService
         // must NEVER leave the outer field boundary. Only skip for on-boundary pass 0.
         bool skipBoundaryCheck = isTrackOnBoundary && passNumber == 0;
         if (autoSteerEngaged && !skipBoundaryCheck
-            && !IsPointInsideBoundary(boundary, driftedEasting, driftedNorthing))
+            && boundary?.OuterBoundary is { IsValid: true } outer
+            && !outer.IsPointInside(driftedEasting, driftedNorthing))
         {
             autoSteerEngaged = false;
             autoSteerDisengaged = true;
@@ -1051,7 +1061,7 @@ public sealed class GpsPipelineService : IGpsPipelineService
         {
             var config2 = _configStore;
             double widthMinusOverlap = config2.ActualToolWidth - config2.Tool.Overlap;
-            double distAway = widthMinusOverlap * passNumber + nudgeOffset;
+            double distAway = Models.Track.PassGeometry.Offset(track, passNumber, widthMinusOverlap, nudgeOffset);
 
             // Curve tracks: extend the displayed (magenta) line straight to the U-turn so
             // there's no visible gap between the guidance line and the turn (the line the
@@ -1206,7 +1216,7 @@ public sealed class GpsPipelineService : IGpsPipelineService
                 // stale baseTrack set by the earlier block (when incoming passNumber
                 // was non-zero) stays pointing at the reference track, and the UI
                 // renders baseTrack + displayTrack at the same position (overlap).
-                baseTrack = nearestPass != 0 ? track : null;
+                baseTrack = ReferenceEquals(nearestDisplayTrack, track) ? null : track;
 
                 // #95: show where Pure Pursuit would aim if engaged now, so the operator
                 // can see the target (field vs. ditch) before engaging.
@@ -1260,10 +1270,15 @@ public sealed class GpsPipelineService : IGpsPipelineService
             data.SatellitesInUse, data.Hdop,
             driftedEasting, driftedNorthing);
 
-        // ── (9b) PGN 100 corrected position ─────────────────────────────
+        // ── (9b) PGN 100 corrected position, PGN 214 GPS data ───────────
         // AgOpenGPS sends pn.fix: the antenna with antenna offset, roll and drift applied
         // but not moved back to the pivot. Undo the fore/aft step of the transform above.
-        // Off unless ticked on the Network IO card.
+        // PGN 214 is the fix as it came in, which AgIO sends after parsing each sentence;
+        // GPS_Out takes speed, heading and fix quality from it (#364). AgIO only has real
+        // receivers; it goes out for the simulator too, so GPS_Out works in sim.
+        // Both off unless ticked on the Network IO card.
+        if (_configStore.Connections.SendCorrectedPosition)
+            _autoSteerService.SendGpsData(data);
         if (_configStore.Connections.SendCorrectedPosition && headingPlane != null && data.FixQuality > 0)
         {
             double fixE = driftedEasting + Math.Sin(headingRad) * _configStore.Vehicle.AntennaPivot;
@@ -1521,7 +1536,7 @@ public sealed class GpsPipelineService : IGpsPipelineService
 
         // Calculate parallel offset
         double widthMinusOverlap = config.ActualToolWidth - config.Tool.Overlap;
-        double distAway = widthMinusOverlap * passNumber + nudgeOffset;
+        double distAway = Models.Track.PassGeometry.Offset(track, passNumber, widthMinusOverlap, nudgeOffset);
 
         if (_cycleCounter % 50 == 0)
         {
@@ -1806,12 +1821,12 @@ public sealed class GpsPipelineService : IGpsPipelineService
         // cross-track error from the tractor position). See #261.
         double sampleDist = CalculatePerpendicularDistance(track, sampleEasting, sampleNorthing);
 
-        // Match AgOpen CABLine.BuildCurrentABLineList — subtract the accumulated nudge
-        // before rounding to the nearest pass. Without this, nudging the line perpendicular
-        // can cause the auto-select to fight the nudge each cycle.
-        double refDist = (sampleDist - nudgeOffset) / widthMinusOverlap;
-        int nearestPass = refDist < 0 ? (int)(refDist - 0.5) : (int)(refDist + 0.5);
-        double distAway = widthMinusOverlap * nearestPass + nudgeOffset;
+        // Match AgOpen CABLine.BuildCurrentABLineList — subtract the accumulated nudge (and
+        // the half width between the reference line and pass 0) before rounding to the
+        // nearest pass. Without the nudge, nudging the line perpendicular can cause the
+        // auto-select to fight the nudge each cycle.
+        int nearestPass = Models.Track.PassGeometry.Nearest(track, sampleDist, widthMinusOverlap, nudgeOffset);
+        double distAway = Models.Track.PassGeometry.Offset(track, nearestPass, widthMinusOverlap, nudgeOffset);
 
         Models.Track.Track? resultTrack = null;
         if (Math.Abs(distAway) < 0.01)
@@ -1921,29 +1936,6 @@ public sealed class GpsPipelineService : IGpsPipelineService
     // ══════════════════════════════════════════════════════════════════════
     // Geometry helpers (pure math, no UI)
     // ══════════════════════════════════════════════════════════════════════
-
-    private static bool IsPointInsideBoundary(Boundary? boundary, double easting, double northing)
-    {
-        if (boundary?.OuterBoundary == null || !boundary.OuterBoundary.IsValid)
-            return true;
-
-        var points = boundary.OuterBoundary.Points;
-        int n = points.Count;
-        bool inside = false;
-
-        for (int i = 0, j = n - 1; i < n; j = i++)
-        {
-            var pi = points[i];
-            var pj = points[j];
-
-            if (((pi.Northing > northing) != (pj.Northing > northing)) &&
-                (easting < (pj.Easting - pi.Easting) * (northing - pi.Northing) / (pj.Northing - pi.Northing) + pi.Easting))
-            {
-                inside = !inside;
-            }
-        }
-        return inside;
-    }
 
     private static double FindNearestSegmentHeading(List<Vec3> points, double easting, double northing)
     {
@@ -2081,10 +2073,8 @@ public sealed class GpsPipelineService : IGpsPipelineService
             VehiclePosition = toolPivot,
             Boundaries = new List<Models.Headland.BoundaryData>
             {
-                new Models.Headland.BoundaryData
-                {
-                    HeadlandLine = new List<Vec3>(headlandLine)
-                }
+                // The cycle's own copy (SetHeadlandLine), not copied again: only read.
+                new Models.Headland.BoundaryData { HeadlandLine = headlandLine }
             }
         };
 
@@ -2123,7 +2113,7 @@ public sealed class GpsPipelineService : IGpsPipelineService
         double ahead = Math.Min(Math.Abs(speed) * Math.Max(0, _configStore.Machine.LookAhead), 20.0);
         var probe = new Vec2(toolPosition.Easting + Math.Sin(toolHeading) * ahead,
                              toolPosition.Northing + Math.Cos(toolHeading) * ahead);
-        bool inCultivatedArea = Models.Base.GeometryMath.IsPointInPolygon(headlandLine, probe);
+        bool inCultivatedArea = _headlandIndex.Contains(headlandLine, probe.Easting, probe.Northing);
 
         return inCultivatedArea ? (byte)1 : (byte)2;
     }
