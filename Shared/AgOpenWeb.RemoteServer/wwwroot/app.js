@@ -11423,6 +11423,7 @@ const TabletExplain = (() => {
     ['[data-tile="tbk"]', tr('Back up and restore: one file with vehicles, tools, fields and NTRIP profiles.')],
     ['[data-tile="eama"]', tr('Fields from eAMA: import field boundaries from an eAMA Shapefile export.')],
     ['[data-tile="work"]', tr('Start work: step by step to field, track, direction and the ready light.')],
+    ['[data-tile="worklog"]', tr('Work log: one entry per working session with time, area from the guidance computer, tool and your notes.')],
     ['[data-tile="setup1"]', tr('First setup: language, vehicle, tool, NTRIP, kit check and the direction trap.')],
   ];
   const SEL = TEXT.map(t => t[0]).join(',');
@@ -11844,3 +11845,84 @@ const TabletLegal = (() => {
   }, 500);
   return { get done() { return done || acked(); }, show };
 })();
+
+// ===== Work log (feature/arbeitsdoku) =========================================================
+// One entry per working session: from the moment this device (holding control) sees a job open
+// on a field until the job closes, the field changes or the connection is gone. The numbers are
+// the host's: worked area of the job (Status.workedAreaSqM), ground covered once
+// (fieldData.actualAreaSqM), trip distance (fieldData.tripDistanceM), each at the start and at
+// the end of the session; the session's own share is the difference. Times are this tablet's
+// clock. Activity, product, amount and note are free text the operator types. Stored only in
+// this browser (localStorage); docs/Arbeitsdoku.md says what a store on the guidance computer
+// would need. The pure part (step, csv, sums) is tested by Tests/web/worklog.test.mjs.
+// worklog:begin
+const WorkLogCore = (() => {
+  const GAP_MS = 5 * 60 * 1000; // a reload or a short drop within this continues the session
+  const num = v => typeof v === 'number' && Number.isFinite(v) ? v : null;
+  // state: { entries: [...], open: entry|null }; s: snapshot of what the client sees; now: ms.
+  function step(state, s, now) {
+    const st = { entries: state.entries, open: state.open };
+    const active = !!(s && s.live && s.control && s.field && s.job);
+    const o = st.open;
+    if (o && (!active || o.field !== s.field || o.job !== s.job || now - o.seenAt > GAP_MS)) {
+      st.entries = st.entries.concat([{ ...o, open: false }]); st.open = null;
+    }
+    if (!active) return st;
+    const vals = { worked: num(s.worked), actual: num(s.actual), trip: num(s.trip) };
+    if (!st.open) {
+      st.open = { id: 'w' + now.toString(36) + Math.random().toString(36).slice(2, 6), field: s.field, job: s.job,
+        workType: s.workType || '', start: now, end: now, seenAt: now,
+        workedStart: vals.worked, workedEnd: vals.worked, actualStart: vals.actual, actualEnd: vals.actual,
+        tripStart: vals.trip, tripEnd: vals.trip, tool: s.tool || '', vehicle: s.vehicle || '', widthM: num(s.widthM),
+        activity: '', product: '', amount: '', note: '', open: true };
+      return st;
+    }
+    const e = { ...st.open, end: now, seenAt: now };
+    if (vals.worked != null) { if (e.workedStart == null) e.workedStart = vals.worked; e.workedEnd = vals.worked; }
+    if (vals.actual != null) { if (e.actualStart == null) e.actualStart = vals.actual; e.actualEnd = vals.actual; }
+    if (vals.trip != null) { if (e.tripStart == null) e.tripStart = vals.trip; e.tripEnd = vals.trip; }
+    if (num(s.widthM) != null) e.widthM = s.widthM;
+    if (s.tool) e.tool = s.tool;
+    if (s.vehicle) e.vehicle = s.vehicle;
+    if (s.workType) e.workType = s.workType;
+    st.open = e;
+    return st;
+  }
+  // Session share of a host counter; null when it went down during the session (area deleted,
+  // trip reset): then only the host's job totals are shown, nothing is made up.
+  const delta = (a, b) => a == null || b == null || b < a ? null : b - a;
+  const sessionArea = e => delta(e.workedStart, e.workedEnd);
+  const overlap = e => e.workedEnd != null && e.actualEnd != null && e.workedEnd >= e.actualEnd ? e.workedEnd - e.actualEnd : null;
+  const season = e => new Date(e.start).getFullYear();
+  function sums(entries) {
+    const out = new Map();
+    for (const e of entries) {
+      const k = e.field + '\u0000' + season(e);
+      const r = out.get(k) || { field: e.field, season: season(e), count: 0, ms: 0, areaSqM: 0, areaMissing: 0 };
+      r.count++; r.ms += Math.max(0, e.end - e.start);
+      const a = sessionArea(e); if (a == null) r.areaMissing++; else r.areaSqM += a;
+      out.set(k, r);
+    }
+    return [...out.values()].sort((a, b) => a.field.localeCompare(b.field) || b.season - a.season);
+  }
+  // CSV for Excel: ";" between fields, German decimal comma, UTF-8 with BOM, CRLF. Areas in ha
+  // with 2 decimals and distance in m without decimals, as the app shows them.
+  const p2 = n => String(n).padStart(2, '0');
+  const dDate = ms => { const d = new Date(ms); return p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '.' + d.getFullYear(); };
+  const dTime = ms => { const d = new Date(ms); return p2(d.getHours()) + ':' + p2(d.getMinutes()); };
+  const dur = ms => { const m = Math.round(Math.max(0, ms) / 60000); return Math.floor(m / 60) + ':' + p2(m % 60); };
+  const ha = m2 => m2 == null ? '' : (m2 * 0.0001).toFixed(2).replace('.', ',');
+  const metres = m => m == null ? '' : m.toFixed(0);
+  const widthTxt = w => w == null ? '' : w.toFixed(2).replace('.', ',');
+  const cell = v => { const t = String(v == null ? '' : v); return /[;"\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  function csv(entries, head) {
+    const rows = [head];
+    for (const e of entries) rows.push([e.field, e.job, e.workType, dDate(e.start), dTime(e.start), dTime(e.end), dur(e.end - e.start),
+      ha(sessionArea(e)), ha(e.workedEnd), ha(e.actualEnd), ha(overlap(e)), metres(delta(e.tripStart, e.tripEnd)),
+      e.tool, widthTxt(e.widthM), e.vehicle, e.activity, e.product, e.amount, e.note]);
+    return '﻿' + rows.map(r => r.map(cell).join(';')).join('\r\n') + '\r\n';
+  }
+  return { step, sums, csv, sessionArea, overlap, season, delta, dDate, dTime, dur, ha, GAP_MS };
+})();
+// worklog:end
+
