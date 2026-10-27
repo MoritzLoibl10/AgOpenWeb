@@ -19,8 +19,11 @@ Erledigt (Oktober 2026): Lizenztext von CanvasKit liegt in `wwwroot/vendor/canva
 
 1. **Android und iOS:** Indirekte Pakete (AndroidX, Mono-Laufzeit u. a.) sind nicht aufgelistet;
    eine Liste ließe sich aus `project.assets.json` eines Release-Builds erzeugen.
-2. **Symbole (`wwwroot/icons`) und Töne (`wwwroot/sounds`):** stammen aus upstream bzw. AgOpenGPS.
-   Ob sie unter Apache 2.0 stehen (upstream hat die Lizenz in #360/#363 vereinheitlicht), ist nicht
-   eigens belegt.
+2. **Symbole (`wwwroot/icons`) und Töne (`wwwroot/sounds`):** belegt in
+   `docs/Herkunft-Symbole-Toene.md` (Oktober 2026): 10 Töne und 164 Symbole sind byte-gleich im
+   heutigen AgOpenGPS (Apache 2.0), 22 Symbole sind im Projekt entstanden, 2 sind Fork-eigen.
+   **Offen:** `Headland.wav` (Fassung aus AgOpenGPS v6.4.0, damals nicht unter Apache 2.0; heute dort eine andere
+   Datei), die Quelle von `ST_NerdAdv.png` und `AutoSteerGray.png`, die Zustimmung der Autoren für
+   Dateien vor dem 17.05.2026 (upstream).
 3. Die Lizenztexte selbst (MIT, Boost, CC BY 4.0) liegen nicht in der App; die Seite nennt sie nur.
 4. Die CanvasKit-Version steht nur im Code-Kommentar; die Datei selbst trägt keine Versionsnummer.
