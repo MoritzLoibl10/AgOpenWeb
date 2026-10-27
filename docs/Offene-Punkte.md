@@ -411,12 +411,12 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 - **Vorschlag:** Upstream-Schlüssel wiederverwenden; „Current: “ als upstream-PR.
 - **Host-Änderung nötig:** nein
 
-### 29. Name auf Desktop/iOS und in den Artefakten weiter „AgOpenWeb“
+### 29. Name auf iOS und in den Artefakten weiter „AgOpenWeb“
 - **Priorität:** niedrig
 - **Dateien:** `Platforms/AgOpenWeb.Desktop/Launcher/LauncherEntry.cs` 38, `Platforms/AgOpenWeb.iOS/Info.plist`, Workflow-Artefakte `agopenweb-*.zip/.apk`.
-- **Beschreibung:** Nur Android ist umbenannt (genehmigte Ausnahme). Die Weboberfläche zeigt
-  überall den Markennamen. Der Produktname ist noch der Platzhalter `[PRODUKTNAME]`; der
-  Workflow warnt jetzt.
+- **Beschreibung:** Produktname „LM Steering Solutions“ (Oktober 2026): Weboberfläche, Android, Desktop-Fenster
+  und Windows-Installer zeigen ihn. iOS und die Dateinamen der Artefakte heißen weiter AgOpenWeb.
+- **Stand:** Desktop erledigt (Ausnahme im Auftrag).
 - **Vorschlag:** Nach der Namenswahl entscheiden, ob Desktop und Artefakte mitziehen (neue
   Ausnahme).
 - **Host-Änderung nötig:** ja (Desktop-Kopf)
