@@ -45,3 +45,17 @@ die ZIPs des Profil-Backups, `/bugreports/` nur Diagnose-ZIPs.
 Menü → „Arbeitsprotokoll“: Filter nach Schlag, Saison (Kalenderjahr des Beginns) und Suchtext;
 Summen je Schlag und Saison (Anzahl Sitzungen, Dauer, Fläche; Sitzungen ohne Fläche werden
 gezählt und genannt). Antippen eines Eintrags zeigt alle Werte und die vier Freitextfelder.
+
+## Teil D – Export
+- **CSV** („CSV exportieren“): Trennzeichen „;“, Dezimalkomma, UTF-8 mit BOM, Zeilenende CRLF,
+  Text mit „;“ oder Anführungszeichen in Anführungszeichen. Flächen in ha mit 2 Nachkommastellen
+  und Breite in m mit 2, Strecke in m ohne Nachkommastellen, wie die App sie anzeigt. Es werden die
+  gefilterten Einträge exportiert.
+- **„CSV kopieren“:** derselbe Inhalt in die Zwischenablage, für Geräte ohne Download.
+- **Druckseite je Schlag:** eine Seite pro Schlag mit Summen und Tabelle, über die Druckfunktion
+  des Browsers (dort „Als PDF speichern“).
+- Jede Ausgabe trägt den Satz, dass nicht geprüft ist, ob sie gesetzliche Aufzeichnungspflichten
+  erfüllt.
+- **Grenzen:** In der Android- und iOS-App-Ansicht gibt es weder Download noch Drucken (keine
+  Anbindung in `Platforms/`); dort bleibt „CSV kopieren“. Im Browser am PC und im Desktop-Fenster
+  funktionieren beide (im Desktop-Fenster nicht eigens geprüft).

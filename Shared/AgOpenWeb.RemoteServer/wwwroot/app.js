@@ -12047,6 +12047,9 @@ const TabletWorkLog = (() => {
     // Export, print, file
     const er = el('div', 'tb-row');
     const btn = (label, fn, pri) => { const b = el('button', 'tp-btn' + (pri ? ' pri' : ''), T(label)); onTap(b, fn); er.appendChild(b); return b; };
+    btn(tr('Export CSV'), () => download('arbeitsprotokoll.csv', 'text/csv;charset=utf-8', C.csv(list, HEAD())), true);
+    btn(tr('Copy CSV'), () => copy(C.csv(list, HEAD()).replace(/^﻿/, '')));
+    btn(tr('Print page per field'), () => printFields(list));
     box.appendChild(er);
     box.appendChild(el('div', 'tp-note', T(NOTE)));
     shB.appendChild(box);
@@ -12082,6 +12085,47 @@ const TabletWorkLog = (() => {
     });
     r.append(ok, back, del); box.appendChild(r);
     shB.appendChild(box);
+  }
+
+  // --- Files -----------------------------------------------------------------------------------
+  // Browser download. The Android/iOS app views have no download or print hook (see
+  // docs/Arbeitsdoku.md); "Copy CSV" is the way there.
+  function download(name, type, text) {
+    try {
+      const url = URL.createObjectURL(new Blob([text], { type }));
+      const a = el('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      msg = tr('File created: {f}. If nothing is downloaded on this tablet, use "Copy CSV".', { f: name });
+    } catch (_) { msg = tr('Download not possible here. Use "Copy CSV".'); }
+    last = ''; render();
+  }
+  async function copy(text) {
+    try { await navigator.clipboard.writeText(text); msg = tr('CSV copied. Paste it into a spreadsheet or an e-mail.'); }
+    catch (_) { msg = tr('Copying is not possible in this browser.'); }
+    last = ''; render();
+  }
+  // --- Print: one page per field, through the browser's print (save as PDF there) -------------
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  function printFields(list) {
+    const by = new Map(); for (const e of list) { if (!by.has(e.field)) by.set(e.field, []); by.get(e.field).push(e); }
+    let h = '';
+    for (const [field, es] of by) {
+      const s = C.sums(es);
+      h += '<section class="wl-page"><h1>' + esc(T(tr('Work log'))) + ': ' + esc(field) + '</h1>'
+        + '<p>' + s.map(r => esc(r.season + ': ' + tr('Sessions: {n}', { n: r.count }) + ' · ' + C.dur(r.ms) + ' h · ' + fmtArea(r.areaSqM))).join('<br>') + '</p>'
+        + '<table><tr>' + [tr('Date'), tr('Time'), tr('Job'), tr('Area this session'), tr('Tool'), tr('Working width'), tr('Activity'), tr('Product / variety'), tr('Amount'), tr('Note')]
+          .map(k => '<th>' + esc(T(k)) + '</th>').join('') + '</tr>'
+        + es.slice().sort((a, b) => a.start - b.start).map(e => '<tr>' + [C.dDate(e.start), C.dTime(e.start) + '–' + C.dTime(e.end), e.job,
+          C.sessionArea(e) == null ? '—' : fmtArea(C.sessionArea(e)), e.tool, e.widthM == null ? '' : fmtUnit(e.widthM, 'm'), e.activity, e.product, e.amount, e.note]
+          .map(v => '<td>' + esc(v) + '</td>').join('') + '</tr>').join('') + '</table>'
+        + '<p class="wl-n">' + esc(T(NOTE)) + '</p></section>';
+    }
+    printBox.innerHTML = h;
+    document.documentElement.setAttribute('data-print', 'worklog');
+    const done = () => { document.documentElement.removeAttribute('data-print'); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    try { window.print(); } catch (_) { done(); }
+    setTimeout(() => { if (document.documentElement.hasAttribute('data-print')) { msg = tr('If no print dialog opened, this app view cannot print; use a browser on a PC.'); last = ''; render(); } }, 1500);
   }
 
   // --- Menu tile (in the field) ---------------------------------------------------------------
