@@ -11512,6 +11512,8 @@ const TabletExplain = (() => {
 // Each step only opens what exists (Fields and Jobs, the track manager, the direction card's
 // own two answers) and moves on by itself when the state is there. It finishes only on a green
 // ready light and never switches steering on: that stays the operator's Steer button.
+// Tested by Tests/web/work.test.mjs (block work:begin/end).
+// work:begin
 const TabletWork = (() => {
   const T = k => I18n.text(k);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
@@ -11617,8 +11619,9 @@ const TabletWork = (() => {
     onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); start(); });
     f.insertBefore(t, f.firstChild);
   }, 300);
-  return { start };
+  return { start, steps, finish };
 })();
+// work:end
 
 // ===== First setup (feature/bedienung-2) ======================================================
 // A guide through the first setup: language, vehicle, tool and working width (the existing
@@ -11627,6 +11630,8 @@ const TabletWork = (() => {
 // direction trap. It enters no values itself: everything is typed in the existing dialogs, an
 // empty field stays empty. Shown by itself once, while no vehicle profile exists (on the device
 // that has control), skippable at every step, and again any time from the menu ("First setup").
+// Tested by Tests/web/firstsetup.test.mjs (block firstsetup:begin/end).
+// firstsetup:begin
 const TabletFirstSetup = (() => {
   const T = k => I18n.text(k);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
@@ -11767,8 +11772,9 @@ const TabletFirstSetup = (() => {
     onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(0); });
     sBox.insertBefore(t, sBox.firstChild);
   }, 300);
-  return { open };
+  return { open, get isOpen() { return isOpen(); } };
 })();
+// firstsetup:end
 
 // ===== Update check (feature/auslieferung) ====================================================
 // Asks GitHub for the releases of this fork (BRAND.source) and says whether a newer one exists:
