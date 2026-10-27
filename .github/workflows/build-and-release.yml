@@ -80,10 +80,16 @@ jobs:
 
       # Fork: web client tests (Tests/web). Playwright + Chromium for the browser test
       # (long-press.test.mjs), installed outside the repo; tests without a browser need neither.
+      # Only Chromium's headless shell, no system packages (the runner image has them), cached.
+      - name: Cache Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-1.63.0-chromium-shell-${{ runner.os }}
       - name: Run web client tests
         run: |
-          npm install --no-save --prefix "$RUNNER_TEMP/pw" playwright@1.63.0
-          "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
+          npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/pw" playwright@1.63.0
+          "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --only-shell chromium
           AOW_REQUIRE_BROWSER=1 NODE_PATH="$RUNNER_TEMP/pw/node_modules" node --test Tests/web/*.test.mjs
 
       - name: Run Model Tests

@@ -387,7 +387,7 @@
   "Display only. Steering is switched on with the Steer button as before.": "Display only. Steering is switched on with the Steer button as before.",
   "Dist": "Dist",
   "Distance from boundary": "Distance from boundary",
-  "Do not use automatic steering on public roads or near people.": "Do not use automatic steering on public roads or near people.",
+  "Do not use on public roads. Switch steering off as soon as people are in the driving area.": "Do not use on public roads. Switch steering off as soon as people are in the driving area.",
   "Does the vehicle face the way it drives?": "Does the vehicle face the way it drives?",
   "Does the vehicle face the way it drives? With one antenna the direction is learned from the first travel; backing first, it is learned the wrong way round.": "Does the vehicle face the way it drives? With one antenna the direction is learned from the first travel; backing first, it is learned the wrong way round.",
   "Done": "Done",

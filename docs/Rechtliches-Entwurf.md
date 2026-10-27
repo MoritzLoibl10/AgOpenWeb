@@ -11,7 +11,7 @@ Gespeichert wird die Bestätigung nur auf dem Gerät (Browser-Speicher), mit der
 1. Diese App ist eine Lenkhilfe. Sie ersetzt nicht den Fahrer.
 2. Du bleibst jederzeit für das Fahrzeug, das Gerät und deine Umgebung verantwortlich. Bleib am Lenkrad und greif ein, wenn etwas nicht stimmt.
 3. Die App wird ohne Garantie bereitgestellt. Sie kann Fehler haben; GPS, Korrekturdaten, Module und Einstellungen können falsche Werte liefern.
-4. Die automatische Lenkung nicht auf öffentlichen Straßen und nicht in der Nähe von Menschen verwenden.
+4. Nicht auf öffentlichen Straßen verwenden. Lenkung ausschalten, sobald Personen im Fahrbereich sind.
 5. Vor dem ersten Einsatz alles in Ruhe prüfen: Maße, Lenkrichtung, Abschalten der Lenkung. Diese Version ist eine Testversion.
 6. Die App steht unter der Apache License 2.0. Sie ist eine geänderte Fassung von AgOpenWeb; der Quellcode ist offen.
 
