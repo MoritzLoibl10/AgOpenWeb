@@ -448,6 +448,30 @@ public sealed class RemoteServerHost
                 new[] { ("Content-Disposition", "attachment"), ("Cache-Control", "no-store") });
         });
 
+        // Work log on the guidance computer (fork, feature/host-paket): GET reads it, like
+        // everything else observers see; POST merges the tablet's copy in (only the screen
+        // holding control, like any change) and replies with the merged log.
+        server.MapGet("/worklog", () => SimpleWebServer.Response.Text(
+            AgOpenWeb.Services.WorkLog.WorkLogStore.Read(AgOpenWeb.Services.AppDataRoot.Documents).ToJsonString(),
+            "application/json", new[] { ("Cache-Control", "no-store") }));
+        server.MapPost("/worklog", AgOpenWeb.Services.WorkLog.WorkLogStore.MaxBytes, req =>
+        {
+            if (!req.Query.TryGetValue("client", out var c) || !Guid.TryParse(c, out var client) || !authority.HoldsFresh(client))
+                return Task.FromResult(new SimpleWebServer.Response(403, "text/plain", "view only"u8.ToArray()));
+            var doc = AgOpenWeb.Services.WorkLog.WorkLogStore.Parse(req.Body);
+            if (doc is null) return Task.FromResult(new SimpleWebServer.Response(400, "text/plain", "not a work log"u8.ToArray()));
+            try
+            {
+                var merged = AgOpenWeb.Services.WorkLog.WorkLogStore.MergeInto(AgOpenWeb.Services.AppDataRoot.Documents, doc);
+                return Task.FromResult(SimpleWebServer.Response.Text(merged.ToJsonString(), "application/json",
+                    new[] { ("Cache-Control", "no-store") }));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return Task.FromResult(new SimpleWebServer.Response(503, "text/plain", "busy"u8.ToArray()));
+            }
+        });
+
         await server.StartAsync().ConfigureAwait(false);
         _broadcaster.Start();
         _server = server;

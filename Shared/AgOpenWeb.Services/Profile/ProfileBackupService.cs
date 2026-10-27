@@ -21,7 +21,8 @@ namespace AgOpenWeb.Services.Profile;
 /// root as one ZIP, and back again. Export: <c>Vehicles/*.json</c>, <c>Tools/*.json</c> and
 /// <c>Fields/&lt;field&gt;/…</c> without the jobs' worked area (<c>jobs/</c>), with a
 /// <c>manifest.json</c> (format, app version, date, every file with size and SHA-256), and the
-/// NTRIP profiles (<c>NtripProfiles/*.json</c>) with the password blanked. The app settings are
+/// NTRIP profiles (<c>NtripProfiles/*.json</c>) with the password blanked, and the work log
+/// (<c>WorkLog/worklog.json</c>, merged on import rather than replaced). The app settings are
 /// not in it (the AgShare key); JSON properties that look like a secret are blanked anyway. On
 /// import an NTRIP profile keeps the password already stored on this device; one left without
 /// is reported (<see cref="ApplyResult.NeedPassword"/>). Import: a ZIP of this format only, checked
@@ -37,7 +38,7 @@ public static class ProfileBackupService
     public const string AutoPrefix = "before-import_";
     private const string ManifestName = "manifest.json";
     private const long MaxTotalBytes = 1L << 30; // 1 GB uncompressed: more is not a profile backup
-    private static readonly string[] Roots = { "Vehicles", "Tools", "Fields", "NtripProfiles" };
+    private static readonly string[] Roots = { "Vehicles", "Tools", "Fields", "NtripProfiles", WorkLog.WorkLogStore.Folder };
     private static readonly Regex Secret = new("(password|passwd|apikey|api_key|secret|token|username)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     // NTRIP profiles keep the user name (it is no secret on its own; the password is re-entered).
     private static readonly Regex NtripSecret = new("(password|passwd|apikey|api_key|secret|token)", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -101,6 +102,8 @@ public static class ProfileBackupService
     /// <summary>The files a backup takes, as (path in the ZIP with '/', full path).</summary>
     private static IEnumerable<(string Rel, string Full)> Collect(string dataRoot)
     {
+        var log = WorkLog.WorkLogStore.PathFor(dataRoot);
+        if (File.Exists(log)) yield return (WorkLog.WorkLogStore.Folder + "/" + WorkLog.WorkLogStore.FileName, log);
         foreach (var root in new[] { "Vehicles", "Tools", "NtripProfiles" })
         {
             var dir = Path.Combine(dataRoot, root);
@@ -208,6 +211,13 @@ public static class ProfileBackupService
                 Directory.CreateDirectory(Path.GetDirectoryName(full)!);
                 var bytes = entries[rel];
                 if (g.Kind == "ntrip") bytes = KeepPassword(bytes, full, g.Name, needPassword);
+                // The work log is merged, not replaced: sessions recorded since the backup stay.
+                if (g.Kind == "worklog")
+                {
+                    if (WorkLog.WorkLogStore.Parse(bytes) is not { } doc) throw new BackupException("damaged", rel);
+                    WorkLog.WorkLogStore.MergeInto(dataRoot, doc);
+                    continue;
+                }
                 var tmp = full + ".import.tmp";
                 File.WriteAllBytes(tmp, bytes);
                 File.Move(tmp, full, overwrite: true);
@@ -307,6 +317,7 @@ public static class ProfileBackupService
         if (string.IsNullOrEmpty(rel) || rel.Contains('\\') || rel.StartsWith('/') || rel.Contains(':')) return false;
         var p = rel.Split('/');
         if (p.Any(s => s.Length == 0 || s == "." || s == "..") || !Roots.Contains(p[0])) return false;
+        if (p[0] == WorkLog.WorkLogStore.Folder) return p.Length == 2 && p[1] == WorkLog.WorkLogStore.FileName;
         if (p[0] is "Vehicles" or "Tools" or "NtripProfiles") return p.Length == 2 && p[1].EndsWith(".json", StringComparison.OrdinalIgnoreCase);
         if (p.Length < 3 || p[2].Equals("jobs", StringComparison.OrdinalIgnoreCase)) return false;
         return !p[^1].EndsWith(".tmp", StringComparison.OrdinalIgnoreCase);
@@ -325,6 +336,7 @@ public static class ProfileBackupService
                 "Vehicles" => ("vehicle", ProfileName(p[1])),
                 "Tools" => ("tool", ProfileName(p[1])),
                 "NtripProfiles" => ("ntrip", p[1][..^".json".Length]),
+                WorkLog.WorkLogStore.Folder => ("worklog", WorkLog.WorkLogStore.FileName),
                 _ => ("field", p[1]),
             };
             if (!d.TryGetValue(k, out var l)) d[k] = l = new List<string>();
@@ -354,6 +366,15 @@ public static class ProfileBackupService
             // stored one is kept on import).
             if (kind == "ntrip") cur = Scrub(rel, cur);
             if (cur.AsSpan().SequenceEqual(entries[rel])) continue;
+            if (kind == "worklog")
+            {
+                // Merged on import: say how many sessions it adds, "same" if none.
+                var added = WorkLogAdds(cur, entries[rel]);
+                if (added == 0) continue;
+                same = false;
+                changes.Add("+ " + added.ToString(CultureInfo.InvariantCulture));
+                continue;
+            }
             same = false;
             if (kind == "field") changes.Add("~ " + rel[(rel.IndexOf('/', 7) + 1)..]);
             else changes.AddRange(JsonChanges(cur, entries[rel]));
@@ -361,6 +382,16 @@ public static class ProfileBackupService
         var state = !any ? ItemState.New : same ? ItemState.Same : ItemState.Overwrites;
         if (state == ItemState.New) changes.Clear();
         return new Item(kind, name, state, changes.Take(8).ToList());
+    }
+
+    /// <summary>Sessions (or newer versions of them) the backup's work log adds to the stored one.</summary>
+    private static int WorkLogAdds(byte[] cur, byte[] imp)
+    {
+        var c = WorkLog.WorkLogStore.Parse(cur) ?? WorkLog.WorkLogStore.Empty();
+        var i = WorkLog.WorkLogStore.Parse(imp);
+        if (i is null) return 0;
+        var before = c["entries"]!.AsArray().Select(e => e!.ToJsonString()).ToHashSet(StringComparer.Ordinal);
+        return WorkLog.WorkLogStore.Merge(c, i)["entries"]!.AsArray().Count(e => !before.Contains(e!.ToJsonString()));
     }
 
     /// <summary>"Vehicle.Wheelbase: 2.5 → 3" for the leaves that differ.</summary>

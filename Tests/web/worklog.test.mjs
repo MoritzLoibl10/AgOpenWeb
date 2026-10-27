@@ -67,3 +67,16 @@ test('CSV: BOM, ";" and decimal comma, quoted text, CRLF', () => {
   assert.ok(out.includes('"nass; ""Senke"""'));
   assert.ok(out.endsWith('\r\n'));
 });
+
+// Host-paket B: the tablet's copy and the guidance computer's merge by id (WorkLogStore.Merge).
+const E = (id, start, o = {}) => ({ id, field: 'Breitenacker', job: 'Mähen', start, end: start + MIN, ...o });
+test('merge: no duplicates, the later change wins, deleted stays deleted, open stays local', () => {
+  const tablet = { entries: [E('a', T0), E('b', T0 + MIN, { note: 'alt', mod: 1 })], deleted: ['x'] };
+  const host = { entries: [E('a', T0), E('b', T0 + MIN, { note: 'neu', mod: 2 }), E('c', T0 + 2 * MIN), E('x', T0 + 3 * MIN), E('o', T0 + 4 * MIN, { open: true })], deleted: [] };
+  const m = C.merge(tablet, host);
+  assert.deepEqual(m.entries.map(e => e.id), ['a', 'b', 'c']);
+  assert.equal(m.entries[1].note, 'neu');
+  assert.deepEqual(m.deleted, ['x']);
+  assert.deepEqual(C.merge(m, m).entries.map(e => e.id), ['a', 'b', 'c'], 'merging again changes nothing');
+  assert.deepEqual(C.merge(host, tablet).entries.map(e => [e.id, e.note]), m.entries.map(e => [e.id, e.note]), 'same result either way round');
+});

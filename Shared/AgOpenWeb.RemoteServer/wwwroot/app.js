@@ -11046,7 +11046,7 @@ const TabletBackup = (() => {
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
   const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
   const STILL_MPS = 0.15;
-  const KIND = { vehicle: tr('Vehicle'), tool: tr('Tool'), field: tr('Field'), ntrip: tr('NTRIP profile') };
+  const KIND = { vehicle: tr('Vehicle'), tool: tr('Tool'), field: tr('Field'), ntrip: tr('NTRIP profile'), worklog: tr('Work log') };
   const STATE = { new: tr('new'), overwrites: tr('overwrites'), same: tr('same') };
   const ERR = {
     notzip: tr('The file is not a readable ZIP file.'),
@@ -11851,16 +11851,17 @@ const TabletLegal = (() => {
 // the host's: worked area of the job (Status.workedAreaSqM), ground covered once
 // (fieldData.actualAreaSqM), trip distance (fieldData.tripDistanceM), each at the start and at
 // the end of the session; the session's own share is the difference. Times are this tablet's
-// clock. Activity, product, amount and note are free text the operator types. Stored only in
-// this browser (localStorage); docs/Arbeitsdoku.md says what a store on the guidance computer
-// would need. The pure part (step, csv, sums) is tested by Tests/web/worklog.test.mjs.
+// clock. Activity, product, amount and note are free text the operator types. Kept in this
+// browser (localStorage) and on the guidance computer (/worklog, WorkLog/worklog.json), merged by
+// entry id: the later change wins (mod, then end), a deleted id stays deleted (host-paket B). The
+// pure part (step, merge, csv, sums) is tested by Tests/web/worklog.test.mjs.
 // worklog:begin
 const WorkLogCore = (() => {
   const GAP_MS = 5 * 60 * 1000; // a reload or a short drop within this continues the session
   const num = v => typeof v === 'number' && Number.isFinite(v) ? v : null;
   // state: { entries: [...], open: entry|null }; s: snapshot of what the client sees; now: ms.
   function step(state, s, now) {
-    const st = { entries: state.entries, open: state.open };
+    const st = { entries: state.entries, open: state.open, deleted: state.deleted || [] };
     const active = !!(s && s.live && s.control && s.field && s.job);
     const o = st.open;
     if (o && (!active || o.field !== s.field || o.job !== s.job || now - o.seenAt > GAP_MS)) {
@@ -11921,7 +11922,20 @@ const WorkLogCore = (() => {
       e.tool, widthTxt(e.widthM), e.vehicle, e.activity, e.product, e.amount, e.note]);
     return '﻿' + rows.map(r => r.map(cell).join(';')).join('\r\n') + '\r\n';
   }
-  return { step, sums, csv, sessionArea, overlap, season, delta, dDate, dTime, dur, ha, GAP_MS };
+  // Same rule as WorkLogStore.Merge on the host: union by id, the later change wins, deleted
+  // ids removed, open sessions not taken (each device keeps its own until it closes).
+  function merge(a, b) {
+    const deleted = [...new Set([...(a.deleted || []), ...(b.deleted || [])].filter(x => typeof x === 'string' && x))].sort();
+    const gone = new Set(deleted), byId = new Map();
+    const newer = (x, y) => (num(x.mod) || 0) !== (num(y.mod) || 0) ? (num(x.mod) || 0) > (num(y.mod) || 0) : (num(x.end) || 0) > (num(y.end) || 0);
+    for (const d of [a, b]) for (const e of d.entries || []) {
+      if (!e || typeof e.id !== 'string' || !e.id || num(e.start) == null || gone.has(e.id) || e.open === true) continue;
+      const h = byId.get(e.id); if (!h || newer(e, h)) byId.set(e.id, e);
+    }
+    const entries = [...byId.values()].sort((x, y) => x.start - y.start || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+    return { entries, deleted };
+  }
+  return { step, merge, sums, csv, sessionArea, overlap, season, delta, dDate, dTime, dur, ha, GAP_MS };
 })();
 // worklog:end
 
@@ -11932,8 +11946,8 @@ const TabletWorkLog = (() => {
   const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
   const KEY = 'aow.worklog.v1';
   const C = WorkLogCore;
-  let state = { entries: [], open: null }, storeOk = true, dirty = false, lastSave = 0;
-  try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); if (v && Array.isArray(v.entries)) state = { entries: v.entries, open: v.open || null }; }
+  let state = { entries: [], open: null, deleted: [] }, storeOk = true, dirty = false, lastSave = 0;
+  try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); if (v && Array.isArray(v.entries)) state = { entries: v.entries, open: v.open || null, deleted: Array.isArray(v.deleted) ? v.deleted : [] }; }
   catch (_) { storeOk = false; }
   function save(force) {
     const now = Date.now();
@@ -11941,6 +11955,30 @@ const TabletWorkLog = (() => {
     try { localStorage.setItem(KEY, JSON.stringify(state)); storeOk = true; dirty = false; lastSave = now; } catch (_) { storeOk = false; }
   }
   window.addEventListener('pagehide', () => save(true));
+
+  // --- Guidance computer -------------------------------------------------------------------------
+  // The tablet holding control sends its copy and takes the merged log back; an observer only
+  // reads. Every 30 s and soon after a change; the local copy stays the buffer when the host is away.
+  let hostAt = 0, hostErr = false, syncing = false, syncSoon = false;
+  async function sync() {
+    if (syncing || connState !== 'connected') return;
+    syncing = true; syncSoon = false;
+    try {
+      const mine = { format: 'aow-worklog', version: 1, entries: state.entries, deleted: state.deleted };
+      const r = iHoldControl && myClientId
+        ? await fetch('/worklog?client=' + encodeURIComponent(myClientId), { method: 'POST', body: JSON.stringify(mine) })
+        : await fetch('/worklog', { cache: 'no-store' });
+      if (!r.ok) throw new Error(String(r.status));
+      const v = await r.json();
+      if (!v || v.format !== 'aow-worklog' || !Array.isArray(v.entries)) throw new Error('format');
+      const m = C.merge({ entries: state.entries, deleted: state.deleted }, v); // changes made meanwhile stay
+      state = { entries: m.entries, deleted: m.deleted, open: state.open && !m.deleted.includes(state.open.id) ? state.open : null };
+      save(true); hostAt = Date.now(); hostErr = false;
+    } catch (_) { hostErr = true; }
+    syncing = false; last = ''; if (isOpen()) render();
+  }
+  const changed = () => { save(true); syncSoon = true; };
+  setInterval(() => { if (syncSoon || Date.now() - hostAt > 30000) sync(); }, 3000);
 
   // --- Recording -------------------------------------------------------------------------------
   function snapshot() {
@@ -11958,7 +11996,8 @@ const TabletWorkLog = (() => {
   setInterval(() => {
     const before = state.entries.length, wasOpen = !!state.open;
     state = C.step(state, snapshot(), Date.now());
-    save(state.entries.length !== before || wasOpen !== !!state.open);
+    const moved = state.entries.length !== before || wasOpen !== !!state.open;
+    save(moved); if (moved) syncSoon = true;
     if (isOpen()) render();
   }, 2000);
 
@@ -11998,7 +12037,7 @@ const TabletWorkLog = (() => {
   }
   function render() {
     if (!isOpen()) return;
-    const list = filtered(), key = JSON.stringify([list.map(e => [e.id, e.end, e.activity, e.product, e.amount, e.note]), fField, fSeason, fText, edit, msg, storeOk, I18n.language]);
+    const list = filtered(), key = JSON.stringify([list.map(e => [e.id, e.end, e.activity, e.product, e.amount, e.note]), fField, fSeason, fText, edit, msg, storeOk, hostAt, hostErr, I18n.language]);
     if (key === last) return;
     if (document.activeElement && sheet.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // don't rebuild under the cursor
     last = key;
@@ -12007,7 +12046,9 @@ const TabletWorkLog = (() => {
     if (edit) { renderEdit(); return; }
     const box = el('div', 'tb-box');
     box.appendChild(el('div', 'tp-note', T(tr('One entry per working session, recorded on this tablet while it has control and a job is open. Areas and distance come from the guidance computer.'))));
-    box.appendChild(el('div', 'tp-note warn', T(tr('Stored only on this tablet (in the browser). Back it up with "Save as file".'))));
+    box.appendChild(el('div', hostAt && !hostErr ? 'tp-note' : 'tp-note warn', hostAt && !hostErr
+      ? T(tr('Also stored on the guidance computer (last at {t}). A running session is stored when it ends.', { t: C.dTime(hostAt) }))
+      : T(tr('Not stored on the guidance computer yet: kept on this tablet until it can be. "Save as file" makes an extra copy.'))));
     if (!storeOk) box.appendChild(el('div', 'tp-note bad', T(tr('This browser does not store data: entries are lost when the page is closed.'))));
     if (msg) box.appendChild(el('div', 'tp-note', T(msg)));
     // Filters
@@ -12074,15 +12115,15 @@ const TabletWorkLog = (() => {
     }
     const r = el('div', 'tb-row');
     const ok = el('button', 'tp-btn pri big', T(tr('Save'))); onTap(ok, () => {
-      const upd = x => x.id === e.id ? { ...x, ...Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value.trim()])) } : x;
-      state = { entries: state.entries.map(upd), open: state.open ? upd(state.open) : null }; save(true); edit = null; last = ''; render();
+      const upd = x => x.id === e.id ? { ...x, ...Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value.trim()])), mod: Date.now() } : x;
+      state = { entries: state.entries.map(upd), open: state.open ? upd(state.open) : null, deleted: state.deleted }; changed(); edit = null; last = ''; render();
     });
     const back = el('button', 'tp-btn', '← ' + T(tr('Back'))); onTap(back, () => { edit = null; last = ''; render(); });
     const del = el('button', 'tp-btn quiet', T(tr('Delete entry'))); del.disabled = !!e.open;
     let armed = false;
     onTap(del, () => {
       if (!armed) { armed = true; del.textContent = T(tr('Tap again to delete')); return; }
-      state = { entries: state.entries.filter(x => x.id !== e.id), open: state.open }; save(true); edit = null; last = ''; render();
+      state = { entries: state.entries.filter(x => x.id !== e.id), open: state.open, deleted: state.deleted.concat([e.id]) }; changed(); edit = null; last = ''; render();
     });
     r.append(ok, back, del); box.appendChild(r);
     shB.appendChild(box);
@@ -12112,7 +12153,8 @@ const TabletWorkLog = (() => {
       if (!v || v.format !== 'aow-worklog' || !Array.isArray(v.entries)) throw new Error('format');
       const have = new Set(all().map(e => e.id));
       const add = v.entries.filter(e => e && e.id && !have.has(e.id) && typeof e.field === 'string' && typeof e.start === 'number').map(e => ({ ...e, open: false }));
-      state = { entries: state.entries.concat(add), open: state.open }; save(true);
+      const m = C.merge({ entries: state.entries, deleted: state.deleted }, { entries: add });
+      state = { entries: m.entries, open: state.open, deleted: m.deleted }; changed();
       msg = tr('{n} entries loaded; entries already here are kept.', { n: add.length });
     } catch (_) { msg = tr('Not a work log file of this app.'); }
     last = ''; render();

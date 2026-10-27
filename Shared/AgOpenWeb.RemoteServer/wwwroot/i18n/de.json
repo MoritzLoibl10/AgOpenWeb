@@ -1350,7 +1350,7 @@
   "Stop Record Pause Boundary": "Grenze: Stopp / Aufzeichnen / Pause",
   "Stop, tap the vehicle on the map (\"Reset direction\"), then drive forward above 1.5 km/h.": "Anhalten, auf der Karte auf das Fahrzeug tippen („Richtung zurücksetzen“), dann vorwärts über 1,5 km/h fahren.",
   "Stopped": "Angehalten",
-  "Stored only on this tablet (in the browser). Back it up with \"Save as file\".": "Nur auf diesem Tablet gespeichert (im Browser). Mit „Als Datei sichern“ sichern.",
+  "Not stored on the guidance computer yet: kept on this tablet until it can be. \"Save as file\" makes an extra copy.": "Noch nicht am Lenkrechner gespeichert: bleibt auf diesem Tablet, bis es geht. „Als Datei sichern“ macht eine zusätzliche Kopie.",
   "Straight": "Gerade",
   "Subnet": "Subnetz",
   "Success: Connected to caster and mount point": "Erfolg: Verbindung zu Caster und Mountpoint steht",
@@ -1666,5 +1666,6 @@
   "● RECORDING…": "● AUFZEICHNUNG…",
   "✎ Edit": "✎ Bearbeiten",
   "✕ Cancel": "✕ Abbrechen",
-  "＋ Add": "＋ Hinzufügen"
+  "＋ Add": "＋ Hinzufügen",
+  "Also stored on the guidance computer (last at {t}). A running session is stored when it ends.": "Auch am Lenkrechner gespeichert (zuletzt {t}). Eine laufende Sitzung wird gespeichert, sobald sie endet."
 }

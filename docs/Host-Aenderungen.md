@@ -330,3 +330,22 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
 - **Client:** `TabletDemo` sendet beim Beenden beide Befehle statt nichts (vorher: Umschaltbefehle,
   dann gar keine). Andere Client-Stellen, die „aus“ meinen, gibt es nicht; die Knöpfe bleiben Umschalter.
 - **Beim Merge von upstream:** neue Datei, zwei Zeilen im `switch`; ohne Konflikt zu erwarten.
+
+## 15. Host-Paket B: Arbeitsprotokoll am Lenkrechner (feature/host-paket, Oktober 2026)
+- **Dateien:** `Shared/AgOpenWeb.Services/WorkLog/WorkLogStore.cs` (neu), `RemoteServerHost.cs`
+  (Routen `GET /worklog`, `POST /worklog?client=<id>`), `Profile/ProfileBackupService.cs` (Ordner
+  `WorkLog` im Backup). Tests: `Tests/AgOpenWeb.Services.Tests/WorkLogStoreTests.cs`,
+  `Tests/web/worklog.test.mjs` (Zusammenführen im Client).
+- **Ablage:** eine Datei `WorkLog/worklog.json` im Datenordner (`AppDataRoot.Documents`), im Format
+  des Clients (`aow-worklog`, Version 1, `entries`, `deleted`). Schreiben über `.tmp` und Umbenennen;
+  eine unlesbare Datei wird als `worklog.json.unreadable-<Zeit>` beiseitegelegt, nicht überschrieben.
+- **Zusammenführen:** nach `id`, ohne Doppel; die zuletzt geänderte Fassung gilt (`mod`, dann `end`);
+  gelöschte IDs bleiben gelöscht; offene Sitzungen werden nicht gespeichert. Gleiche Regel im Client
+  (`WorkLogCore.merge`).
+- **Bedienung:** Schreiben nur mit der Bedienung (Client-ID wie bei `/bugreports/attach`), sonst 403.
+  Lesen für alle (Beobachter sehen alles). Höchstens 8 MB je Anfrage.
+- **Backup:** `WorkLog/worklog.json` wird mitgesichert; beim Einspielen zusammengeführt statt ersetzt.
+  Vorschau: „+ N“ neue oder geänderte Einträge, sonst „gleich“.
+- **Lenk-, Regel- und Sicherheitslogik:** nicht berührt.
+- **Beim Merge von upstream:** neue Datei; im Backup-Dienst vier kleine Stellen (`Roots`, `Collect`,
+  `IsAllowed`, `Group`/`Apply`/`Compare`); in `RemoteServerHost` ein Block vor `StartAsync`.
