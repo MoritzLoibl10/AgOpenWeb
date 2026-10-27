@@ -7870,9 +7870,11 @@ const TabletTerminal = (() => {
     cards = {};
     for (const c of host.querySelectorAll('.tui-card')) cards[c.dataset.m] = { el: c, last: '' };
     const pg = host.querySelector('.tui-pager');
-    pg.querySelector('.pg-n').textContent = tr('Page {n} of {count}', { n: pageIdx + 1, count: pages.length });
+    // "1 / 3" on the pager (the sentence ran under the next button at 1024×600); the sentence and
+    // the cards of the page are in the tooltip.
+    pg.querySelector('.pg-n').textContent = (pageIdx + 1) + ' / ' + pages.length;
     pg.querySelector('.pg-dots').innerHTML = pages.map((_, i) => '<i class="' + (i === pageIdx ? 'on' : '') + '"></i>').join('');
-    pg.querySelector('.pg-t').title = p.map(m => MOD_NAME[m]).join(', ');
+    pg.querySelector('.pg-t').title = tr('Page {n} of {count}', { n: pageIdx + 1, count: pages.length }) + ': ' + p.map(m => MOD_NAME[m]).join(', ');
     pg.querySelector('.pg-prev').disabled = pageIdx === 0;
     pg.querySelector('.pg-next').disabled = pageIdx >= pages.length - 1;
     onTap(pg.querySelector('.pg-prev'), () => goPage(pageIdx - 1));
@@ -10347,6 +10349,8 @@ const TabletBrand = (() => {
     rtk: () => sv(box(10, 20, 96, 40, 'RTK Fix', 'hb f1') + box(112, 20, 96, 40, 'RTK Float', 'hb f2') + box(214, 20, 96, 40, 'DGPS', 'hb f3') +
       '<text class="ht" x="58" y="84" text-anchor="middle">———</text><text class="ht" x="160" y="84" text-anchor="middle">- - -</text><text class="ht" x="262" y="84" text-anchor="middle">· · ·</text>' + box(10, 106, 300, 40, tr('Network & GPS'))),
     band: () => sv('<rect class="hband" x="20" y="60" width="280" height="50" rx="10"/><text class="ht inv" x="160" y="90" text-anchor="middle">' + esc(T(tr('Profile not completely saved'))) + '</text>'),
+    actnow: () => sv(box(40, 50, 110, 60, tr('Steer'), 'hb acc') + box(170, 50, 110, 60, tr('Auto'), 'hb acc')),
+    demo: () => sv('<rect class="hband" x="20" y="60" width="280" height="50" rx="10"/><text class="ht inv" x="160" y="90" text-anchor="middle">' + esc(T(tr('DEMO – simulator only, no real outputs'))) + '</text>'),
     board: () => sv(box(60, 30, 200, 110, 'AiO v4') + box(84, 100, 70, 26, 'v4', 'hb acc') + box(166, 100, 70, 26, 'v26', 'hb f3')),
     direction: () => sv('<path class="hl" d="M160 150 L160 20"/><path class="hl" d="M146 40 L160 20 L174 40"/>' +
       box(110, 70, 100, 60, tr('Vehicle'), 'hb acc') + box(10, 14, 92, 34, tr('REVERSE'), 'hb f2') + box(218, 14, 92, 34, tr('Tap'), 'hb')),
@@ -10459,7 +10463,7 @@ const TabletBrand = (() => {
         b.appendChild(Object.assign(el('div', 'tp-lead'), { textContent: T(tr('Short guide')) }));
         const g = el('div', 'tb-topics');
         for (const p of PAGES) {
-          const t = el('button', 'tb-topic', ILL[p.id]() + '<span></span>'); t.querySelector('span').textContent = T(p.t);
+          const t = el('button', 'tb-topic', (ILL[p.id] ? ILL[p.id]() : '') + '<span></span>'); t.querySelector('span').textContent = T(p.t); // a page without a picture must not break the index
           onTap(t, () => openHelp(p.id));
           g.appendChild(t);
         }
@@ -10473,7 +10477,7 @@ const TabletBrand = (() => {
     }
     openSheet(T(pg.t), b => {
       const w = el('div', 'tb-page');
-      w.appendChild(el('div', 'tb-pill', ILL[pg.id]()));
+      if (ILL[pg.id]) w.appendChild(el('div', 'tb-pill', ILL[pg.id]()));
       const col = el('div');
       if (pg.warn) col.appendChild(Object.assign(el('div', 'tp-note warn'), { textContent: T(pg.warn) }));
       const ol = el('ol', 'tb-steps');
