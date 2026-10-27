@@ -96,12 +96,18 @@ public static class WireCodec
         return frame;
     }
 
-    public static byte[] EncodeToast(string message)
+    public static byte[] EncodeToast(string message) => EncodeToast(message, "", "");
+
+    /// <summary>Fork (host-paket D, #11), append-only: after the English text, the translation key
+    /// with {name} placeholders and the values as a JSON object ("" when the text has none).</summary>
+    public static byte[] EncodeToast(string message, string key, string argsJson)
     {
         using var ms = new MemoryStream();
         using var w = new BinaryWriter(ms);
         w.Write(Toast);
         WriteStr(w, message);
+        WriteStr(w, key);
+        WriteStr(w, argsJson);
         return ms.ToArray();
     }
 
@@ -198,6 +204,7 @@ public static class WireCodec
         WriteStr(w, a.BugReportStatus);
         WriteStr(w, a.BugReportSendStatus);
         WriteStr(w, a.BackupStatus); // append-only (fork)
+        WriteStr(w, a.FirstSetup);   // append-only (fork, host-paket D)
         return ms.ToArray();
     }
 
@@ -427,6 +434,7 @@ public static class WireCodec
         // Tab 9 — Display
         w.Write(a.LineWidth); w.Write(a.NudgeDistance); w.Write(a.NextGuidanceTime); w.Write(a.CmPerPixel);
         DB(a.LightbarEnabled); DB(a.SteerBarEnabled); DB(a.GuidanceBarOn);
+        w.Write(g.MinFixQuality); // i32, append-only (fork, host-paket D)
         return ms.ToArray();
     }
 

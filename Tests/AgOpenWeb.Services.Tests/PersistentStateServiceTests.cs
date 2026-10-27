@@ -147,6 +147,7 @@ public class PersistentStateServiceTests
             IsDayMode = false, Is2DMode = true, IsNorthUp = true,
             SimulatorLatitude = 12.5, SimulatorLongitude = 13.5, SimulatorSpeed = 9, SimulatorSteerAngle = 8,
             LastOpenedField = "X", BoundaryDrawRightSide = false, BoundaryDrawAtPivot = false, BoundaryOffset = 42,
+            FirstSetup = "done", // fork (host-paket D)
         };
         NewService(save).Save();
 

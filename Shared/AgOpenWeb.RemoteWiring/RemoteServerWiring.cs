@@ -76,6 +76,13 @@ public static partial class RemoteServerWiring
                                     vm.IsSimulatorPanelVisible = ps.State.SimulatorPanelVisible;
                                     return;
                                 }
+                                case "setup.first": // fork (host-paket D): first-setup guide state; "done" stays done
+                                    if (arg is "shown" or "done")
+                                    {
+                                        var ps = services.GetRequiredService<IPersistentStateService>();
+                                        if (ps.State.FirstSetup != "done" && ps.State.FirstSetup != arg) { ps.State.FirstSetup = arg; ps.Save(); }
+                                    }
+                                    return;
                                 case "sim.setSteer":
                                     if (double.TryParse(arg, num, inv, out var deg))
                                         vm.SimulatorSteerAngle = deg;
@@ -837,7 +844,18 @@ public static partial class RemoteServerWiring
                     };
 
                     // Refusals and failures (#109): shown as a short notification on the web.
-                    vm.FailureReported += msg => server.ShowToast(msg);
+                    // Fork (host-paket D, #11): a keyed failure goes with its key and values, so
+                    // the client translates the sentence; the English text stays the fallback.
+                    vm.FailureReported += msg =>
+                    {
+                        if (vm.LastFailureKey is { } k)
+                        {
+                            var args = new System.Text.Json.Nodes.JsonObject();
+                            foreach (var (n, v) in k.Args) args[n] = v;
+                            server.ShowToast(msg, k.Key, args.ToJsonString());
+                        }
+                        else server.ShowToast(msg);
+                    };
 
                     // AiO board messages (PGN 221), when "AiO Board Msgs" is on (#110).
                     if (services.GetService<IAutoSteerService>() is { } hwSteer)

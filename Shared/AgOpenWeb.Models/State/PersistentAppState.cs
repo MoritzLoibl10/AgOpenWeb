@@ -135,4 +135,9 @@ public class PersistentAppState : ObservableObject
 
     private double _boundaryOffset = 100.0; // cm
     public double BoundaryOffset { get => _boundaryOffset; set => SetProperty(ref _boundaryOffset, value); }
+
+    // ---- Fork (host-paket D): the web client's first-setup guide on this guidance computer:
+    // "" = not yet, "shown" = opened once by itself, "done" = closed. ----
+    private string _firstSetup = string.Empty;
+    public string FirstSetup { get => _firstSetup; set => SetProperty(ref _firstSetup, value ?? string.Empty); }
 }

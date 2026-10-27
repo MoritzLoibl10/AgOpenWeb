@@ -366,3 +366,30 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
   gilt die Tablet-Uhr. Die Detailansicht nennt, was vom Lenkrechner kommt.
 - **Beim Merge von upstream:** Der Datensatz ist nur hinten verlängert; ändert upstream die
   Auftragszeile im FieldOps-Rahmen, beide Seiten (`WireCodec`, `transport.js`) gleich nachziehen.
+
+## 17. Host-Paket D: kleinere Punkte (feature/host-paket, Oktober 2026)
+- **Einrichtungsstatus am Lenkrechner:** `PersistentAppState.FirstSetup` ("", "shown", "done") in
+  `appstate.json` (`PersistentStateService.ApplySnapshot` übernimmt ihn), gesendet am Ende des
+  AppInfo-Rahmens (`AppInfoDto.FirstSetup`, `WireCodec`, `transport.js`), gesetzt mit dem Befehl
+  `setup.first|shown|done` (`RemoteServerWiring.cs`; „done“ wird nicht zurückgesetzt). Der Client
+  liest den Host-Wert vor dem eigenen Browser-Speicher und meldet einen dort schon vorhandenen Stand
+  einmal an den Host.
+- **MinFixQuality an den Client:** `GpsConfigDto.MinFixQuality`, gesendet als `i32` am Ende des
+  Config-Rahmens. Die Ampel prüft die Fix-Qualität jetzt wie der Host (`GpsFixQualityValidator`:
+  Qualität kleiner als Minimum wird abgelehnt); ohne den Wert (älterer Host) wie bisher „RTK Fix“.
+  Hinweis, nur gemeldet: Der Host vergleicht die NMEA-Zahl; RTK Float (5) liegt numerisch über
+  RTK Fix (4) und besteht damit die Vorgabe 4. Die Ampel zeigt das so an, wie der Host entscheidet.
+- **1-KB-Grenze (Offene Punkte 7):** `WebSocketHub` sammelt die Stücke einer Nachricht bis
+  `EndOfMessage` (`CommandAssembler.cs`, neu) und führt den Befehl einmal ganz aus; über 64 KB wird
+  die Nachricht ganz verworfen. Test: `CommandAssemblerTests.cs`.
+- **field.fromGeo:** liegt nur im eAMA-Branch (#19), nicht in diesem Stapel; die stückweise
+  Übertragung bleibt dort unverändert (siehe Bericht).
+- **Englische Host-Meldungen (Offene Punkte 11):** Die 21 Fehlermeldungen mit Werten im Text
+  (`ReportFailure($"…")`) gehen jetzt als Schlüssel mit Platzhaltern (`{error}`, `{n}`, `{file}`,
+  `{path}`) und den Werten: neue Überladung `ReportFailure(key, (name, value)…)` im ViewModel,
+  `LastFailureKey` während des Ereignisses, Toast-Rahmen hinten um Schlüssel und Werte (JSON)
+  verlängert. `FailureReported` bekommt weiter den englischen Satz. Der Client übersetzt den Satz,
+  die Werte bleiben wie sie sind; die Schlüssel stehen in `TabletHostText` (für `en.json`).
+  Tests: `KeyedFailureTests.cs`, `ToastKeyTests`; Einrichtungsstatus im Vollständigkeitstest von
+  `PersistentStateServiceTests`.
+- **Lenk-, Regel- und Sicherheitslogik:** nicht berührt (nur Texte der Meldungen).

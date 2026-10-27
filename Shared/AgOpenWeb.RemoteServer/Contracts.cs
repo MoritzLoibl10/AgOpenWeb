@@ -498,7 +498,8 @@ public record GpsConfigDto(
     double HeadingFusionWeight,
     bool ReverseDetection,
     bool RtkLostAlarm,
-    int RtkLostAction);  // 0 Warn, 1 Pause AutoSteer
+    int RtkLostAction,   // 0 Warn, 1 Pause AutoSteer
+    int MinFixQuality);  // fork (host-paket D): the guidance gate's minimum fix quality; sent at the frame's end
 
 /// <summary>Data Sources → Roll tab (ConfigStore.Ahrs).</summary>
 public record RollConfigDto(
@@ -589,7 +590,8 @@ public record AppInfoDto(
     IReadOnlyList<AppLogDto> Logs,
     string BugReportStatus,
     string BugReportSendStatus,
-    string BackupStatus = ""); // append-only (fork): profile backup state as JSON
+    string BackupStatus = "", // append-only (fork): profile backup state as JSON
+    string FirstSetup = "");  // append-only (fork, host-paket D): "", "shown" or "done"
 
 /// <summary>Field Tools read-frame. Grows per sub-increment (append-only). Import
 /// Tracks: the other fields on disk that have saved tracks (current field excluded).

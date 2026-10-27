@@ -1955,7 +1955,7 @@ public partial class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             _logger.LogError(ex, $"[Field] Error opening field: {fieldName}");
-            ReportFailure($"Failed to open field: {ex.Message}");
+            ReportFailure("Failed to open field: {error}", ("error", ex.Message));
         }
         finally
         {
@@ -5026,7 +5026,7 @@ public partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            ReportFailure($"Error parsing KML: {ex.Message}");
+            ReportFailure("Error parsing KML: {error}", ("error", ex.Message));
         }
     }
 
@@ -5144,7 +5144,7 @@ public partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            ReportFailure($"Error importing KML boundary: {ex.Message}");
+            ReportFailure("Error importing KML boundary: {error}", ("error", ex.Message));
         }
     }
 

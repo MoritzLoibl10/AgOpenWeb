@@ -25,11 +25,11 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 | 4 | Zwei Geräte speichern gleichzeitig: Befehle mischen sich, fremdes Profil wird beschrieben | hoch | ja | Issue-Text an upstream |
 | 5 | NTRIP-Passwörter und AgShare-Schlüssel gehen an jeden Browser im LAN | hoch | ja | Issue-Text an upstream |
 | 6 | Lizenz uneinheitlich (`LICENSE.md`, README, Dateiköpfe, Info-Seite) | hoch | nein | erledigt: upstream Apache 2.0 (#360, #363), der Fork folgt (sync/upstream-2) |
-| 7 | Host liest Befehle in 1-KB-Stücken (WebSocket) | mittel | ja | offen |
+| 7 | Host liest Befehle in 1-KB-Stücken (WebSocket) | mittel | ja | erledigt in feature/host-paket (`docs/Host-Aenderungen.md` 17) |
 | 8 | Unvollständiges Speichern lässt sich nicht verwerfen | mittel | nein | erledigt (sync/upstream: Verwerfen in Sackgassen) |
 | 9 | Speicher-Merker gilt pro Adresse, nicht pro Lenkrechner | mittel | ja | offen |
 | 10 | Deutsch als Standard überstimmt eine bewusste Sprachwahl | mittel | ja | offen |
-| 11 | Host-Meldungen als Toast bleiben englisch, auch sicherheitsnahe | mittel | nein | erledigt (tablet-feedback-1): 62 feste Host-Meldungen deutsch; Meldungen mit Werten bleiben englisch |
+| 11 | Host-Meldungen als Toast bleiben englisch, auch sicherheitsnahe | mittel | nein | Fix-Texte im Client; Texte mit Werten als Schlüssel vom Host (feature/host-paket, `docs/Host-Aenderungen.md` 17) |
 | 12 | Bei Verbindungsverlust frieren upstream-Anzeigen ein (Fix-Chip, Lichtleiste, Rollanzeige) | mittel | nein | erledigt (tablet-feedback-1): Fix „Keine Daten“, Lichtleiste, Rollanzeige und Ein/Aus-Zustände ausgeblendet, solange keine Daten kommen |
 | 13 | `GpsService.CurrentData` veraltet nie, wenn das GPS verstummt | mittel | ja | offen |
 | 14 | Neues Feld ohne GPS bekommt den Ursprung New York | mittel | ja | offen |

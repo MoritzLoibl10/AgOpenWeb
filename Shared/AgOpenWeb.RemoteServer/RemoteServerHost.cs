@@ -49,6 +49,10 @@ public sealed class RemoteServerHost
     public void ShowToast(string message)
         => _ = _ws?.BroadcastAsync(WireCodec.EncodeToast(message));
 
+    /// <summary>Fork (host-paket D, #11): the same with a translation key and its values as JSON.</summary>
+    public void ShowToast(string message, string key, string argsJson)
+        => _ = _ws?.BroadcastAsync(WireCodec.EncodeToast(message, key, argsJson));
+
     /// <summary>Broadcast a module hardware message (PGN 221, #110).</summary>
     public void ShowHardwareMessage(string text, int seconds, bool warning)
         => _ = _ws?.BroadcastAsync(WireCodec.EncodeHardwareMessage(text, seconds, warning));

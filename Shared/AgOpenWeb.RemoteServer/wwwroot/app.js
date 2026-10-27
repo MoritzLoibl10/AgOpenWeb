@@ -440,7 +440,7 @@ const transport = RemoteTransport.create({
   onControlState(s) { lastControl = s; updateControlUi(); claimSeatIfFree(); Vt.render(); },
   onSound(id) { Sounds.play(id); },
   onPrompt(p) { hostPrompt = p; renderHostPrompt(); },
-  onToast(msg) { showToast(msg); },
+  onToast(msg, key, args) { showToast(key ? TabletHostText.keyed(msg, key, args) : msg); },
   onHardwareMessage(text, seconds, warning) { showHardwareMessage(text, seconds, warning); },
   onDrivePick(fields) { showDrivePick(fields); },
   onVt(m, t) { Vt.message(m, t); },
@@ -10146,6 +10146,21 @@ const TabletHostText = (() => {
     tr('Steer module stopped steering (kickout, switch or button)'),
     tr('This track has no ends to adjust'),
     tr('Too few points to smooth (need at least 5)')]);
+  // Host-paket D (#11): the host's failure texts with values, sent as a key with {name}
+  // placeholders and the values; the sentence is translated, the values (error messages, file
+  // names, counts) stay as they are. Listed so the extractor finds the keys.
+  const KEYED = new Set([
+    tr('Error creating boundary: {error}'), tr('Error deleting field: {error}'), tr('Error creating field: {error}'),
+    tr('Error importing KML: {error}'), tr('Error importing ISO-XML: {error}'), tr('Debug dump failed: {error}'),
+    tr('Bug report capture failed: {error}'), tr('Bug report saved (no details): {path}'), tr('Bug report failed: {error}'),
+    tr('Need at least 3 points for a curve (have {n})'), tr('Need at least 2 points (have {n})'), tr('Save failed: {error}'),
+    tr('Failed to load: {file}'), tr('Failed to load: {error}'), tr('Import failed: {error}'),
+    tr('Need at least 3 points for contour (have {n})'), tr('Failed to open field: {error}'), tr('Error parsing KML: {error}'),
+    tr('Error importing KML boundary: {error}')]);
+  function keyed(msg, key, args) {
+    let a = null; try { a = JSON.parse(args); } catch (_) { /* no values */ }
+    return KEYED.has(key) && a && typeof a === 'object' ? tr(key, a) : msg;
+  }
   showToast = (orig => function (msg, ms) { return orig(typeof msg === 'string' && tuiIsDe() && TOASTS.has(msg) ? I18n.text(msg) : msg, ms); })(showToast);
   function de(s) {
     if (!tuiIsDe()) return s;
@@ -10170,7 +10185,7 @@ const TabletHostText = (() => {
   // Where the host's texts are shown: status bar, GPS popup, Network IO, System Data, NTRIP test.
   const IDS = ['sb-fix', 'sb-gps-d', 'gc-fix', 'nio-ntrip-status', 'nio-ntrip-rx', 'sd-fix', 'nte-teststatus'];
   for (const id of IDS) { const e = document.getElementById(id); if (e) obs.observe(e, { subtree: true, childList: true, characterData: true }); }
-  return { de };
+  return { de, keyed };
 })();
 
 // ===== Tablet UI (Phase 4a): product look, help, support diagnosis ====================
@@ -11269,7 +11284,14 @@ const TabletReady = (() => {
     const out = [];
     if (s.gpsSentence === 'SIM') out.push([1, tr('GPS'), tr('Simulator: not a real position')]);
     else if (s.gpsLost || !s.gpsOk) out.push([0, tr('GPS'), tr('No GPS data')]);
-    else out.push([s.fixQuality === 4 ? 2 : 0, tr('GPS'), (s.fixText || '') + (s.fixQuality === 4 ? '' : ' – ' + T(tr('steering needs RTK Fix')))]);
+    else {
+      // The host's own gate (Connections.MinFixQuality, GpsFixQualityValidator: quality < minimum is
+      // refused); before the host sent it (host-paket D): RTK Fix as before.
+      const minQ = gps && Number.isInteger(gps.minFixQuality) ? gps.minFixQuality : null, q = s.fixQuality | 0;
+      const ok = minQ != null ? q >= minQ : q === 4;
+      out.push([ok ? 2 : 0, tr('GPS'), (s.fixText || '') + (ok ? '' : ' – ' + (minQ != null
+        ? tr('the guidance computer needs fix quality {n} or higher (now {q})', { n: minQ, q }) : T(tr('steering needs RTK Fix'))))]);
+    }
     out.push([s.autoSteerOk ? 2 : 0, tr('Steer module'), s.autoSteerOk ? tr('connected') : tr('not heard')]);
     // An IMU module's hello (imuOk), or the steer module's IMU heading in PGN 253 (AiO boards).
     const sd = s.systemData, imu = !!s.imuOk || !!(sd && typeof sd.imuHeading === 'number' && Number.isFinite(sd.imuHeading));
@@ -11598,8 +11620,19 @@ const TabletFirstSetup = (() => {
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
   const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
   const KEY = 'aow.firstSetup';
-  const lsOk = () => { try { return localStorage.getItem(KEY); } catch (_) { return 'blocked'; } };
-  const mark = v => { try { localStorage.setItem(KEY, v); } catch (_) { /* ignore */ } };
+  // Kept on the guidance computer too (host-paket D: appInfo.firstSetup, command setup.first), so
+  // another tablet or a cleared browser doesn't start the guide again; this browser's copy stays.
+  const local = () => { try { return localStorage.getItem(KEY); } catch (_) { return 'blocked'; } };
+  const lsOk = () => (appInfo && appInfo.firstSetup) || local();
+  const mark = v => {
+    try { localStorage.setItem(KEY, v); } catch (_) { /* ignore */ }
+    if (iHoldControl) transport.send('setup.first|' + v);
+  };
+  // A host that doesn't know yet what this browser already did learns it (once it can tell).
+  setInterval(() => {
+    const l = local();
+    if (iHoldControl && appInfo && appInfo.firstSetup === '' && (l === 'shown' || l === 'done')) transport.send('setup.first|' + l);
+  }, 5000);
   const sheet = el('div', 'tui-sheet tb-sheet tbk-sheet'); sheet.id = 'tui-setup1'; sheet.setAttribute('translate', 'no');
   sheet.innerHTML = '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>';
   const scrim = el('div', 'tp-scrim');
