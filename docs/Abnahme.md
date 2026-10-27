@@ -11,7 +11,7 @@ Board und Motor sind nicht getestet.
 | Kit-Daten | Kunde, Traktor (Eingabe), Datum (Tablet-Uhr), Fahrzeugprofil, Antennenhöhe, Antenne–Drehpunkt, Antennenversatz, Radstand, Zwei Antennen ja/nein, Dual-Kursversatz | Config-Rahmen des Hosts, wie eingestellt; „Aktuelle Einstellungen übernehmen“ liest neu |
 | Zeit bis RTK Fix | Sekunden vom Tippen auf „Start“ bis Fix-Qualität 4 | `statusBar.fixQuality`; Zeit von der Tablet-Uhr |
 | Gerade Strecke | Querabweichung: Mittel (mit Vorzeichen), Maximum (Betrag), Streuung (Standardabweichung), Anzahl | `tick.crossTrackError`, nur Ticks, in denen der Host lenkt (eingeschaltet, Führung aktiv, Modul nicht „Lenkt nicht“, nicht in einer Wende), jeder Host-Tick einmal (`hostMs`) |
-| Hangfahrt | wie oben, dazu Rollwinkel Mittel und Maximum | `tick.roll` |
+| Hangfahrt | wie oben, dazu Querneigung Mittel und Maximum | `tick.roll` |
 | Wende | Querabweichung über die Wende hinweg; ob eine Wende gefahren wurde | `tick.op.executing` |
 | Lenkung aus: Knopf | Lenkung war an, dann aus; Zeit seit dem Scharfschalten | `tick.op.autoSteer`, `moduleNotSteering` |
 | Lenkung aus: Lenkrad übersteuern | dasselbe | dasselbe |

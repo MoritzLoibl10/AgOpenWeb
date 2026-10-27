@@ -23,9 +23,16 @@ Sie öffnet sich von selbst, solange noch kein Fahrzeugprofil angelegt ist; sons
 5. **Kit prüfen:** Die Liste zeigt live, ob GPS, Lenkmodul und IMU gehört werden.
 6. **Richtungsfalle** lesen (siehe Abschnitt 5).
 
+**Zwei Antennen (Dual-GPS):** unter **Einrichtung → Fahrzeug & Gerät → Fahrzeug → Reiter „GPS“**
+„Dual-GPS“ einschalten. „Kursversatz (°)“ bleibt 0, wenn der Empfänger den Versatz der Antennen
+selbst verrechnet (z. B. `HEADING OFFSET` beim UM982); sonst trägt ihn der Monteur ein.
+„Dual-Fix automatisch“ mit „Schaltgeschwindigkeit“ ist wahlweise. Kommt der Dual-Kurs an, ist die
+Richtung in der Ampel grün und die Richtungskarte entfällt (außer bei „Dual-Fix automatisch“);
+fehlt er, zeigt die App „kein Dual-Kurs“.
+
 ## 3. Arbeit starten
 **Menü → Arbeit starten** führt in vier Schritten durch:
-1. **Schlag** öffnen oder anlegen („Schläge und Aufträge“).
+1. **Schlag** öffnen oder anlegen („Schläge/Aufträge“).
 2. **Spur** wählen oder anlegen („Spuren“ oder „Schnelle AB-Linie“, z. B. „A+“ durch deine Position).
 3. **Richtung** bestätigen („Ja“ oder „Nein – Richtung neu lernen“).
 4. **Ampel** grün. Erst dann führt „Zur Fahransicht“ weiter.
@@ -59,8 +66,10 @@ verkehrt herum, und die Lenkung arbeitet dann für die falsche Richtung.
 ## 7. Arbeitsprotokoll sichern
 **Menü → Arbeitsprotokoll** zeigt je Arbeitssitzung Datum, Zeit, Fläche (vom Lenkrechner), Gerät
 und Arbeitsbreite. Antippen: Tätigkeit, Mittel/Sorte, Menge, Bemerkung eintragen.
-- Die Einträge liegen auf dem Tablet und am Lenkrechner (abgeglichen, sobald er erreichbar ist; im
-  Profil-Backup enthalten). Eine zusätzliche Kopie:
+- Die Einträge liegen auf dem Tablet und **am Lenkrechner**: Das Tablet mit der Bedienung gleicht
+  alle 30 s und nach jeder Änderung ab; andere Geräte sehen dieselben Einträge. Ist der Lenkrechner
+  nicht erreichbar, bleiben sie auf dem Tablet und werden später nachgeliefert, auch eine Sitzung,
+  die bei „Zündung aus“ offen war. Sie sind im Profil-Backup enthalten. Eine zusätzliche Kopie:
   - **„Als Datei sichern“** (am Tablet ggf. kein Download möglich) oder
   - **„CSV kopieren“** und in eine Tabelle oder E-Mail einfügen.
 - Am PC-Browser: „CSV exportieren“ und „Druckseite je Schlag“ (als PDF speichern).
