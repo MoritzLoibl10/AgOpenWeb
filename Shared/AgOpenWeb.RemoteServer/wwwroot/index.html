@@ -1655,7 +1655,7 @@
       display: flex; gap: 8px; align-items: center; padding: 6px 8px 6px 14px; border-radius: 12px; background: var(--tui-card, #fff); color: var(--tui-ink, #111);
       border: 2px solid var(--tui-acc); box-shadow: 0 6px 18px rgba(0,0,0,0.3); font: 800 var(--tui-fs-lbl) system-ui, sans-serif; max-width: calc(100vw - 20px); }
     #tui-work-mini[hidden] { display: none; }
-    #tui-work-mini .wm-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #tui-work-mini .wm-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0; } /* was cut off at 1024×600 */
     /* First setup (feature/bedienung-2). */
     #tui-setup1 .fs1-r { display: grid; grid-template-columns: 30px auto 1fr; gap: 8px; align-items: center; padding: 4px 0; font: 700 var(--tui-fs-lbl) system-ui, sans-serif; }
     #tui-setup1 .fs1-i { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; font-weight: 900; background: var(--tui-stop); color: var(--tui-stop-ink); }
