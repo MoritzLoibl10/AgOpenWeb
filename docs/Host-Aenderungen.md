@@ -141,8 +141,10 @@ Lenk-, Regel- und Sicherheitslogik unberührt.
 | `Platforms/AgOpenWeb.Android/Brand.cs` | **neu**: `Brand.ProductName` | keine Konflikte möglich |
 | `Platforms/AgOpenWeb.Android/MainActivity.cs` | `Label`, Starttext, Fehlertext, „Beenden?“-Titel aus `Brand.ProductName` | 4 Zeilen |
 | `Platforms/AgOpenWeb.Android/BackendService.cs` | Titel der Benachrichtigung und des Kanals aus `Brand.ProductName` (Kanal-ID unverändert) | 2 Zeilen |
-| `Platforms/AgOpenWeb.Android/AgOpenWeb.Android.csproj` | `ApplicationId` `at.loibl.lenksystem` (vorher `com.agopenweb.android`), `ApplicationTitle` `[PRODUKTNAME]` | bei Konflikt Fork-Werte behalten |
+| `Platforms/AgOpenWeb.Android/AgOpenWeb.Android.csproj` | `ApplicationId` `at.loibl.lenksystem` (vorher `com.agopenweb.android`), `ApplicationTitle` `LM Steering Solutions` | bei Konflikt Fork-Werte behalten |
 | `Platforms/AgOpenWeb.Android/Resources/drawable/icon.xml` | eigenes Symbol (Vektor) | Fork-Datei behalten |
+| `Platforms/AgOpenWeb.Desktop/Brand.cs` | **neu** (Produktname, Oktober 2026, Ausnahme im Auftrag): `Brand.ProductName` = „LM Steering Solutions“ | keine Konflikte möglich |
+| `Platforms/AgOpenWeb.Desktop/Launcher/LauncherEntry.cs`, `WebViewLauncher.cs`, `ConsolePage.cs`, `Program.cs` | Fenstertitel, Start- und Fehlertext, „Beenden?“-Frage, Titel der Konsolenseite, „läuft schon“-Meldung aus `Brand.ProductName`; Assembly, Namespaces, Ordner, Datenordner `Dokumente\AgOpenWeb`, Autostart-Eintrag, Port 5174 unverändert | je 1–2 Zeilen; bei Konflikt upstream nehmen und den Text wieder durch `Brand.ProductName` ersetzen |
 
 Folgen der neuen Paket-ID: Android installiert die App neben der alten; die Daten liegen unter
 `Android/data/at.loibl.lenksystem/…` statt `…/com.agopenweb.android/…` und werden nicht
@@ -162,7 +164,7 @@ Keine neue Host-Ausnahme außer den NTRIP-Nachträgen in §1. Für Rebases auße
 
 | Datei / Stelle | Was | Rebase-Hinweis |
 |---|---|---|
-| `.github/workflows/fork-prerelease.yml` | **neu** (Phase 4a): Testversionen als Pre-Release; Fußtext mit Lizenz und Quellcode-Commit; Warnung, solange der Produktname `[PRODUKTNAME]` ist | Fork-Datei, keine Konflikte möglich; Signaturprüfung und Secrets unverändert |
+| `.github/workflows/fork-prerelease.yml` | **neu** (Phase 4a): Testversionen als Pre-Release; Fußtext mit Lizenz und Quellcode-Commit; die Warnung zum Platzhalter-Produktnamen ist mit dem Namen „LM Steering Solutions“ entfallen | Fork-Datei, keine Konflikte möglich; Signaturprüfung und Secrets unverändert |
 | `app.js` NTRIP-Editor (upstream-Teil) | `#nte-ver` lesen und schreiben, Version an `ntrip.save`/`ntrip.test` anhängen (siehe §1) | nicht mit `fork:` kommentiert: bei Konflikten in `openNtripEditor`/Speichern/Test nach `nte-ver` suchen |
 | `index.html` NTRIP-Editor | `<select id="nte-ver">` | eine Zeile |
 | `index.html` upstream-`<style>` | Regel `.fb-twmiss` (letzte Zeilen, nutzt `var(--tui-warn)` aus dem Block) | eine Regel |

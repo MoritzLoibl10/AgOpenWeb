@@ -1,4 +1,4 @@
-# [PRODUKTNAME] – Kurzanleitung
+# LM Steering Solutions – Kurzanleitung
 
 Für das Lenksystem-Kit mit Tablet. Die App ist eine **Lenkhilfe**: Du bleibst am Lenkrad und für
 Fahrzeug, Gerät und Umgebung verantwortlich. Nicht auf öffentlichen Straßen verwenden. Lenkung
@@ -86,5 +86,6 @@ neue Version selbst herunterladen und installieren. Auf Wunsch „Beim Start pr�
   signiert ist („Weitere Informationen“ → „Trotzdem ausführen“).
 
 ---
-Lizenz: Apache License 2.0. Fremdkomponenten und Namensnennungen: Einrichtung → Info →
+LM Steering Solutions basiert auf AgOpenWeb und AgOpenGPS. Lizenz: Apache License 2.0. Fremdkomponenten
+und Namensnennungen: Einrichtung → Info →
 Drittkomponenten. Kurze Erklärungen zu Knöpfen: Knopf lange drücken.
