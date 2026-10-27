@@ -310,7 +310,8 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
 
 ## 13. CI: Web-Tests mit Browser (feature/bedienung-2, Oktober 2026)
 - **Datei:** `.github/workflows/build-and-release.yml`, Job `test`: Schritt „Run web client tests“.
-  Er installiert Playwright 1.63.0 mit Chromium außerhalb des Repos (`$RUNNER_TEMP/pw`) und führt
+  Er installiert Playwright 1.63.0 außerhalb des Repos (`$RUNNER_TEMP/pw`), dazu nur Chromiums
+  Headless-Shell ohne Systempakete, zwischengespeichert in `~/.cache/ms-playwright`, und führt
   `node --test Tests/web/*.test.mjs` mit `AOW_REQUIRE_BROWSER=1` aus: fehlt der Browser, schlägt
   `long-press.test.mjs` fehl statt übersprungen zu werden.
 - **Hinweis:** Auf diesem Branch gab es den Schritt noch nicht (er liegt sonst nur in

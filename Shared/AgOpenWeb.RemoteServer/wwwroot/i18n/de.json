@@ -401,7 +401,7 @@
   "Distance": "Strecke",
   "Distance (m)": "Strecke (m)",
   "Distance from boundary": "Abstand zur Schlaggrenze",
-  "Do not use automatic steering on public roads or near people.": "Die automatische Lenkung nicht auf öffentlichen Straßen und nicht in der Nähe von Menschen verwenden.",
+  "Do not use on public roads. Switch steering off as soon as people are in the driving area.": "Nicht auf öffentlichen Straßen verwenden. Lenkung ausschalten, sobald Personen im Fahrbereich sind.",
   "Does the vehicle face the way it drives?": "Zeigt das Fahrzeug in Fahrtrichtung?",
   "Does the vehicle face the way it drives? With one antenna the direction is learned from the first travel; backing first, it is learned the wrong way round.": "Zeigt das Fahrzeug in Fahrtrichtung? Mit einer Antenne wird die Richtung aus der ersten Fahrt gelernt; zuerst rückwärts gefahren, wird sie verkehrt herum gelernt.",
   "Done": "Fertig",

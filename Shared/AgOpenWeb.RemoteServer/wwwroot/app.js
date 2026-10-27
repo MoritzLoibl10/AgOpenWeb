@@ -11811,12 +11811,12 @@ const TabletUpdate = (() => {
 const TabletLegal = (() => {
   const T = k => I18n.text(k);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
-  const KEY = 'aow.legal', VERSION = '2026-10-draft1';
+  const KEY = 'aow.legal', VERSION = '2026-10-draft2'; // a changed text is shown and confirmed again
   const TEXT = [
     tr('This app is a steering aid. It does not replace the driver.'),
     tr('You stay responsible for the vehicle, the tool and your surroundings at all times. Stay at the wheel and step in when something is wrong.'),
     tr('The app comes without any warranty. It can have faults; GPS, correction data, modules and settings can give wrong values.'),
-    tr('Do not use automatic steering on public roads or near people.'),
+    tr('Do not use on public roads. Switch steering off as soon as people are in the driving area.'),
     tr('Before the first use, check everything calmly: dimensions, steering direction, switching the steering off. This version is a test version.'),
     tr('The app is licensed under the Apache License 2.0. It is a changed version of AgOpenWeb; the source code is open.'),
   ];
