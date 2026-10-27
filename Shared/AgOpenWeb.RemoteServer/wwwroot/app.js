@@ -422,7 +422,7 @@ const transport = RemoteTransport.create({
   },
   onCoverageEdge(polylines) { coverageEdges = polylines; }, // crisp worked-area perimeter (~2 Hz)
   onStatusBar(s) { statusBar = s; syncUnits(); if (typeof applySimBarVisible === 'function') applySimBarVisible(); syncUnsavedCov(); syncDualHeadingWarning(s); syncGpsLost(s); },
-  onConfig(c) { config = c; configDirty = true; applyTheme(c && c.display && c.display.isDayMode); },
+  onConfig(c) { config = c; configDirty = true; applyTheme(c && c.display && c.display.isDayMode); applyUiScale(c && c.display && c.display.uiScale); },
   onProfiles(p) { profiles = p; profilesDirty = true; },
   onNtripProfiles(p) { ntripProfiles = p; ntripDirty = true; },
   onFieldOps(f) { fieldOps = f; fieldOpsDirty = true; },
@@ -436,13 +436,15 @@ const transport = RemoteTransport.create({
     if (document.getElementById('boundaryplayer').classList.contains('open')) renderBoundaryPlayer();
   },
   onWizard(w) { wizard = w; wizardDirty = true; },
-  onHello(id) { myClientId = id; updateControlUi(); claimSeatIfFree(); applyMobileQualityCap(); },
-  onControlState(s) { lastControl = s; updateControlUi(); claimSeatIfFree(); },
+  onHello(id) { myClientId = id; updateControlUi(); claimSeatIfFree(); Vt.render(); },
+  onControlState(s) { lastControl = s; updateControlUi(); claimSeatIfFree(); Vt.render(); },
   onSound(id) { Sounds.play(id); },
   onPrompt(p) { hostPrompt = p; renderHostPrompt(); },
   onToast(msg) { showToast(msg); },
   onHardwareMessage(text, seconds, warning) { showHardwareMessage(text, seconds, warning); },
   onDrivePick(fields) { showDrivePick(fields); },
+  onVt(m, t) { Vt.message(m, t); },
+  onVtImage(id, w, h, rgba) { Vt.image(id, w, h, rgba); },
   // Round-trip link probe reply: token is the performance.now() we sent in diag.ping, so
   // RTT = now − token measures the pure server↔client link (one client clock, no skew).
   onPong(token) {
@@ -659,6 +661,25 @@ function applyMobileQualityCap() {
   transport.send('display.capResolution|2.5'); // 2.5 = Medium
 }
 
+// An observer (a browser without control) sees everything and changes nothing (#397): the
+// host drops its commands, so say why when a tap of its own was refused. The host's
+// ObserverIds plus the hub's own control.* / diag.ping are what it may send.
+const OBSERVER_IDS = new Set(['control.acquire', 'control.release', 'control.presence', 'diag.ping', 'boundary.refresh']);
+let _viewOnlyToastT = -Infinity;
+const _send = transport.send;
+transport.send = cmd => {
+  const id = String(cmd).split('|')[0];
+  if (!iHoldControl && !OBSERVER_IDS.has(id)) {
+    const now = performance.now();
+    if (navigator.userActivation && navigator.userActivation.isActive && now - _viewOnlyToastT > 3000) {
+      _viewOnlyToastT = now;
+      showToast(tr('View only: another screen has control'));
+    }
+    return;
+  }
+  _send(cmd);
+};
+
 transport.start();
 
 // ---- CanvasKit (Skia) renderer — built alongside Canvas2D for A/B (toggle K).
@@ -701,6 +722,82 @@ function applyMapTheme() {
   SKP.gridMinor.setColor(ckColor(GRID_MINOR[k]));
   SKP.gridMajor.setColor(ckColor(GRID_MAJOR[k]));
 }
+// UI size (Screen & Alerts): the controls are zoomed by CSS (--ui-zoom), the map is not.
+// Anything that turns screen pixels into a zoomed element's left/top divides by uiZoom.
+// Engines differ: current Chromium and WebKit give a zoomed element's rects in screen
+// pixels and grow vw/vh with the zoom; older WebKit (iPadOS 17) gives the rects in the
+// element's own pixels. calibrateZoom measures which, so rects are always screen pixels
+// (zoomRect) and --vw/--vh always come out at one viewport percent.
+let uiZoom = 1;
+let rectScale = 1;
+function applyUiScale(pct) {
+  const z = pct >= 100 && pct <= 200 ? pct / 100 : 1;
+  if (z === uiZoom) return;
+  uiZoom = z;
+  document.documentElement.style.setProperty('--ui-zoom', String(z));
+  calibrateZoom();
+  placeCorner();
+}
+function calibrateZoom() {
+  const root = document.documentElement.style;
+  root.removeProperty('--vw'); root.removeProperty('--vh');
+  rectScale = 1;
+  if (uiZoom === 1) return;
+  const p = document.createElement('div');
+  p.style.cssText = 'position:fixed;left:0;top:0;width:calc(100 * var(--vw));height:1px;visibility:hidden;pointer-events:none';
+  document.body.appendChild(p);
+  const w = p.getBoundingClientRect().width, own = p.offsetWidth;
+  if (w > 0 && own > 0) {
+    // 1 when rects are already screen pixels, else uiZoom (offsetWidth is rounded)
+    rectScale = Math.abs(w / own - uiZoom) < Math.abs(w / own - 1) ? 1 : uiZoom;
+    // vw/vh not grown by the zoom here: one viewport percent is plain vw.
+    if (Math.abs(w * rectScale - innerWidth) > 4) { root.setProperty('--vw', '1vw'); root.setProperty('--vh', '1vh'); }
+  }
+  p.remove();
+}
+// An element's rect in screen pixels, whichever way the engine reports zoomed rects.
+function zoomRect(el) {
+  const r = el.getBoundingClientRect(), k = rectScale;
+  if (k === 1) return r;
+  return { left: r.left * k, right: r.right * k, top: r.top * k, bottom: r.bottom * k, width: r.width * k, height: r.height * k };
+}
+// The right nav grows down from the top, the bottom bar up from the bottom, and the gauge
+// + camera pad and the clock sit in the bottom-right corner between them. When they meet
+// (a big UI size, a short screen, many buttons) the corner moves rather than being
+// covered: the gauge + pad beside the nav, and the clock and gauge + pad above the bar.
+function placeCorner() {
+  const rn = document.getElementById('rightnav'), lr = document.getElementById('lowerright');
+  const clock = document.getElementById('clock'), bar = document.getElementById('bottomstack');
+  if (!rn || !lr || !clock || !bar) return;
+  lr.style.right = ''; lr.style.bottom = ''; clock.style.bottom = '';
+  const b = zoomRect(bar);
+  // Screen pixels from the bottom edge to y, in the zoomed pixels bottom is set in.
+  const above = (y, gap) => `${(innerHeight - y) / uiZoom + gap}px`;
+  const meets = q => b.height > 0 && q.left < b.right && q.right > b.left && q.bottom > b.top;
+  if (meets(zoomRect(clock))) clock.style.bottom = above(b.top, 8);
+  // Lift the gauge + pad clear of the bar and the clock; lifting can carry it into the
+  // nav, and moving it beside the nav can bring it over the bar, so lift again after.
+  const lift = () => {
+    lr.style.bottom = '';
+    const r = zoomRect(lr), c = zoomRect(clock);
+    let top = Infinity;
+    if (meets(r)) top = b.top;
+    if (r.left < c.right && r.right > c.left && r.bottom > c.top) top = Math.min(top, c.top);
+    if (top < Infinity) lr.style.bottom = above(top, 10);
+  };
+  lift();
+  const nav = zoomRect(rn), r = zoomRect(lr);
+  if (nav.height > 0 && nav.bottom > r.top && nav.left < r.right) {
+    lr.style.right = `calc(14px + var(--sar) + ${nav.width / uiZoom}px)`;
+    lift();
+  }
+}
+if (window.ResizeObserver) {
+  const ro = new ResizeObserver(placeCorner);
+  ro.observe(document.getElementById('rightnav'));
+  ro.observe(document.getElementById('bottomstack'));
+}
+addEventListener('resize', placeCorner);
 function applyTheme(isDay) {
   mapIsDay = !!isDay;
   document.documentElement.setAttribute('data-theme', mapIsDay ? 'day' : 'night');
@@ -873,7 +970,11 @@ addEventListener('pointermove', e => {
   // touch/pen there's no hover to ride, and a tap's micro-move would drop the "big A" under
   // the finger/button and clash with the placed-dot label; touch relies on the dot letters
   // + the "Tap Point A/B" banner instead.
-  if (mapTap && (abFlow === 'straight' || abFlow === 'curve') && e.pointerType === 'mouse') updateAbCursorLabel(e.clientX, e.clientY);
+  // Only over the map itself: over a button or a menu it isn't where the next point goes (#399).
+  if (mapTap && (abFlow === 'straight' || abFlow === 'curve') && e.pointerType === 'mouse') {
+    if (e.target && e.target.id === 'ck') updateAbCursorLabel(e.clientX, e.clientY);
+    else if (abLabelEl) abLabelEl.classList.remove('show');
+  }
   if (editDragIdx >= 0 && editSession) {       // drag the grabbed handle
     const w = s2w(e.clientX, e.clientY);
     if (w) editSession.points[editDragIdx] = editSession.kind === 'headland' ? hlSnap(w.e, w.n) : { e: w.e, n: w.n };
@@ -962,7 +1063,7 @@ const HOTKEY_CMD = {
   NudgeLeft: 'track.nudgeLeft', NudgeRight: 'track.nudgeRight',
   ManualSection: 'section.manual', AutoSection: 'section.master',
 };
-const HOTKEY_TIER1 = { Flag: 'flag.placeHere' }; // markers — not control-gated (like the button)
+const HOTKEY_TIER1 = { Flag: 'flag.placeHere' }; // markers (still need control, like every command)
 const HOTKEY_UI = {
   FieldMenu: () => document.getElementById('ln-fieldops').dispatchEvent(new PointerEvent('pointerdown')),
   VehicleSettings: () => document.getElementById('ln-vehicle').dispatchEvent(new PointerEvent('pointerdown')),
@@ -999,8 +1100,7 @@ addEventListener('keydown', e => {
   transport.send(cmd);
 });
 // ---- simulator bar (Phase 6) — mirrors the native SimulatorPanel ----
-// Sim is Tier-1 (hardware-safe), so the bar's commands aren't gated by control
-// authority — anyone driving the sim is fine. Panel *visibility* is client-local
+// Like every command, the bar's need control (an observer changes nothing, #397). Panel *visibility* is client-local
 // (the host's IsSimulatorPanelVisible is a native-only concept); enabled/speed/
 // steer are host state, mirrored back over the Status frame.
 const SIM = {
@@ -1053,13 +1153,14 @@ SIM.launch.addEventListener('pointerdown', e => {
 // phases add more cards into the same host and reuse openDialog/closeDialog.
 const dialogHost = document.getElementById('dialoghost');
 let _confirmCb = null;
+let _confirmBack = null; // reopens the dialog the confirm was asked from, after OK or Cancel
 function openDialog(cardId) {
   for (const c of dialogHost.querySelectorAll('.dlg-card')) c.classList.toggle('open', c.id === cardId);
   dialogHost.classList.add('open');
 }
 function closeDialog() {
   hideKeyboard();
-  dialogHost.classList.remove('open'); _confirmCb = null;
+  dialogHost.classList.remove('open'); _confirmCb = null; _confirmBack = null;
 }
 // Lower the Android soft keyboard via the native bridge (window.agnative, wired by the Android
 // head to InputMethodManager). No-op on iOS/desktop, where blur() already dismisses.
@@ -1087,8 +1188,9 @@ document.addEventListener('focusout', e => {
 // Shared confirm (unified nav model) — replaces browser confirm() + the native
 // ShowConfirmationDialog. Transparent light-dismiss scrim (backdrop tap / Cancel = no
 // action); Confirm runs the callback. Hosted in the dialog host (now a transparent leaf).
-function showConfirm(title, message, onConfirm) {
+function showConfirm(title, message, onConfirm, onBack) {
   _confirmCb = onConfirm || null;
+  _confirmBack = onBack || null;
   document.getElementById('dlgc-title').textContent = title || tr('Confirm');
   document.getElementById('dlgc-msg').textContent = message || '';
   openDialog('dlg-confirm');
@@ -1302,10 +1404,13 @@ document.getElementById('dlg-ok').addEventListener('pointerdown', e => {
     transport.send('sim.setCoords|' + lat + ',' + lon);
   closeDialog();
 });
-document.getElementById('dlgc-cancel').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); closeDialog(); });
+document.getElementById('dlgc-cancel').addEventListener('pointerdown', e => {
+  e.preventDefault(); e.stopPropagation();
+  const back = _confirmBack; closeDialog(); if (back) back();
+});
 document.getElementById('dlgc-ok').addEventListener('pointerdown', e => {
   e.preventDefault(); e.stopPropagation();
-  const cb = _confirmCb; closeDialog(); if (cb) cb();
+  const cb = _confirmCb, back = _confirmBack; closeDialog(); if (cb) cb(); if (back) back();
 });
 
 // ---- unsaved-coverage guard (server-driven) ----
@@ -1345,7 +1450,7 @@ sectionBar.addEventListener('pointerdown', e => {
 
 // ---- bottom nav (Phase 8) — field-tools toolbar + Flags/AB-line flyouts ----
 // Direct-action field tools. Tier-2 ids (data-t2: track.* / headland.* / youturn.skip*)
-// fire only while we hold control (the host re-gates); the rest are Tier-1. Toggle
+// are dimmed and fire only while we hold control; every other command needs it too (#397). Toggle
 // READ state rides the Tick (tick.tools); AB-dependent buttons key off activeTrackName.
 const bottomNav = document.getElementById('bottomnav');
 const bnFlags = document.getElementById('bn-flyout-flags');
@@ -1569,20 +1674,20 @@ function showAbBar(setPoint, undo, finish) {
   drawBar.querySelector('#draw-finish').style.display = finish ? '' : 'none';
   drawBar.classList.add('show');
 }
-function startDrawTrack(mode) {           // map-tap straight/curve (ungated — creating data)
+function startDrawTrack(mode) {           // map-tap straight/curve
   abFlow = mode; drawMode = mode; drawPts = [];
   transport.send(mode === 'straight' ? 'track.drawStraight' : 'track.drawCurve');
   showAbBar(false, mode === 'curve', mode === 'curve');
   startMapTap({ hint: abHint(), onTap: drawTap });
 }
-function startDriveAB() {                  // GPS: set A then B at the vehicle (ungated)
-  abFlow = 'driveAB'; driveStep = 0; drawPts = []; // drawPts holds the dropped A/B markers
+function startDriveAB() {                  // GPS: set A then B at the vehicle
+  abFlow = 'driveAB'; driveStep = 0; drawPts = []; driveRaw = []; // drawPts holds the dropped A/B markers
   transport.send('track.driveAB');
   showAbBar(true, false, false);
   document.getElementById('draw-setpoint').textContent = tr('Set Point A');
   hintEl.classList.add('show'); setAbHint();
 }
-function startRecordCurve() {              // GPS: record by driving — Set Start → Set End (ungated)
+function startRecordCurve() {              // GPS: record by driving — Set Start → Set End
   abFlow = 'recordCurve'; driveStep = 0; curveMarks = []; _lastCurveMark = null;
   // Recording doesn't begin until "Set Start" (deferred track.recordCurve), so the operator
   // can position at the curve's start first. The set-point button drives the two-step.
@@ -1591,43 +1696,78 @@ function startRecordCurve() {              // GPS: record by driving — Set Sta
   hintEl.classList.add('show'); setAbHint();
 }
 // "Bnd. Curve" — tap point A then point B on the boundary; the host walks the shorter arc
-// between them and builds a curve following the boundary. Points snap to the nearest boundary
-// vertex for display; the host re-snaps authoritatively.
-function nearestBoundaryPt(e, n) {
-  let best = null, bd = Infinity;
-  const bs = scene && scene.boundaries;
-  if (bs) for (const ring of bs) for (const p of ring) {
-    const dx = p.e - e, dy = p.n - n, d = dx * dx + dy * dy;
-    if (d < bd) { bd = d; best = p; }
-  }
-  return best ? { e: best.e, n: best.n } : { e, n };
-}
+// between them and builds a curve following the boundary. Each tap lands on the fence where
+// it's nearest (a corner when one is close) for display; the host projects it again.
 function startBoundaryCurve() {
   abFlow = 'boundaryCurve'; drawPts = [];
   showAbBar(false, false, false);          // draw toolbar shows just Cancel
   startMapTap({ hint: tr('Tap point A on the boundary'), onTap: boundaryCurveTap });
 }
 function boundaryCurveTap(e, n) {
-  drawPts.push(nearestBoundaryPt(e, n));   // snap A/B to the nearest boundary vertex (dot shown)
+  drawPts.push(snapToFence(e, n, Infinity)); // A/B on the fence (dot shown)
   if (drawPts.length < 2) { hintEl.textContent = tr('Tap point B on the boundary'); return; }
   const a = drawPts[0], b = drawPts[1];
   transport.send('track.boundaryCurveSeg|' + a.e.toFixed(3) + ',' + a.n.toFixed(3) + ',' + b.e.toFixed(3) + ',' + b.n.toFixed(3));
   endAbFlow();
 }
+// A drawn line is the edge between passes (PassGeometry), as in AgOpenGPS's FormABDraw,
+// whose taps all land on fence points. A tap near the fence snaps onto it (a corner when
+// one is close, else the nearest point on the fence), so a line drawn along the boundary
+// lies on it and its first pass is half a width inside. Measured on screen, so the reach
+// is the same at any zoom or tilt.
+const FENCE_SNAP_PX = 24;
+function snapToFence(e, n, reach = FENCE_SNAP_PX) {
+  const bs = scene && scene.boundaries;
+  if (!bs) return { e, n };
+  const t = w2s(e, n);
+  const px = (q) => { const s = w2s(q.e, q.n); return Math.hypot(s[0] - t[0], s[1] - t[1]); };
+  let corner = null, cd = FENCE_SNAP_PX, edge = null, ed = reach;
+  for (const ring of bs) for (let i = 0; i < ring.length; i++) {
+    const a = ring[i], b = ring[(i + 1) % ring.length];
+    const d = px(a);
+    if (d < cd) { cd = d; corner = a; }
+    const dx = b.e - a.e, dn = b.n - a.n, len2 = dx * dx + dn * dn;
+    if (len2 === 0) continue;
+    const u = Math.max(0, Math.min(1, ((e - a.e) * dx + (n - a.n) * dn) / len2));
+    const q = { e: a.e + u * dx, n: a.n + u * dn }, dq = px(q);
+    if (dq < ed) { ed = dq; edge = q; }
+  }
+  const p = corner || edge;
+  return p ? { e: p.e, n: p.n } : { e, n };
+}
 function drawTap(e, n) {                    // map-tap point captured (straight/curve)
+  ({ e, n } = snapToFence(e, n));
   drawPts.push({ e, n });
   transport.send('track.drawPoint|' + e.toFixed(3) + ',' + n.toFixed(3));
   // Straight = exactly 2 points; the host auto-creates the line on the 2nd, so we're done.
   if (abFlow === 'straight' && drawPts.length >= 2) { endAbFlow(); return; }
   setAbHint();
 }
+// A driven line's reference goes to the implement's edge on the First pass side (the host's
+// RefSideOffset), so the A/B markers and path dots go there too, not under the tractor.
+let driveRaw = [];       // Drive-AB A/B at the vehicle, to re-place both on the A→B heading
+function refEdgePt(e, n, h) {
+  const t = config && config.tool;
+  const half = Math.max(0, toolWidthM() - ((t && t.overlap) || 0)) * 0.5;
+  const d = (qabSide === 'right' ? half : -half) + ((t && t.offset) || 0);
+  return { e: e + Math.sin(h + Math.PI / 2) * d, n: n + Math.cos(h + Math.PI / 2) * d };
+}
+function poseEdgePt() { const p = tick.pose; return refEdgePt(p.e, p.n, p.heading || 0); }
 function abSetPoint() {                     // Set-point button — drives Drive-AB and record-curve
   const btn = document.getElementById('draw-setpoint');
   if (abFlow === 'driveAB') {
     if (driveStep > 1) return;             // guard a double-B while B lingers
     transport.send('track.setABGps');      // SetABPoint uses live GPS in DriveAB mode
-    // Drop an A/B marker at the vehicle so the operator sees where each point landed.
-    if (tick && tick.pose) drawPts.push({ e: tick.pose.e, n: tick.pose.n });
+    // Drop an A/B marker where the line will lie. B fixes the heading the host shifts by
+    // (A→B), so both markers are placed again on it.
+    if (tick && tick.pose) {
+      driveRaw.push({ e: tick.pose.e, n: tick.pose.n });
+      if (driveRaw.length >= 2) {
+        const a = driveRaw[0], b = driveRaw[driveRaw.length - 1];
+        const h = Math.atan2(b.e - a.e, b.n - a.n);
+        drawPts = driveRaw.slice(0, 2).map(p => refEdgePt(p.e, p.n, h));
+      } else drawPts.push(poseEdgePt());
+    }
     if (driveStep === 0) { driveStep = 1; btn.textContent = tr('Set Point B'); setAbHint(); }
     else {                                  // B set → host created the line; show B a beat, then clear
       driveStep = 2;
@@ -1639,13 +1779,13 @@ function abSetPoint() {                     // Set-point button — drives Drive
       transport.send('track.recordCurve');
       driveStep = 1; btn.textContent = tr('Set Point B');
       if (tick && tick.pose) {
-        drawPts.push({ e: tick.pose.e, n: tick.pose.n });   // labeled "A" endpoint dot (orange)
+        drawPts.push(poseEdgePt());                          // labeled "A" endpoint dot (orange)
         _lastCurveMark = { e: tick.pose.e, n: tick.pose.n }; // seed green-dot spacing; no dot at A itself
       }
       setAbHint();
     } else {                                // Set Point B → drop the B endpoint + finish
       driveStep = 2;
-      if (tick && tick.pose) drawPts.push({ e: tick.pose.e, n: tick.pose.n }); // labeled "B" endpoint dot (blue)
+      if (tick && tick.pose) drawPts.push(poseEdgePt());    // labeled "B" endpoint dot (blue)
       transport.send('track.finishCurve');  // host builds the curve from its recorded points
       setTimeout(() => { if (abFlow === 'recordCurve') endAbFlow(); }, 700);   // show B a beat, then clear
     }
@@ -1669,7 +1809,7 @@ function abCancel() {
   endAbFlow();
 }
 function endAbFlow() {
-  abFlow = null; drawMode = null; drawPts = []; driveStep = 0;
+  abFlow = null; drawMode = null; drawPts = []; driveRaw = []; driveStep = 0;
   curveMarks = []; _lastCurveMark = null; // clear record-curve path dots
   drawBar.classList.remove('show');
   endMapTap();
@@ -1682,7 +1822,7 @@ function sampleCurveMark() {
   const p = tick.pose;
   if (_lastCurveMark && Math.hypot(p.e - _lastCurveMark.e, p.n - _lastCurveMark.n) < 1.5) return;
   _lastCurveMark = { e: p.e, n: p.n };
-  curveMarks.push(_lastCurveMark);
+  curveMarks.push(poseEdgePt());
 }
 function drawCurveMarksSk(canvas) {
   if (!curveMarks.length) return;
@@ -1907,7 +2047,7 @@ let trkSel = -1; // index into scene.trackList, or -1
 function openTracksManager() { trkSel = -1; renderTracksList(); openDialog('dlg-tracks'); }
 function renderTracksList() {
   // Dim the guidance-affecting actions when we're not the operator. Delete/swap/activate
-  // change the active line; import, visibility and rec-path display are data → ungated.
+  // change the active line (every action needs control, #397; these are dimmed).
   for (const id of ['trk-delete', 'trk-swap', 'trk-activate'])
     document.getElementById(id).classList.toggle('disabled', !iHoldControl);
   const list = document.getElementById('trk-list');
@@ -1937,7 +2077,7 @@ function renderTracksList() {
     });
     const cb = row.querySelector('.trk-vis');
     cb.addEventListener('change', e => {
-      e.stopPropagation(); // visibility is display-only → ungated (any browser)
+      e.stopPropagation();
       transport.send('track.setVisible|' + t.index + ',' + (cb.checked ? 1 : 0));
     });
     list.appendChild(row);
@@ -1949,7 +2089,8 @@ document.getElementById('trk-delete').addEventListener('pointerdown', e => {
   const t = (scene && scene.trackList || [])[trkSel];
   if (!t) { showToast(tr('Select a track first')); return; }
   showConfirm(tr('Delete Track'), tr("Delete '{name}'? This cannot be undone.", { name: t.name }),
-    () => { transport.send('track.delete|' + t.index); trkSel = -1; });
+    () => { transport.send('track.delete|' + t.index); trkSel = -1; },
+    () => { renderTracksList(); openDialog('dlg-tracks'); }); // stay in the manager to delete more
 });
 document.getElementById('trk-swap').addEventListener('pointerdown', e => {
   e.preventDefault(); e.stopPropagation();
@@ -1974,7 +2115,7 @@ document.getElementById('dlg-tracks-close').addEventListener('pointerdown', e =>
 // ---- left nav (Phase 9) — config/settings panels via the config bridge ----
 // Vertical button bar; each button toggles a non-modal panel (only one open at a
 // time). Panels READ from the config frame (or existing frames, e.g. units =
-// Status.isMetric) and WRITE via `config.set|key:value` (Tier-1; the host applies it
+// Status.isMetric) and WRITE via `config.set|key:value` (needs control; the host applies it
 // to ConfigurationStore). Grows one entry per sub-phase.
 // Navigation: top-level buttons open a panel; sub-panels (vehicle/tool config) are
 // reached from the hub and carry a Back button. One panel open at a time.
@@ -1999,6 +2140,8 @@ function lnCloseAll() {
   document.getElementById('ln-fieldtools').classList.remove('active');
 }
 function lnOpen(panelId, navBtnId, onOpen) {
+  // Opening a menu leaves an AB line being drawn on the map, like Esc (#399).
+  if (abFlow === 'straight' || abFlow === 'curve') abCancel();
   lnCloseAll();
   document.getElementById(panelId).classList.add('open');
   if (!NO_SCRIM.has(panelId)) lnScrim.classList.add('open'); // transparent light-dismiss
@@ -2221,7 +2364,7 @@ document.getElementById('fb-trk-rename').addEventListener('pointerdown', e => {
   input.addEventListener('blur', commit);
 });
 // ---- Field Builder Headland tab (stage 2) — segment list + build ----------------------
-// Building is field-data editing (Tier-1, ungated). Line/Curve = tap two boundary points
+// Line/Curve = tap two boundary points
 // on the main map (host snaps + builds the inward offset + the headland polygon); Whole
 // Boundary = the entire boundary offset inward. The host runs ALL geometry — the client
 // only captures the two taps + the offset and ships them (no headland math in JS).
@@ -2314,7 +2457,7 @@ document.getElementById('fb-hl-rename').addEventListener('pointerdown', e => {
 });
 // ---- Field Builder Tram tab (stage 3) — system list + per-system editor --------------
 // Systems live in ConfigStore.Tram.Systems (host SoT); the browser sends field edits and
-// the host regenerates the lines + persists. Tram building is field-data editing (Tier-1).
+// the host regenerates the lines + persists.
 let fbTramSel = -1;
 let fbTramPendingEdit = false; // open the editor on the system we just added (native parity)
 function openTramEditor() {
@@ -2429,7 +2572,7 @@ document.getElementById('bp-leftright').addEventListener('pointerdown', e => { e
 document.getElementById('bp-antennatool').addEventListener('pointerdown', e => { e.stopPropagation(); transport.send('boundary.toggleAntennaTool'); });
 document.getElementById('bp-stop').addEventListener('pointerdown', e => { e.stopPropagation(); transport.send('boundary.stop'); transport.send('boundary.refresh'); lnOpen('boundarymenu', 'ln-fieldtools', renderBoundaryMenu); });
 document.getElementById('bp-record').addEventListener('pointerdown', e => { e.stopPropagation(); transport.send('boundary.toggleRecording'); });
-// Offset Fix D-pad (argless Tier-1 commands).
+// Offset Fix D-pad (argless commands).
 for (const b of document.querySelectorAll('#offsetfix .of-btn'))
   b.addEventListener('pointerdown', e => { e.stopPropagation(); transport.send(b.dataset.cmd); });
 // Manual Easting/Northing entry → absolute set (offset.set|E,N).
@@ -2454,6 +2597,9 @@ for (const b of saPanel.querySelectorAll('.sa-tgl'))
   b.addEventListener('pointerdown', e => { e.stopPropagation(); cfgSend(b.dataset.key, b.classList.contains('active') ? '0' : '1'); });
 for (const b of saPanel.querySelectorAll('.sa-act'))
   b.addEventListener('pointerdown', e => { e.stopPropagation(); transport.send(b.dataset.cmd); });
+// On click, not pointerdown: the panel resizes under the finger once the new size applies.
+for (const b of saPanel.querySelectorAll('.sa-scale'))
+  b.addEventListener('click', e => { e.stopPropagation(); cfgSend('display.uiScale', b.dataset.scale); });
 const saExtra = document.getElementById('sa-extracount');
 saExtra.addEventListener('change', () => { const v = parseInt(saExtra.value); if (Number.isFinite(v)) cfgSend('display.extraGuidelinesCount', v); });
 function populateScreenAlerts() {
@@ -2462,6 +2608,7 @@ function populateScreenAlerts() {
   for (const b of saPanel.querySelectorAll('.sa-tgl')) b.classList.toggle('active', !!d[b.dataset.key.split('.')[1]]);
   if (document.activeElement !== saExtra) saExtra.value = d.extraGuidelinesCount;
   document.getElementById('sa-quality').textContent = d.resolutionLabel || '—';
+  for (const b of saPanel.querySelectorAll('.sa-scale')) b.classList.toggle('active', +b.dataset.scale === (d.uiScale || 100));
 }
 // Vehicle config panel — full native VehicleConfigDialog surface (Vehicle/GPS/Roll).
 // Generic config controls keyed by data-key="<section>.<field>"; reused by later
@@ -2814,8 +2961,8 @@ function populateSmartWas() {
 }
 
 // ---- Network IO (Phase 9) — modules / scan / subnet / host IPs / NTRIP. Reads ride
-// the Status frame; writes are config.set (module-present, Tier-1), net.scan (Tier-1),
-// net.subnet (Tier-2 gated), and ntrip.* profile CRUD. The NTRIP editor keeps its
+// the Status frame; writes are config.set (module-present), net.scan, net.subnet and
+// ntrip.* profile CRUD, all needing control. The NTRIP editor keeps its
 // editing buffer client-side; Save sends every field at once. ----
 const nioPanel = document.getElementById('networkio');
 nioPanel.addEventListener('pointerdown', e => e.stopPropagation());
@@ -3113,7 +3260,8 @@ document.getElementById('nte-test').addEventListener('pointerdown', e => {
   _nteTestActive = true;
   st.textContent = tr('Testing connection...');
   const ver = document.getElementById('nte-ver').value;
-  transport.send('ntrip.test|' + [host, port, mount, user, pass, ver].join('\t'));
+  // pass is the host's mask for a stored password; the id lets the host use that one (#397); fork: version last
+  transport.send('ntrip.test|' + [host, port, mount, user, pass, (nteBuf && nteBuf.id) || '', ver].join('\t'));
 });
 document.getElementById('nte-save').addEventListener('pointerdown', e => {
   e.stopPropagation();
@@ -3138,7 +3286,7 @@ document.getElementById('nte-save').addEventListener('pointerdown', e => {
 // ---- Field Operations (Phase 9) — field/job lifecycle. Fly-out launches the
 // Fields-and-Jobs chain panel (fields table + jobs + new-job form) and New Field.
 // Reads ride the FieldOps frame; writes are field.* commands (host-driven via the real
-// StartWorkSessionDialogViewModel). Tier-1 (data management); deletes confirm client-side.
+// StartWorkSessionDialogViewModel); deletes confirm client-side.
 const JOB_STATUS = [tr('In progress'), tr('Done'), tr('Abandoned')];
 let fjSelField = null, fjSelJob = null;
 
@@ -3371,6 +3519,7 @@ function renderAgSettings() {
   document.getElementById('ag-teststatus').textContent = agShare.status || '';
 }
 document.getElementById('ag-server').addEventListener('change', () => cfgSend('conn.agShareServer', document.getElementById('ag-server').value.trim()));
+// The field holds the host's mask while a key is stored; sending the mask back keeps it (#397).
 document.getElementById('ag-key').addEventListener('change', () => cfgSend('conn.agShareApiKey', document.getElementById('ag-key').value.trim()));
 document.getElementById('ag-enabled').addEventListener('pointerdown', e => { e.stopPropagation(); cfgSend('conn.agShareEnabled', e.currentTarget.classList.contains('active') ? '0' : '1'); });
 document.getElementById('ag-test').addEventListener('pointerdown', e => {
@@ -3582,24 +3731,128 @@ function renderBugReport() {
   document.getElementById('br-status').textContent = s;
   const m = /(bugreport_[^\/\\]+\.zip)$/.exec(s);
   brFile = m ? m[1] : null;
-  for (const id of ['br-download', 'br-github', 'br-github-hint'])
+  for (const id of ['br-sendbox', 'br-download'])
     document.getElementById(id).style.display = brFile ? '' : 'none';
+  // Send Report state, as BugReportRemote codes it: sending, queued, sent|n|url, accepted, rejected|msg.
+  const ss = appInfo ? (appInfo.bugReportSendStatus || '') : '';
+  const bar = ss.indexOf('|'), kind = bar < 0 ? ss : ss.slice(0, bar), rest = bar < 0 ? '' : ss.slice(bar + 1);
+  const issueUrl = kind === 'sent' ? rest.slice(rest.indexOf('|') + 1) : '';
+  document.getElementById('br-sendstatus').textContent =
+    kind === 'sending' ? tr('Sending…')
+    : kind === 'queued' ? tr('No connection: the report sends by itself when the device is back online.')
+    : kind === 'sent' ? tr('Sent as issue #{n}. Thank you!', { n: rest.split('|')[0] })
+    : kind === 'accepted' ? tr('Sent. Thank you! The GitHub issue opens shortly.')
+    : kind === 'rejected' ? tr('Not sent: {reason}', { reason: rest })
+    : '';
+  brIssueUrl = issueUrl || null;
+  document.getElementById('br-openissue').style.display = brIssueUrl ? '' : 'none';
+  brSendBusy = ['sending', 'queued', 'sent', 'accepted'].includes(kind);
+  if (brFile !== brFilesFor) { brFiles = []; brFilesFor = brFile; renderBrFiles(); }
+  document.getElementById('br-attach').disabled = brSendBusy || brAttaching;
+  brUpdateSend();
 }
+// Screenshots and files: each one is posted to the host as it is picked and goes into the
+// dump under attachments/ (BugReportAttachments). Only the screen holding control may add.
+let brFiles = [], brFilesFor = null, brAttaching = false;
+const brSize = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+function renderBrFiles() {
+  const box = document.getElementById('br-files'); box.innerHTML = '';
+  for (const f of brFiles) {
+    const row = document.createElement('div'); row.className = 'br-filerow';
+    const nm = document.createElement('span'); nm.className = 'br-fname'; nm.textContent = f.name; nm.translate = false;
+    const sz = document.createElement('span'); sz.className = 'br-fsize'; sz.textContent = brSize(f.size);
+    const x = document.createElement('button'); x.className = 'ln-x'; x.textContent = '✕'; x.title = tr('Remove');
+    x.disabled = brSendBusy;
+    x.addEventListener('pointerdown', e => { e.stopPropagation(); brChangeFiles('detach', f.name, new Uint8Array(0)); });
+    row.append(nm, sz, x); box.appendChild(row);
+  }
+}
+async function brChangeFiles(op, name, body) {
+  const st = document.getElementById('br-attachstatus');
+  const q = new URLSearchParams({ zip: brFile, name, client: myClientId || '' });
+  let res, reply = null;
+  try {
+    res = await fetch('/bugreports/' + op + '?' + q, { method: 'POST', body });
+    if (res.ok) reply = await res.json();
+  } catch (_) { st.textContent = tr('Could not add {name}', { name }); return false; }
+  if (res.status === 403) { st.textContent = tr('View only: another screen has control'); return false; }
+  if (res.status === 413) { st.textContent = tr('{name} is too large (20 MB at most)', { name }); return false; }
+  if (!reply) { st.textContent = tr('Could not add {name}', { name }); return false; }
+  const why = {
+    TooLarge: tr('{name} is too large (20 MB at most)', { name }),
+    TotalTooLarge: tr('Attachments are limited to 25 MB in all'),
+    TooMany: tr('At most 10 attachments'),
+    Empty: tr('{name} is empty', { name }),
+    Busy: tr('The report is being sent; try again in a moment'),
+  }[reply.refusal];
+  if (reply.refusal !== 'Busy') { brFiles = reply.files; renderBrFiles(); }
+  st.textContent = why || tr('Like the rest of the report, attachments go only to the maintainers.');
+  return !why;
+}
+document.getElementById('br-attach').addEventListener('click', e => {
+  e.stopPropagation();
+  if (brFile && !brSendBusy && !brAttaching) document.getElementById('br-file').click();
+});
+document.getElementById('br-file').addEventListener('change', async e => {
+  const picked = [...e.target.files]; e.target.value = '';
+  if (!picked.length || !brFile) return;
+  brAttaching = true; document.getElementById('br-attach').disabled = true;
+  for (const f of picked) {
+    document.getElementById('br-attachstatus').textContent = tr('Adding {name}…', { name: f.name });
+    if (f.size > 20 * 1048576) { document.getElementById('br-attachstatus').textContent = tr('{name} is too large (20 MB at most)', { name: f.name }); break; }
+    if (!await brChangeFiles('attach', f.name, f)) break;
+  }
+  brAttaching = false; document.getElementById('br-attach').disabled = brSendBusy;
+});
+let brIssueUrl = null, brSendBusy = false;
+// Send needs what the bug report service checks too (Tools/bugreport-worker reports.js):
+// a title and description long enough to act on, and a GitHub username or an email to reply
+// to. Create needs nothing: it captures the moment.
+const BR_MIN_TITLE = 15, BR_MIN_DESC = 40;
+const brOne = id => document.getElementById(id).value.replace(/\t/g, ' ').trim();
+const brChars = s => [...s].length;
+function brMissing() {
+  const t = BR_MIN_TITLE - brChars(brOne('br-title'));
+  if (t > 0) return tr('Title: {n} more characters', { n: t });
+  const d = BR_MIN_DESC - brChars(document.getElementById('br-desc').value.trim());
+  if (d > 0) return tr('Description: {n} more characters', { n: d });
+  const gh = brOne('br-ghuser').replace(/^@/, ''), em = brOne('br-email');
+  if (gh && !/^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/.test(gh)) return tr('Not a GitHub username');
+  if (em && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)) return tr('Not an email address');
+  if (!gh && !em) return tr('Add your GitHub username or email so we can reply');
+  return '';
+}
+function brUpdateSend() {
+  const need = brMissing();
+  document.getElementById('br-need').textContent = brSendBusy ? '' : need;
+  document.getElementById('br-send').disabled = brSendBusy || !!need;
+}
+for (const id of ['br-title', 'br-desc', 'br-ghuser', 'br-email'])
+  document.getElementById(id).addEventListener('input', brUpdateSend);
+try {
+  document.getElementById('br-ghuser').value = localStorage.getItem('agopenweb.bugReportGitHub') || '';
+  document.getElementById('br-email').value = localStorage.getItem('agopenweb.bugReportEmail') || '';
+} catch (_) { }
+document.getElementById('br-send').addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  if (!brFile || brMissing()) return;
+  const gh = brOne('br-ghuser').replace(/^@/, ''), em = brOne('br-email');
+  try { localStorage.setItem('agopenweb.bugReportGitHub', gh); localStorage.setItem('agopenweb.bugReportEmail', em); } catch (_) { }
+  document.getElementById('br-sendstatus').textContent = tr('Sending…');
+  document.getElementById('br-send').disabled = true;
+  transport.send('app.bugReport.send|' + [brFile, gh, em, brOne('br-title'), document.getElementById('br-desc').value].join('\t'));
+});
+document.getElementById('br-docs').addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  openExternal('https://docs.agopengps.com/');
+});
+document.getElementById('br-openissue').addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  if (brIssueUrl) openExternal(brIssueUrl);
+});
 document.getElementById('br-download').addEventListener('pointerdown', e => {
   e.stopPropagation();
   if (brFile) openExternal(location.origin + '/bugreports/' + encodeURIComponent(brFile));
-});
-// GitHub's bug form, prefilled through its field ids (.github/ISSUE_TEMPLATE/bug_report.yml).
-// A URL can't carry the zip, so the user drags in the one Download saved.
-document.getElementById('br-github').addEventListener('pointerdown', e => {
-  e.stopPropagation();
-  const q = new URLSearchParams({ template: 'bug_report.yml' });
-  const title = document.getElementById('br-title').value.trim();
-  const desc = document.getElementById('br-desc').value.trim();
-  if (title) q.set('title', title);
-  if (desc) q.set('description', desc.slice(0, 3000)); // keep the URL within browser limits
-  if (appInfo && appInfo.version) q.set('version', appInfo.version + (appInfo.gitHash ? ' · ' + appInfo.gitHash : ''));
-  openExternal('https://github.com/AgOpenGPS-Official/AgOpenWeb/issues/new?' + q);
 });
 document.getElementById('br-submit').addEventListener('pointerdown', e => {
   e.stopPropagation();
@@ -3960,6 +4213,7 @@ function renderRole() {
 }
 function updateControlUi() {
   iHoldControl = lastControl.held && lastControl.holderId === myClientId;
+  if (iHoldControl) applyMobileQualityCap(); // a host-wide setting: sent once we may (#397)
   if (typeof renderHostPrompt === 'function') renderHostPrompt(); // who may answer
   if (typeof updateAsGated === 'function') updateAsGated(); // re-gate AutoSteer actions
   if (document.getElementById('recpath').classList.contains('open')) renderRecPath(); // re-gate Play
@@ -4435,7 +4689,9 @@ function moduleAggColor(s) {
 }
 // Area/rate formatting — matches MainViewModel.FormatArea / WorkRateDisplay.
 function fmtArea(m2) { return fmtUnit(m2 * 0.0001, 'ha'); }
-function fmtRate(haPerHr) { return fmtUnit(haPerHr, 'ha', 1) + '/hr'; }
+function fmtRate(haPerHr) { return haPerHr == null ? '—' : fmtUnit(haPerHr, 'ha', 1) + '/hr'; }
+// Work rate from speed (m/s) × tool width; null without a tool width (#398).
+function workRateHa(speedMs) { const tw = toolWidthM(); return tw > 0 ? speedMs * 3600 * tw / 10000 : null; }
 // Workable area (m²) from the Scene the client already has: headland polygon if
 // present, else the outer boundary (shoelace) — matches WorkableAreaSqM.
 function shoelace(pts) {
@@ -4502,7 +4758,18 @@ if (fsBtn) {
   // Use 'click' (not pointerdown): requestFullscreen needs a durable user activation
   // that pointerdown doesn't reliably grant on Android Chrome (entering took 2–3 taps).
   // exitFullscreen needs no activation, so that always worked first tap.
+  // fork (feature/bedienung-1): in the desktop launcher (Photino) the Fullscreen API only fills the
+  // web view; the launcher switches the window itself on a "fullscreen|1/0" message.
+  const photino = () => !!(window.external && typeof window.external.sendMessage === 'function');
+  let winFs = null; // the launcher's state as last asked; starts as App Settings › Start Fullscreen
   fsBtn.addEventListener('click', () => {
+    if (photino()) {
+      if (winFs === null) winFs = !!(config && config.display && config.display.startFullscreen);
+      winFs = !winFs;
+      window.external.sendMessage('fullscreen|' + (winFs ? '1' : '0'));
+      fsBtn.textContent = winFs ? '🗗' : '⛶';
+      return;
+    }
     if (fsEl()) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
     const el = document.documentElement, req = el.requestFullscreen || el.webkitRequestFullscreen;
     if (req) { try { const p = req.call(el); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
@@ -4576,7 +4843,7 @@ function renderFieldCard() {
   // catches up, so keep Actual within Worked.
   const actual = Math.min(fd.actualAreaSqM, worked);
   const speedKmh = (lastTick ? lastTick.speed : 0) * 3.6;
-  const haPerHr = speedKmh * toolWidthM() / 10;
+  const haPerHr = workRateHa(lastTick ? lastTick.speed : 0);
   for (const r of FC.card.querySelectorAll('.fc-bnd')) r.classList.toggle('fc-hide', !(total > 0));
   FC.name.textContent = scene.fieldName + (s.jobName ? '  ·  ' + s.jobName : '');
   FC.worked.textContent = fmtArea(worked);
@@ -4879,9 +5146,15 @@ const UTI = {
   dist: document.getElementById('uti-distval'),
   typePath: document.getElementById('uti-typepath'),
 };
+// A tap on the arrow swaps the planned turn's direction, as in AgOpenGPS (SwapDirection, #411).
+// The host replans the turn and the arrow follows the new path's side.
+if (UTI.arrow) UTI.arrow.parentElement.addEventListener('pointerdown', e => {
+  e.preventDefault(); e.stopPropagation(); rnSend('youturn.direction');
+});
 const UTURN_GLYPH = {
   0: 'M7 34 Q7 20 20 20 Q33 20 33 34',         // Sagitta (default) — flatter rounded arch
   1: 'M9 34 L9 22 A11 11 0 0 1 31 22 L31 34',  // K-turn — squared/tighter inverted-U
+  2: 'M15 34 A9 9 0 1 1 25 34',                 // Keyhole — loop centred over a narrow neck
 };
 function renderUTurnIndicator() {
   if (!UTI.root) return;
@@ -5176,7 +5449,7 @@ function renderImportTracks() {
   }
 }
 
-// Recorded Path: GPS-driven record (Tier-1) + playback (Play is gated). All state
+// Recorded Path: GPS-driven record + playback. All state
 // comes from the host-driven RecordedPath frame; the name field is local input.
 function renderRecPath() {
   const r = recPath || { recFiles: [], isRecording: false, isPlaying: false, hasUnsaved: false, recordedPathInfo: '', resumeModeLabel: 'Start' };
@@ -5265,30 +5538,749 @@ function renderBoundaryPlayer() {
 }
 
 // Drag chart cards by the header (web docks ln-panels, but charts are free overlays
-// like the native FloatingPanel so the operator can move them out of the way).
-(function wireChartDrag() {
-  for (const key of ['steer', 'heading', 'xte']) {
-    const card = document.getElementById('chart-' + key);
-    const hdr = card.querySelector('.chart-hdr');
-    let drag = false, sx = 0, sy = 0, ox = 0, oy = 0;
-    card.addEventListener('pointerdown', e => e.stopPropagation()); // don't pan the map
-    hdr.addEventListener('pointerdown', e => {
-      if (e.target.classList.contains('chart-x')) return;
-      e.stopPropagation();
-      const r = card.getBoundingClientRect();
-      drag = true; sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
-      card.style.left = ox + 'px'; card.style.top = oy + 'px'; card.style.right = 'auto';
-      try { hdr.setPointerCapture(e.pointerId); } catch (_) {}
-    });
-    hdr.addEventListener('pointermove', e => {
-      if (!drag) return;
-      card.style.left = (ox + e.clientX - sx) + 'px';
-      card.style.top = (oy + e.clientY - sy) + 'px';
-    });
-    const end = e => { drag = false; try { hdr.releasePointerCapture(e.pointerId); } catch (_) {} };
-    hdr.addEventListener('pointerup', end);
-    hdr.addEventListener('pointercancel', end);
+// like the native FloatingPanel so the operator can move them out of the way). The VT cards,
+// made later, use wireCardDrag too.
+// The card touched last is on top of the other cards (29, the cards' layer; the others one
+// below it, still above the map's overlays at 20 and under the panels from 30 up).
+function raiseCard(card) {
+  // Every card each time: one added since (a VT card) starts at the stylesheet's 29 too.
+  for (const c of document.querySelectorAll('.chart-card')) c.style.zIndex = c === card ? '29' : '28';
+}
+function wireCardDrag(card) {
+  const hdr = card.querySelector('.chart-hdr');
+  let drag = false, sx = 0, sy = 0, ox = 0, oy = 0;
+  card.addEventListener('pointerdown', e => { e.stopPropagation(); raiseCard(card); }); // don't pan the map
+  hdr.addEventListener('pointerdown', e => {
+    raiseCard(card); // the card's own handler doesn't hear it
+    if (e.target.closest('button, select')) return;
+    e.stopPropagation();
+    const r = zoomRect(card);
+    // zoomRect and clientX are screen pixels; left/top are in the card's own (zoomed)
+    // pixels.
+    drag = true; sx = e.clientX; sy = e.clientY; ox = r.left / uiZoom; oy = r.top / uiZoom;
+    card.style.left = ox + 'px'; card.style.top = oy + 'px'; card.style.right = 'auto';
+    try { hdr.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  hdr.addEventListener('pointermove', e => {
+    if (!drag) return;
+    card.style.left = (ox + (e.clientX - sx) / uiZoom) + 'px';
+    card.style.top = (oy + (e.clientY - sy) / uiZoom) + 'px';
+  });
+  const end = e => { drag = false; try { hdr.releasePointerCapture(e.pointerId); } catch (_) {} };
+  hdr.addEventListener('pointerup', end);
+  hdr.addEventListener('pointercancel', end);
+}
+for (const id of ['chart-steer', 'chart-heading', 'chart-xte']) wireCardDrag(document.getElementById(id));
+
+// ---- VT painter ----
+// The virtual terminal's draw list (screens, soft keys, list options) painted in Canvas 2D: no
+// ISOBUS knowledge, the items in order. From SharpIsoTerm's reference painter
+// (painter/vtpaint.js, bc508cf, MIT); keep the two in step when the draw list changes.
+//   images.add(id, w, h, rgba) · vtPaintMask(ctx, screen, images) · vtPaintKey(ctx, keys, i, images)
+//   vtPaintItems(ctx, items, images) · vtHit(items, x, y)
+
+class VtImages {
+  constructor() { this.byId = new Map(); }
+  add(id, w, h, rgba) {
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    c.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
+    this.byId.set(id, c);
   }
+  get(id) { return this.byId.get(id); }
+}
+
+// The 16 pixel line art pattern as dash lengths, most significant bit first.
+function vtDash(pattern) {
+  const runs = [];
+  let bit = (pattern >> 15) & 1, run = 0;
+  if (!bit) runs.push(0); // a dash list starts with a drawn run
+  for (let i = 15; i >= 0; i--) {
+    const b = (pattern >> i) & 1;
+    if (b === bit) run++;
+    else { runs.push(run); bit = b; run = 1; }
+  }
+  runs.push(run);
+  return runs;
+}
+
+function vtStroke(ctx, it) {
+  if (!it.line || !it.lw) return false;
+  ctx.strokeStyle = it.line;
+  ctx.lineWidth = it.lw;
+  ctx.setLineDash(it.dash !== undefined ? vtDash(it.dash) : []);
+  return true;
+}
+
+function vtFill(ctx, it, images) {
+  if (it.pat) {
+    const img = images.get(it.pat);
+    if (!img) return false;
+    ctx.fillStyle = ctx.createPattern(img, "repeat");
+    return true;
+  }
+  if (!it.fill) return false;
+  ctx.fillStyle = it.fill;
+  return true;
+}
+
+// Text in a box of fixed font cells: a monospace face stretched to the cell.
+function vtText(ctx, it) {
+  const style = it.style || 0;
+  let c = it.c || "#000000", bg = it.bg;
+  if (style & 16 && bg) [c, bg] = [bg, c]; // inverted
+  if (bg) { ctx.fillStyle = bg; ctx.fillRect(it.x, it.y, it.w, it.h); }
+  const fw = it.fw || 8, fh = it.fh || 8;
+  const perLine = Math.max(1, Math.floor(it.w / fw));
+  let lines = [];
+  for (const para of it.s.split(/\r\n|\n|\r/)) {
+    if (!it.wrap || para.length <= perLine) { lines.push(para); continue; }
+    let rest = para;
+    while (rest.length > perLine) {
+      let cut = rest.lastIndexOf(" ", perLine);
+      if (cut <= 0) cut = perLine;
+      lines.push(rest.slice(0, cut));
+      rest = rest.slice(cut).replace(/^ /, "");
+    }
+    lines.push(rest);
+  }
+  lines = lines.slice(0, Math.max(1, Math.floor(it.h / fh)));
+  const total = lines.length * fh;
+  let y = it.vj === 1 ? it.y + (it.h - total) / 2 : it.vj === 2 ? it.y + it.h - total : it.y;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(it.x, it.y, it.w, it.h);
+  ctx.clip();
+  ctx.font = `${style & 8 ? "italic " : ""}${style & 1 ? "bold " : ""}${fh}px ui-monospace, Menlo, Consolas, monospace`;
+  ctx.textBaseline = "alphabetic";
+  const advance = ctx.measureText("M").width || fh / 2;
+  const sx = fw / advance;
+  ctx.fillStyle = c;
+  ctx.strokeStyle = c;
+  ctx.lineWidth = Math.max(1, fh / 12);
+  for (const line of lines) {
+    const width = line.length * fw;
+    const x = it.hj === 1 ? it.x + (it.w - width) / 2 : it.hj === 2 ? it.x + it.w - width : it.x;
+    ctx.save();
+    ctx.translate(x, y + fh * 0.8);
+    ctx.scale(sx, 1);
+    ctx.fillText(line, 0, 0);
+    ctx.restore();
+    if (style & 4) { ctx.beginPath(); ctx.moveTo(x, y + fh - 1); ctx.lineTo(x + width, y + fh - 1); ctx.stroke(); }
+    if (style & 2) { ctx.beginPath(); ctx.moveTo(x, y + fh / 2); ctx.lineTo(x + width, y + fh / 2); ctx.stroke(); }
+    y += fh;
+  }
+  ctx.restore();
+}
+
+function vtItem(ctx, it, images) {
+  switch (it.t) {
+    case "clip":
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(it.x, it.y, it.w, it.h);
+      ctx.clip();
+      break;
+    case "unclip":
+      ctx.restore();
+      break;
+    case "rect": {
+      if (vtFill(ctx, it, images)) ctx.fillRect(it.x, it.y, it.w, it.h);
+      if (!vtStroke(ctx, it)) break;
+      // The line lies inside the rectangle.
+      const h = it.lw / 2, x0 = it.x + h, y0 = it.y + h, x1 = it.x + it.w - h, y1 = it.y + it.h - h;
+      const sides = it.sides === undefined ? 15 : it.sides;
+      if (sides === 15) { ctx.strokeRect(x0, y0, x1 - x0, y1 - y0); break; }
+      ctx.beginPath();
+      if (sides & 1) { ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); }
+      if (sides & 2) { ctx.moveTo(x1, y0); ctx.lineTo(x1, y1); }
+      if (sides & 4) { ctx.moveTo(x0, y1); ctx.lineTo(x1, y1); }
+      if (sides & 8) { ctx.moveTo(x0, y0); ctx.lineTo(x0, y1); }
+      ctx.stroke();
+      break;
+    }
+    case "line":
+      if (!vtStroke(ctx, it)) break;
+      ctx.beginPath();
+      ctx.moveTo(it.x1, it.y1);
+      ctx.lineTo(it.x2, it.y2);
+      ctx.stroke();
+      break;
+    case "ellipse": {
+      // Angles count anticlockwise from 3 o'clock; the canvas's y axis points down.
+      const rx = it.w / 2, ry = it.h / 2, cx = it.x + rx, cy = it.y + ry;
+      const kind = it.kind || 0;
+      const full = !kind || it.a0 === it.a1;
+      const a0 = full ? 0 : (-it.a0 * Math.PI) / 180, a1 = full ? 2 * Math.PI : (-it.a1 * Math.PI) / 180;
+      ctx.beginPath();
+      if (kind === 3 && !full) ctx.moveTo(cx, cy);
+      ctx.ellipse(cx, cy, Math.max(0, rx - (it.lw || 0) / 2), Math.max(0, ry - (it.lw || 0) / 2), 0, a0, a1, !full);
+      if (kind !== 1) ctx.closePath();
+      if (kind !== 1 && vtFill(ctx, it, images)) ctx.fill();
+      if (vtStroke(ctx, it)) ctx.stroke();
+      break;
+    }
+    case "poly": {
+      const p = it.pts;
+      if (p.length < 4) break;
+      ctx.beginPath();
+      ctx.moveTo(p[0], p[1]);
+      for (let i = 2; i < p.length; i += 2) ctx.lineTo(p[i], p[i + 1]);
+      if (it.closed) ctx.closePath();
+      if (it.closed && vtFill(ctx, it, images)) ctx.fill("evenodd");
+      if (vtStroke(ctx, it)) ctx.stroke();
+      break;
+    }
+    case "text":
+      vtText(ctx, it);
+      break;
+    case "image": {
+      const img = images.get(it.img);
+      if (img) { ctx.imageSmoothingEnabled = false; ctx.drawImage(img, it.x, it.y, it.w, it.h); }
+      break;
+    }
+    case "hit":
+      if (!it.on) { ctx.fillStyle = "rgba(128,128,128,0.5)"; ctx.fillRect(it.x, it.y, it.w, it.h); }
+      if (it.sel) {
+        // The focus: a frame around the field, solid while it is open for input.
+        ctx.setLineDash(it.open ? [] : [4, 3]);
+        ctx.strokeStyle = "#ff8c00";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(it.x + 1, it.y + 1, it.w - 2, it.h - 2);
+        ctx.setLineDash([]);
+      }
+      break;
+    case "box":
+      ctx.setLineDash([4, 3]);
+      ctx.strokeStyle = "#ff00ff";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(it.x + 0.5, it.y + 0.5, it.w - 1, it.h - 1);
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#ff00ff";
+      ctx.font = "10px sans-serif";
+      ctx.fillText(it.label, it.x + 3, it.y + 12);
+      break;
+  }
+}
+
+function vtPaintItems(ctx, items, images) {
+  ctx.save();
+  for (const it of items) vtItem(ctx, it, images);
+  ctx.restore();
+}
+
+function vtPaintMask(ctx, screen, images) {
+  ctx.fillStyle = screen.bg || "#000000";
+  ctx.fillRect(0, 0, screen.w, screen.h);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, screen.w, screen.h);
+  ctx.clip();
+  vtPaintItems(ctx, screen.items, images);
+  ctx.restore();
+}
+
+// Soft key i of the screen's key mask; an empty place (null) shows the mask's background.
+function vtPaintKey(ctx, keys, i, images) {
+  const key = keys.keys[i];
+  ctx.fillStyle = key ? key.bg : keys.bg;
+  ctx.fillRect(0, 0, keys.w, keys.h);
+  if (!key) return;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, keys.w, keys.h);
+  ctx.clip();
+  vtPaintItems(ctx, key.items, images);
+  ctx.restore();
+}
+
+// The topmost touchable item at x, y (mask pixels), or null.
+function vtHit(items, x, y) {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    if (it.t === "hit" && x >= it.x && x < it.x + it.w && y >= it.y && y < it.y + it.h) return it;
+  }
+  return null;
+}
+
+// Virtual terminal cards: ISOBUS implements' own screens, one card per terminal (the host runs
+// one to four, as displays in one cab; each implement chooses its terminal in its own menu). A
+// terminal flattens its implement's object pool into draw lists (screen, soft keys, input
+// editors) that the VT painter above paints; its card shows them and sends the operator's
+// touches back (vt.* commands naming the terminal, which need control). The host repeats a held
+// key and ends it if control goes. Hidden unless the host has terminals (its first link message
+// says so, with how many).
+const Vt = (() => {
+  const navBtn = document.getElementById('ln-vt'), tpl = document.getElementById('vt-card-tpl');
+  const SIZES = [320, 400, 480, 600];
+  const PAGE = 12; // soft keys shown at once (the terminal's PhysicalKeys): two columns of six, 1-6 beside the mask
+  let link = null, session = -1, images = new VtImages(); // picture ids are unique across terminals
+  let audioCtx = null;
+  const terms = []; // one per terminal: its card and what it shows
+
+  // The cards to show: the link's count (one while there is no link, for the gateway editor).
+  // The cards added after this browser's Connect open with the card it was pressed on.
+  let openAdded = false;
+  function setCount(n) {
+    while (terms.length < n) {
+      const term = makeTerminal(terms.length);
+      terms.push(term);
+      if (openAdded) term.setOpen(true);
+    }
+    while (terms.length > n) terms.pop().remove();
+  }
+
+  function message(m, t) {
+    if (t < 0) { // the link: for every terminal
+      if (m.type !== 'link') return;
+      if (m.session !== session) { // new terminals: their pictures and screens start over
+        session = m.session; images = new VtImages();
+        for (const term of terms) term.reset();
+      }
+      link = m;
+      navBtn.style.display = '';
+      setCount(m.state === 'off' ? 1 : Math.max(1, Math.min(4, m.count || 1)));
+      if (m.state !== 'off') openAdded = false;
+      render();
+      return;
+    }
+    if (terms[t]) terms[t].message(m);
+  }
+
+  function image(id, w, h, rgba) { images.add(id, w, h, rgba); }
+
+  function render() {
+    navBtn.classList.toggle('active', terms.some(term => term.open()));
+    for (const term of terms) term.render();
+  }
+
+  // The nav button: closes every card when any is open, else opens them all.
+  navBtn.addEventListener('pointerdown', e => {
+    e.preventDefault(); e.stopPropagation();
+    const any = terms.some(term => term.open());
+    for (const term of terms) term.setOpen(!any);
+  });
+
+  // Control Audio Signal: the implement's beeps, as tones (activations 0 stops them).
+  function playAudio(m, term) {
+    clearTimeout(term.audioTimer);
+    if (!m.activations) return;
+    try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch (_) { return; }
+    let n = Math.min(m.activations, 20);
+    const beep = () => {
+      const osc = audioCtx.createOscillator(), g = audioCtx.createGain();
+      osc.frequency.value = Math.max(200, Math.min(m.frequency || 1000, 8000));
+      g.gain.value = 0.2;
+      osc.connect(g); g.connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime + Math.max(20, m.on || 200) / 1000);
+      if (--n > 0) term.audioTimer = setTimeout(beep, Math.max(20, m.on || 200) + Math.max(20, m.off || 100));
+    };
+    beep();
+  }
+
+  function makeTerminal(index) {
+    const card = tpl.content.firstElementChild.cloneNode(true);
+    card.id = 'vt-card-' + index;
+    // Each card a little below and right of the one before, so every header can be reached.
+    card.style.top = 'calc(' + (70 + index * 36) + 'px + var(--sat))';
+    card.style.left = 'calc(' + (80 + index * 36) + 'px + var(--sal))';
+    tpl.parentNode.insertBefore(card, tpl); // beside the chart cards
+    wireCardDrag(card);
+    const q = sel => card.querySelector(sel);
+    const maskCv = q('.vt-mask'), mctx = maskCv.getContext('2d');
+    const keysEl = q('.vt-keys'), msgEl = q('.vt-msg'), editEl = q('.vt-edit'), wsSel = q('.vt-ws');
+    const dot = q('.vt-dot'), nameEl = q('.vt-name'), identEl = q('.vt-ident');
+    const alarmEl = q('.vt-alarm'), alarmText = q('.vt-alarm-text');
+    const sizeKey = 'vt.size' + (index ? '.' + index : '');
+    let screen = null, edit = null, workingSets = null, alarms = [];
+    let keyPage = 0, showGateway = false, selecting = null, sizeIx = 1, identTimer = null;
+    try { sizeIx = SIZES.indexOf(+localStorage.getItem(sizeKey)); if (sizeIx < 0) sizeIx = 1; } catch (_) {}
+    card.style.setProperty('--vt', SIZES[sizeIx] + 'px');
+    const send = (cmd, arg) => transport.send('vt.' + cmd + '|' + index + (arg !== undefined ? ',' + arg : ''));
+
+    const term = {
+      audioTimer: null,
+      open: () => card.style.display !== 'none',
+      setOpen(on) {
+        card.style.display = on ? '' : 'none';
+        navBtn.classList.toggle('active', terms.some(x => x.open()));
+        if (on) this.render();
+      },
+      reset() { screen = null; edit = null; workingSets = null; alarms = []; },
+      remove() { clearTimeout(term.audioTimer); clearTimeout(identTimer); card.remove(); },
+      message(m) {
+        switch (m.type) {
+          case 'screen': screen = m; break;
+          case 'edit': onEdit(m); break;
+          case 'workingSets': workingSets = m; break;
+          case 'alarms': onAlarms(m.list || []); break;
+          case 'audio': playAudio(m, term); return;
+          case 'identify': identify(); break;
+          default: return; // volume and later additions: nothing to show yet
+        }
+        if (term.open()) term.render();
+        else navBtn.classList.toggle('active', terms.some(x => x.open()));
+      },
+      render,
+    };
+
+    // A new alarm reaches the operator with the card closed: the card opens, and an alarm
+    // from an implement that isn't shown offers to show it.
+    function onAlarms(list) {
+      const before = new Set(alarms.map(a => a.ws + ':' + a.mask));
+      alarms = list;
+      if (list.some(a => !before.has(a.ws + ':' + a.mask)) && !term.open()) term.setOpen(true);
+    }
+
+    // Identify VT: an implement asks every terminal to show its number while the operator picks
+    // one in its menu. The card opens and shows its number for 3 s.
+    function identify() {
+      identEl.textContent = tr('VT {n}', { n: index + 1 });
+      identEl.classList.add('show');
+      clearTimeout(identTimer);
+      identTimer = setTimeout(() => identEl.classList.remove('show'), 3000);
+      if (!term.open()) term.setOpen(true);
+    }
+
+    function onEdit(m) {
+      edit = m.o === null ? null : m;
+      // A boolean toggles without an editor, when this browser asked for it.
+      if (edit && edit.kind === 'bool' && selecting === edit.o && iHoldControl) {
+        send('number', edit.o + ',' + (edit.value ? 0 : 1));
+        edit = null;
+      }
+      selecting = null;
+    }
+
+    function wsLabel(ws) { return tr('Implement') + ' ' + ws.address + (ws.state === 'transferring' ? ' (' + ws.progress + '%)' : ''); }
+
+    function renderHeader() {
+      nameEl.textContent = tr('VT {n}', { n: index + 1 }); // the same with one terminal or four
+      const st = link ? link.state : 'off';
+      dot.className = 'vt-dot ' + (st === 'connected' ? 'ok' : st === 'connecting' || st === 'busy' ? 'wait' : st === 'failed' ? 'bad' : '');
+      dot.title = st === 'connected' ? (link.name || link.gateway) + (link.rtt != null ? ' · ' + link.rtt + ' ms' : '') + (link.bus ? ' · ' + link.bus : '')
+        : st === 'busy' ? tr('In use by {who}', { who: link.why })
+        : st === 'connecting' ? (link.adapter ? tr('Waiting for the CAN adapter on {port}', { port: link.adapter }) : tr('Connecting to {gw}', { gw: link.gatewayName || link.gateway })) + (link.why ? ' (' + link.why + ')' : '') : '';
+    }
+
+    function render() {
+      renderHeader();
+      if (!term.open()) return;
+      // Implement picker: shown with two or more implements on this terminal.
+      const list = (workingSets && workingSets.list || []).filter(w => w.selectable !== false);
+      wsSel.style.display = list.length > 1 ? '' : 'none';
+      if (list.length > 1) {
+        wsSel.innerHTML = '';
+        for (const w of list) {
+          const o = document.createElement('option');
+          o.value = w.name; o.textContent = wsLabel(w); o.title = w.name;
+          o.selected = workingSets.active === w.name;
+          wsSel.appendChild(o);
+        }
+      }
+      // Alarm from an implement that isn't shown.
+      const away = alarms.find(a => !screen || a.ws !== screen.ws);
+      alarmEl.classList.toggle('show', !!away);
+      if (away) { alarmText.textContent = tr('Alarm') + ': ' + tr('Implement') + ' ' + away.address; alarmEl.dataset.ws = away.ws; }
+
+      const msg = statusMessage();
+      msgEl.style.display = msg ? '' : 'none';
+      if (msg) { if (msgEl.dataset.msg !== msg.key) { msgEl.dataset.msg = msg.key; msgEl.innerHTML = ''; msg.build(msgEl); } }
+      else msgEl.dataset.msg = '';
+      paint();
+      renderEdit();
+    }
+
+    // What covers the mask instead of a screen, or null when there's a screen to show. The
+    // gateway editor is on the first card only: one connection serves every terminal.
+    function statusMessage() {
+      const text = (t, sub) => el => {
+        const d = document.createElement('div'); d.textContent = t; el.appendChild(d);
+        if (sub) { const s = document.createElement('div'); s.className = 'vt-sub'; s.textContent = sub; el.appendChild(s); }
+      };
+      if (index === 0 && (showGateway || !link || link.state === 'off')) return { key: 'gw:' + (link ? [link.session, link.state, link.gateway, link.gatewayName, link.adapter, link.count].concat(link.ports || [], (link.gateways || []).map(g => g.name + '@' + g.address)).join('|') : ''), build: buildGateway }; // rebuilt when what it shows changes
+      if (!link || link.state === 'off') return { key: 'off', build: text(tr('No gateway')) };
+      if (link.state === 'failed') return { key: 'failed' + link.why, build: text(tr('The terminal could not start.'), link.why) };
+      if (link.state === 'busy')
+        return { key: 'busy' + link.why, build: text(tr('{gw} is in use by {who}', { gw: link.gatewayName || link.gateway, who: link.why }),
+          tr('This card connects when the other terminal lets it go.')) };
+      if (link.state !== 'connected')
+        return { key: 'conn' + link.why, build: link.adapter
+          ? text(tr('Waiting for the CAN adapter on {port}', { port: link.adapter }), link.why)
+          : text(tr('Connecting to {gw}', { gw: link.gatewayName || link.gateway }), link.why) };
+      if (!screen || !screen.ws || !screen.kind) {
+        const ws = workingSets && workingSets.list && workingSets.list[0];
+        if (ws && ws.state === 'transferring') return { key: 'up' + ws.progress, build: text(tr('Loading the implement\'s screens: {p}%', { p: ws.progress })) };
+        if (ws && ws.state === 'parsing') return { key: 'parse', build: text(tr('Loading the implement\'s screens')) };
+        if (ws && ws.state === 'failed') return { key: 'bad', build: text(tr('The implement\'s screens were refused.')) };
+        return { key: 'none', build: text(tr('No implement'), terms.length > 1 ? tr('Choose this VT in the implement\'s own settings.') : link.name || link.gateway) };
+      }
+      return null;
+    }
+
+    // The gear: how the terminals reach the bus (a gateway on the network, or an slcan adapter
+    // plugged into this device) and how many there are.
+    function buildGateway(el) {
+      const d = document.createElement('div'); d.textContent = tr('ISOBUS connection'); el.appendChild(d);
+      const kind = document.createElement('select'); kind.className = 'vt-ws';
+      for (const [v, label] of [['gateway', tr('Gateway on the network')], ['adapter', tr('CAN adapter on this device')]]) {
+        const o = document.createElement('option'); o.value = v; o.textContent = label; kind.appendChild(o);
+      }
+      kind.value = link && link.adapter ? 'adapter' : 'gateway';
+      if (link && link.adapters === false && !link.adapter) kind.style.display = 'none'; // no USB adapters here (iOS)
+      el.appendChild(kind);
+      // Gateway: one of those announcing themselves on the network, by name, or an address typed.
+      const found = (link && link.gateways || []).slice();
+      const gwRow = document.createElement('div'); gwRow.className = 'vt-row';
+      const pick = document.createElement('select'); pick.className = 'vt-ws';
+      for (const g of found) {
+        const o = document.createElement('option'); o.value = g.address; o.textContent = g.name; o.dataset.name = g.name;
+        pick.appendChild(o);
+      }
+      const other = document.createElement('option'); other.value = ''; other.textContent = tr('Other address…');
+      pick.appendChild(other);
+      const mine = link && link.gateway ? found.find(g => (link.gatewayName && g.name === link.gatewayName) || g.address === link.gateway) : found[0];
+      pick.value = mine ? mine.address : '';
+      const gwAgain = document.createElement('button'); gwAgain.className = 'fo-btn'; gwAgain.textContent = tr('Refresh');
+      gwAgain.addEventListener('pointerdown', e => { e.preventDefault(); transport.send('vt.ports'); });
+      gwRow.append(pick, gwAgain);
+      const inp = document.createElement('input');
+      inp.placeholder = '192.168.1.10'; inp.value = link && link.gateway && !mine ? link.gateway : '';
+      inp.autocapitalize = 'off'; inp.spellcheck = false;
+      // Adapter: its serial port, from the host's list (refreshed when the gear opens).
+      const portRow = document.createElement('div'); portRow.className = 'vt-row';
+      const port = document.createElement('select'); port.className = 'vt-ws';
+      const ports = (link && link.ports || []).slice();
+      if (link && link.adapter && !ports.includes(link.adapter)) ports.unshift(link.adapter);
+      for (const p of ports) {
+        const o = document.createElement('option'); o.value = p; o.textContent = p; o.selected = link && p === link.adapter;
+        port.appendChild(o);
+      }
+      const again = document.createElement('button'); again.className = 'fo-btn'; again.textContent = tr('Refresh');
+      again.addEventListener('pointerdown', e => { e.preventDefault(); transport.send('vt.ports'); });
+      portRow.append(port, again);
+      const sub = document.createElement('div'); sub.className = 'vt-sub';
+      const show = () => {
+        const adapter = kind.value === 'adapter', typed = !pick.value;
+        gwRow.style.display = adapter ? 'none' : '';
+        inp.style.display = adapter || !typed ? 'none' : '';
+        portRow.style.display = adapter ? '' : 'none';
+        sub.textContent = adapter
+          ? (ports.length ? tr('An slcan adapter (CANable) on the implement bus, 250 kbit/s.') : tr('No adapter found: plug it in, then Refresh.'))
+          : !typed ? tr('A gateway on this network, on the implement bus.')
+          : found.length ? tr('Address of the AOW link gateway on the implement bus (port 2323).')
+          : tr('No gateway found on this network. Type its address (port 2323), or Refresh.');
+      };
+      kind.addEventListener('change', show);
+      pick.addEventListener('change', show);
+      el.append(gwRow, inp, portRow, sub);
+      show();
+      // How many terminals: one card each, as displays in one cab.
+      const countRow = document.createElement('div'); countRow.className = 'vt-row';
+      const countLabel = document.createElement('span'); countLabel.textContent = tr('Terminals');
+      const count = document.createElement('select'); count.className = 'vt-ws';
+      const have = link && link.count || 1;
+      for (let n = 1; n <= 4; n++) {
+        const o = document.createElement('option'); o.value = n; o.textContent = n; o.selected = n === have;
+        count.appendChild(o);
+      }
+      countRow.append(countLabel, count);
+      el.appendChild(countRow);
+      const row = document.createElement('div'); row.className = 'vt-row';
+      const ok = document.createElement('button'); ok.className = 'fo-btn'; ok.textContent = tr('Connect');
+      ok.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        if (+count.value > 1) openAdded = true;
+        if (+count.value !== have) transport.send('vt.count|' + count.value);
+        const picked = pick.value ? pick.selectedOptions[0].dataset.name : '';
+        const address = pick.value || inp.value.trim();
+        if (kind.value === 'adapter') { if (port.value) transport.send('vt.adapter|' + port.value); }
+        else if (+count.value === have || address !== (link && link.gateway || '') || picked !== (link && link.gatewayName || '') || (link && link.adapter))
+          transport.send('vt.gateway|' + address + (picked ? '\t' + picked : ''));
+        showGateway = false; msgEl.dataset.msg = ''; render();
+      });
+      row.appendChild(ok);
+      if (link && link.state !== 'off') {
+        // Disconnect: every terminal off, until Connect.
+        const off = document.createElement('button'); off.className = 'fo-btn'; off.textContent = tr('Disconnect');
+        off.addEventListener('pointerdown', e => { e.preventDefault(); transport.send('vt.gateway|'); showGateway = false; msgEl.dataset.msg = ''; render(); });
+        row.appendChild(off);
+        const cancel = document.createElement('button'); cancel.className = 'fo-btn'; cancel.textContent = tr('Cancel');
+        cancel.addEventListener('pointerdown', e => { e.preventDefault(); showGateway = false; render(); });
+        row.appendChild(cancel);
+      }
+      el.appendChild(row);
+    }
+
+    function paint() {
+      if (!screen || !screen.kind) { keysEl.innerHTML = ''; return; }
+      maskCv.width = screen.w; maskCv.height = screen.h;
+      mctx.setTransform(1, 0, 0, 1, 0, 0);
+      vtPaintMask(mctx, screen, images);
+      // Soft keys: a page of PAGE at a time, with a pager when the mask holds more.
+      const keys = screen.keys ? screen.keys.keys : [];
+      const pages = Math.max(1, Math.ceil(keys.length / PAGE));
+      if (keyPage >= pages) keyPage = 0;
+      const want = PAGE + (pages > 1 ? 1 : 0);
+      if (keysEl.childElementCount !== want || keysEl.dataset.pages !== String(pages)) {
+        keysEl.innerHTML = ''; keysEl.dataset.pages = pages;
+        for (let i = 0; i < PAGE; i++) { const c = document.createElement('canvas'); c.dataset.slot = i; keysEl.appendChild(c); wireKey(c); }
+        if (pages > 1) {
+          const b = document.createElement('button'); b.textContent = '⇣';
+          b.addEventListener('pointerdown', e => { e.preventDefault(); keyPage = (keyPage + 1) % pages; paint(); });
+          keysEl.appendChild(b);
+        }
+      }
+      for (let i = 0; i < PAGE; i++) {
+        const c = keysEl.children[i], k = keyPage * PAGE + i;
+        const kw = screen.keys ? screen.keys.w : 80, kh = screen.keys ? screen.keys.h : 80;
+        c.width = kw; c.height = kh;
+        const kc = c.getContext('2d');
+        kc.setTransform(1, 0, 0, 1, 0, 0);
+        if (screen.keys && k < keys.length) vtPaintKey(kc, screen.keys, k, images);
+        else { kc.fillStyle = screen.keys ? screen.keys.bg : '#808080'; kc.fillRect(0, 0, kw, kh); }
+      }
+    }
+
+    // Press, then release or abort: pointer up over the same thing releases; leaving it or a
+    // cancelled touch aborts. A press must always end, so a lost pointer aborts too.
+    function trackPress(el, kind, o, still) {
+      send('key', kind + ',' + o + ',p');
+      let done = false;
+      const end = state => {
+        if (done) return; done = true;
+        send('key', kind + ',' + o + ',' + state);
+        el.removeEventListener('pointerup', up); el.removeEventListener('pointercancel', cancel);
+        el.removeEventListener('pointermove', move); el.removeEventListener('lostpointercapture', cancel);
+      };
+      const up = e => end(still(e) ? 'r' : 'a');
+      const cancel = () => end('a');
+      const move = e => { if (!still(e)) end('a'); };
+      el.addEventListener('pointerup', up); el.addEventListener('pointercancel', cancel);
+      el.addEventListener('pointermove', move); el.addEventListener('lostpointercapture', cancel);
+    }
+
+    function wireKey(c) {
+      c.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        if (!iHoldControl || !screen || !screen.keys) return;
+        const key = screen.keys.keys[keyPage * PAGE + (+c.dataset.slot)];
+        if (!key) return;
+        try { c.setPointerCapture(e.pointerId); } catch (_) {}
+        const r = c.getBoundingClientRect();
+        trackPress(c, 's', key.o, ev => ev.clientX >= r.left && ev.clientX < r.right && ev.clientY >= r.top && ev.clientY < r.bottom);
+      });
+    }
+
+    function maskPoint(e) {
+      const r = maskCv.getBoundingClientRect();
+      return { x: (e.clientX - r.left) * screen.w / r.width, y: (e.clientY - r.top) * screen.h / r.height };
+    }
+
+    maskCv.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      if (!iHoldControl || !screen || !screen.kind) return;
+      const p = maskPoint(e);
+      const hit = vtHit(screen.items, p.x, p.y);
+      if (!hit || !hit.on) return;
+      if (hit.kind === 'input') { selecting = hit.o; send('select', hit.o); return; }
+      if (hit.kind !== 'button') return;
+      try { maskCv.setPointerCapture(e.pointerId); } catch (_) {}
+      trackPress(maskCv, 'b', hit.o, ev => {
+        const q = maskPoint(ev);
+        return q.x >= hit.x && q.x < hit.x + hit.w && q.y >= hit.y && q.y < hit.y + hit.h;
+      });
+    });
+
+    // The editor for an open input field (only for the browser holding control).
+    function renderEdit() {
+      const show = !!edit && iHoldControl && term.open() && !(msgEl.style.display !== 'none');
+      editEl.classList.toggle('show', show);
+      if (!show) { editEl.dataset.o = ''; editEl.innerHTML = ''; return; }
+      const key = edit.ws + ':' + edit.o + ':' + edit.kind + ':' + edit.value;
+      if (editEl.dataset.o === key) return;
+      editEl.dataset.o = key; editEl.innerHTML = '';
+      const row = document.createElement('div'); row.className = 'vt-row';
+      const btn = (label, fn) => {
+        const b = document.createElement('button'); b.className = 'fo-btn'; b.textContent = label;
+        b.addEventListener('pointerdown', ev => { ev.preventDefault(); fn(); }); row.appendChild(b);
+      };
+      const esc = () => send('escape');
+      if (edit.kind === 'number') {
+        const inp = document.createElement('input');
+        inp.inputMode = 'decimal'; inp.value = edit.text;
+        const lo = (edit.min + edit.offset) * edit.scale, hi = (edit.max + edit.offset) * edit.scale;
+        const sub = document.createElement('div'); sub.className = 'vt-sub';
+        sub.textContent = Math.min(lo, hi).toFixed(edit.decimals) + ' … ' + Math.max(lo, hi).toFixed(edit.decimals);
+        const enter = () => {
+          const shown = parseFloat(inp.value.replace(',', '.'));
+          if (!isFinite(shown) || !edit.scale) return;
+          const raw = Math.round(shown / edit.scale) - edit.offset;
+          if (raw < edit.min || raw > edit.max) { sub.textContent = tr('Out of range') + ': ' + sub.textContent; return; }
+          send('number', edit.o + ',' + raw);
+        };
+        inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') enter(); else if (ev.key === 'Escape') esc(); });
+        editEl.append(inp, sub);
+        btn(tr('OK'), enter); btn(tr('Cancel'), esc);
+        editEl.appendChild(row);
+        setTimeout(() => { inp.focus(); inp.select(); }, 0);
+      } else if (edit.kind === 'string') {
+        const inp = document.createElement('input');
+        inp.value = edit.value; inp.maxLength = edit.length; inp.autocapitalize = 'off'; inp.spellcheck = false;
+        const enter = () => send('string', edit.o + ',' + inp.value);
+        inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') enter(); else if (ev.key === 'Escape') esc(); });
+        editEl.appendChild(inp);
+        btn(tr('OK'), enter); btn(tr('Cancel'), esc);
+        editEl.appendChild(row);
+        setTimeout(() => inp.focus(), 0);
+      } else if (edit.kind === 'list') {
+        const opts = document.createElement('div'); opts.className = 'vt-opts';
+        edit.options.forEach((items, i) => {
+          if (!items) return;
+          const c = document.createElement('canvas');
+          c.width = edit.w; c.height = edit.h;
+          if (i === edit.value) c.classList.add('sel');
+          const cx = c.getContext('2d');
+          cx.fillStyle = '#ffffff'; cx.fillRect(0, 0, edit.w, edit.h);
+          vtPaintItems(cx, items, images);
+          c.addEventListener('pointerdown', ev => { ev.preventDefault(); send('number', edit.o + ',' + i); });
+          opts.appendChild(c);
+        });
+        editEl.appendChild(opts);
+        btn(tr('Cancel'), esc);
+        editEl.appendChild(row);
+      } else { // bool opened by the implement or another browser
+        btn(edit.value ? tr('Off') : tr('On'), () => send('number', edit.o + ',' + (edit.value ? 0 : 1)));
+        btn(tr('Cancel'), esc);
+        editEl.appendChild(row);
+      }
+    }
+
+    if (index) q('.vt-gear').style.display = 'none'; // the connection is set on VT 1
+    q('.vt-x').addEventListener('pointerdown', e => { e.preventDefault(); term.setOpen(false); });
+    q('.vt-gear').addEventListener('pointerdown', e => {
+      e.preventDefault();
+      if (!iHoldControl) return;
+      showGateway = !showGateway; msgEl.dataset.msg = ''; render();
+      if (showGateway) transport.send('vt.ports');
+    });
+    q('.vt-size').addEventListener('pointerdown', e => {
+      e.preventDefault();
+      sizeIx = (sizeIx + 1) % SIZES.length;
+      card.style.setProperty('--vt', SIZES[sizeIx] + 'px');
+      try { localStorage.setItem(sizeKey, SIZES[sizeIx]); } catch (_) {}
+    });
+    wsSel.addEventListener('change', () => { if (iHoldControl) send('activate', wsSel.value); });
+    q('.vt-alarm-show').addEventListener('pointerdown', e => {
+      e.preventDefault();
+      if (iHoldControl && alarmEl.dataset.ws) send('activate', alarmEl.dataset.ws);
+    });
+
+    return term;
+  }
+
+  return { message, image, render };
 })();
 
 // Clock — browser-local 24h HH:MM:SS.
@@ -5325,13 +6317,27 @@ function toolWidthM() {
     for (const s of ts) { if (s.left < lo) lo = s.left; if (s.right > hi) hi = s.right; }
     if (hi > lo) return hi - lo;
   }
-  return 6;
+  // No sections: the host's tool width (#398); 0 when that isn't set either, never a guess.
+  const w = config && config.tool && config.tool.totalWidth;
+  return w > 0 ? w : 0;
 }
 // HUD text (DOM). Built each frame from the latest tick/scene.
 // ---- Skia (CanvasKit) render — Phase A: vector layers at parity. Works in CSS
 //      px (canvas.scale(dpr)), reusing w2s. Coverage/imagery/tool/lightbar TODO. ----
 // CanvasKit 0.41: Path is immutable (no moveTo/reset) — build via MakeFromCmds
 // (flat [VERB,x,y,...]) for polylines; drawLine for single segments.
+// True when line `a` lies on polyline `b`: its middle point is within 5 cm of it.
+function onPolyline(a, b) {
+  if (!a || a.length < 2 || !b || b.length < 2) return false;
+  const m = a.length === 2
+    ? { e: (a[0].e + a[1].e) / 2, n: (a[0].n + a[1].n) / 2 } : a[a.length >> 1];
+  for (let i = 0; i + 1 < b.length; i++) {
+    const p = b[i], q = b[i + 1], de = q.e - p.e, dn = q.n - p.n, l2 = de * de + dn * dn;
+    const u = l2 ? Math.max(0, Math.min(1, ((m.e - p.e) * de + (m.n - p.n) * dn) / l2)) : 0;
+    if (Math.hypot(m.e - p.e - u * de, m.n - p.n - u * dn) < 0.05) return true;
+  }
+  return false;
+}
 function strokePtsSk(canvas, pts, close, paint) {
   if (!pts || pts.length < 2) return;
   strokePtsSk3D(canvas, pts, close, paint);
@@ -5625,7 +6631,7 @@ function drawGridSk(canvas) {
   const minE = Math.max(camE - halfW, -G), maxE = Math.min(camE + halfW, G);
   const minN = Math.max(camN - halfH, -G), maxN = Math.min(camN + halfH, G);
   if (minE >= maxE || minN >= maxN) return;
-  const toolW = toolWidthM();
+  const toolW = toolWidthM() || 1; // no tool width: plain metres
   // Spacing = tool-width × NiceStep125(viewSpan / (toolW·30)) — same as native.
   const spacing = toolW * niceStep125(Math.max(vw, vh) / pxPerM / (toolW * 30));
   const major = k => k % 10 === 0 ? SKP.gridMajor : SKP.gridMinor;
@@ -6376,10 +7382,11 @@ function renderSkia(canvas, rp) {
     drawContourRefSk(canvas);
     if (scene.nextTrack) strokePtsSk(canvas, scene.nextTrack, false, SKP.next);
     if (scene.uTurnPath) strokePtsSk(canvas, scene.uTurnPath, false, SKP.uturn);
-    // Purple reference (extended across the field) — drawn ONLY when the tractor is offset from
-    // it (pass ≠ 0). On the reference pass it coincides with the magenta guidance, so we show
-    // just the one line. Matches the host's baseTrack = nearestPass!=0?track:null intent.
-    const _onRef = !tick || !tick.op || (tick.op.passNumber | 0) === 0;
+    // Purple reference (extended across the field). The reference is the edge between passes
+    // (PassGeometry), so pass 0 lies half a width from it; only a track driven on the line
+    // itself (boundary-follow) puts the magenta guidance on top of it, and then just the one
+    // line shows. Matches the host's baseTrack = (display track is the reference) ? null : track.
+    const _onRef = scene.guidanceLine && scene.tracks.some(t => onPolyline(scene.guidanceLine, t.points));
     if (!_onRef) for (const tr of scene.tracks)
       strokePtsSk(canvas, extendAbLine(tr.points), false, SKP.reference);
     // Magenta current pass, extended across the field. The host's DisplayLine is only ~track
@@ -6863,9 +7870,11 @@ const TabletTerminal = (() => {
     cards = {};
     for (const c of host.querySelectorAll('.tui-card')) cards[c.dataset.m] = { el: c, last: '' };
     const pg = host.querySelector('.tui-pager');
-    pg.querySelector('.pg-n').textContent = tr('Page {n} of {count}', { n: pageIdx + 1, count: pages.length });
+    // "1 / 3" on the pager (the sentence ran under the next button at 1024×600); the sentence and
+    // the cards of the page are in the tooltip.
+    pg.querySelector('.pg-n').textContent = (pageIdx + 1) + ' / ' + pages.length;
     pg.querySelector('.pg-dots').innerHTML = pages.map((_, i) => '<i class="' + (i === pageIdx ? 'on' : '') + '"></i>').join('');
-    pg.querySelector('.pg-t').title = p.map(m => MOD_NAME[m]).join(', ');
+    pg.querySelector('.pg-t').title = tr('Page {n} of {count}', { n: pageIdx + 1, count: pages.length }) + ': ' + p.map(m => MOD_NAME[m]).join(', ');
     pg.querySelector('.pg-prev').disabled = pageIdx === 0;
     pg.querySelector('.pg-next').disabled = pageIdx >= pages.length - 1;
     onTap(pg.querySelector('.pg-prev'), () => goPage(pageIdx - 1));
@@ -7508,8 +8517,6 @@ const TabletPolish = (() => {
     ['#bn-skiptoggle', tr('Skip mode'), true],
     ['[data-cmd="map.cycleColor"]', tr('Coverage colour'), true],
     ['[data-cmd="tool.resetHeading"]', tr('Reset tool heading'), true],
-    ['#bn-secheadland', tr('HL sections'), false],
-    ['#bn-headland', tr('Headland'), false],
     ['#bn-flags', tr('Flags'), false],
     ['[data-cmd="track.snapLeft"]', tr('Track left'), false],
     ['[data-cmd="track.snapRight"]', tr('Track right'), false],
@@ -9324,6 +10331,8 @@ const TabletBrand = (() => {
     rtk: () => sv(box(10, 20, 96, 40, 'RTK Fix', 'hb f1') + box(112, 20, 96, 40, 'RTK Float', 'hb f2') + box(214, 20, 96, 40, 'DGPS', 'hb f3') +
       '<text class="ht" x="58" y="84" text-anchor="middle">———</text><text class="ht" x="160" y="84" text-anchor="middle">- - -</text><text class="ht" x="262" y="84" text-anchor="middle">· · ·</text>' + box(10, 106, 300, 40, tr('Network & GPS'))),
     band: () => sv('<rect class="hband" x="20" y="60" width="280" height="50" rx="10"/><text class="ht inv" x="160" y="90" text-anchor="middle">' + esc(T(tr('Profile not completely saved'))) + '</text>'),
+    actnow: () => sv(box(40, 50, 110, 60, tr('Steer'), 'hb acc') + box(170, 50, 110, 60, tr('Auto'), 'hb acc')),
+    demo: () => sv('<rect class="hband" x="20" y="60" width="280" height="50" rx="10"/><text class="ht inv" x="160" y="90" text-anchor="middle">' + esc(T(tr('DEMO – simulator only, no real outputs'))) + '</text>'),
     board: () => sv(box(60, 30, 200, 110, 'AiO v4') + box(84, 100, 70, 26, 'v4', 'hb acc') + box(166, 100, 70, 26, 'v26', 'hb f3')),
     direction: () => sv('<path class="hl" d="M160 150 L160 20"/><path class="hl" d="M146 40 L160 20 L174 40"/>' +
       box(110, 70, 100, 60, tr('Vehicle'), 'hb acc') + box(10, 14, 92, 34, tr('REVERSE'), 'hb f2') + box(218, 14, 92, 34, tr('Tap'), 'hb')),
@@ -9374,6 +10383,25 @@ const TabletBrand = (() => {
       tr('Stop, tap the vehicle on the map ("Reset direction"), then drive forward above 1.5 km/h.'),
       tr('So after switching on, drive forward first if you can. With two antennas (Dual GPS) this does not happen.'),
       tr('On the test bench, Menu → Bench checklist → "Reverse start" reproduces this case on purpose.')] },
+    { id: 'actnow', t: tr('Buttons that act at once'), steps: [
+      tr('Steer: switches automatic steering on or off. It needs a track and, as set by default, an RTK fix. Stay at the wheel; steering is an aid.'),
+      tr('Auto U-turn: switches automatic U-turns at the headland on or off.'),
+      tr('Sections automatic: the sections switch on and off by themselves, by the worked area and the boundary.'),
+      tr('Sections manual: switches the sections on by hand; they stay on until you switch them off.'),
+      tr("ISOBUS: switches the implement's own section control on or off."),
+      tr('Contour: guidance along the path you drove before, instead of along a track.'),
+      tr('Contour lock: keeps the contour you follow, so the guidance does not jump to another path.'),
+      tr('Next track: switches to the next track. Steering and auto U-turn are switched off; switch steering on again yourself.'),
+      tr('Previous track: switches to the previous track.'),
+      tr('Auto track: picks the closest track by itself.'),
+      tr('Section control in the headland on or off.'),
+      tr('Headland on or off. The headland distance and the hydraulic lift follow it.'),
+      tr('Demo mode: the simulator with a "DEMO" band, only without the kit connected.')] },
+    { id: 'demo', t: tr('Demo mode'), steps: [
+      tr('Demo only without the kit connected.'),
+      tr('Menu → "Demo mode" starts the simulator; a striped "DEMO" band shows it runs.'),
+      tr('If a module is detected, the demo ends: then check steering and sections yourself.'),
+      tr('"End demo" on the band or in the menu stops it.')] },
     { id: 'usb', t: tr('Back up profiles by USB copy'), warn: tr('Not checked on a real tablet yet.'), steps: [
       tr('Easier: Setup → Menu → "Back up and restore" makes one file and restores it from the Import folder.'),
       tr('Close the app. Connect the tablet to a PC by USB and choose "File transfer" on the tablet.'),
@@ -9417,7 +10445,7 @@ const TabletBrand = (() => {
         b.appendChild(Object.assign(el('div', 'tp-lead'), { textContent: T(tr('Short guide')) }));
         const g = el('div', 'tb-topics');
         for (const p of PAGES) {
-          const t = el('button', 'tb-topic', ILL[p.id]() + '<span></span>'); t.querySelector('span').textContent = T(p.t);
+          const t = el('button', 'tb-topic', (ILL[p.id] ? ILL[p.id]() : '') + '<span></span>'); t.querySelector('span').textContent = T(p.t); // a page without a picture must not break the index
           onTap(t, () => openHelp(p.id));
           g.appendChild(t);
         }
@@ -9431,7 +10459,7 @@ const TabletBrand = (() => {
     }
     openSheet(T(pg.t), b => {
       const w = el('div', 'tb-page');
-      w.appendChild(el('div', 'tb-pill', ILL[pg.id]()));
+      if (ILL[pg.id]) w.appendChild(el('div', 'tb-pill', ILL[pg.id]()));
       const col = el('div');
       if (pg.warn) col.appendChild(Object.assign(el('div', 'tp-note warn'), { textContent: T(pg.warn) }));
       const ol = el('ol', 'tb-steps');
@@ -10208,4 +11236,1235 @@ const TabletBackup = (() => {
     s.appendChild(t);
   }, 300);
   return { open, get state() { return status(); }, get selection() { return [...sel]; } };
+})();
+
+// ===== Ready-to-steer light (feature/bedienung-1) =============================================
+// A traffic light in the status bar, left of the steer chip: display only, from states the
+// client already has; it never sends a command and the steering logic is untouched.
+// Red = something steering needs is missing (no data, no RTK fix as the host reports it, steer
+// module not heard, no line). Yellow = steering works but check first: no IMU heard, or with one
+// antenna the direction not yet confirmed on the card "Does the vehicle face the way it drives?"
+// (TabletSteerConfirm; driving forward can't be told from backing with one antenna, so only the
+// confirmation counts). The module flags are the host's own (gpsOk / autoSteerOk / imuOk); RTK
+// fix = NMEA fix quality 4, the host's default minimum (MinFixQuality, not sent to the client).
+// Tap it for the list. In the demo mode (TabletDemo) it says "Demo" instead.
+const TabletReady = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); fn(e); });
+  const pill = el('button'); pill.id = 'tui-sb-ready'; pill.setAttribute('translate', 'no');
+  pill.innerHTML = '<span class="rd-dot"></span><span class="rd-t"></span>';
+  const pop = el('div'); pop.id = 'tui-ready'; pop.hidden = true; pop.setAttribute('translate', 'no');
+  pop.addEventListener('pointerdown', e => e.stopPropagation());
+  document.body.appendChild(pop);
+  const sb = document.getElementById('statusbar'), steer = document.getElementById('tui-sb-steer');
+  if (sb) sb.insertBefore(pill, steer && steer.parentNode === sb ? steer : document.getElementById('sb-fs'));
+  onTap(pill, () => { pop.hidden = !pop.hidden; last = ''; render(); });
+  let last = '';
+
+  const live = () => connState === 'connected' && !!lastTick && performance.now() - lastTick.t < 2000;
+  // [level, label, detail]: level 2 = ok, 1 = check, 0 = missing.
+  function checks() {
+    const s = statusBar || {}, op = tick && tick.op, gps = config && config.gps;
+    if (!live()) return [[0, tr('Connection'), connState === 'connected' ? tr('No current data from the guidance computer.') : tr('No connection to the guidance computer.')]];
+    const out = [];
+    if (s.gpsSentence === 'SIM') out.push([1, tr('GPS'), tr('Simulator: not a real position')]);
+    else if (s.gpsLost || !s.gpsOk) out.push([0, tr('GPS'), tr('No GPS data')]);
+    else out.push([s.fixQuality === 4 ? 2 : 0, tr('GPS'), (s.fixText || '') + (s.fixQuality === 4 ? '' : ' – ' + T(tr('steering needs RTK Fix')))]);
+    out.push([s.autoSteerOk ? 2 : 0, tr('Steer module'), s.autoSteerOk ? tr('connected') : tr('not heard')]);
+    // An IMU module's hello (imuOk), or the steer module's IMU heading in PGN 253 (AiO boards).
+    const sd = s.systemData, imu = !!s.imuOk || !!(sd && typeof sd.imuHeading === 'number' && Number.isFinite(sd.imuHeading));
+    out.push([imu ? 2 : 1, tr('IMU'), imu ? tr('connected') : tr('not heard')]);
+    out.push([op && scene && scene.hasField && op.autoSteerAvail ? 2 : 0, tr('Line'), op && op.autoSteerAvail ? tr('selected') : tr('No line')]);
+    const dual = !!(gps && gps.isDualGps && !s.dualHeadingMissing);
+    const conf = dual || (typeof TabletSteerConfirm !== 'undefined' && TabletSteerConfirm.confirmed);
+    out.push([conf ? 2 : 1, tr('Direction'), dual ? tr('dual antenna') : conf ? tr('confirmed') : tr('not confirmed since the start')]);
+    return out;
+  }
+  function render() {
+    const demo = typeof TabletDemo !== 'undefined' && TabletDemo.active;
+    const cs = checks(), lvl = Math.min(...cs.map(c => c[0]));
+    const word = demo ? tr('Demo') : lvl === 2 ? tr('Ready') : lvl === 1 ? tr('Check') : tr('Not ready');
+    const key = JSON.stringify([demo, cs, pop.hidden, I18n.language]);
+    if (key === last) return;
+    last = key;
+    pill.dataset.lv = demo ? 'demo' : String(lvl);
+    pill.querySelector('.rd-t').textContent = T(word);
+    pill.title = T(tr('Ready to steer'));
+    if (pop.hidden) return;
+    pop.innerHTML = '';
+    pop.appendChild(el('div', 'rd-h', T(tr('Ready to steer')) + ': ' + T(word)));
+    if (demo) pop.appendChild(el('div', 'rd-n', T(tr('Demo: simulator only, no real outputs.'))));
+    for (const [l, k, v] of cs) {
+      const r = el('div', 'rd-r'); r.dataset.lv = String(l);
+      r.append(el('span', 'rd-i', l === 2 ? '✓' : l === 1 ? '!' : '✗'), el('span', 'rd-k', T(k)), el('span', 'rd-v', T(v)));
+      pop.appendChild(r);
+    }
+    pop.appendChild(el('div', 'rd-n', T(tr('Display only. Steering is switched on with the Steer button as before.'))));
+  }
+  setInterval(render, 300);
+  return { checks, get level() { return Math.min(...checks().map(c => c[0])); } };
+})();
+
+// ===== Demo mode (feature/bedienung-1) ========================================================
+// For showing the app: the existing simulator as the GPS source, with a striped "DEMO" band that
+// can't be missed. It only starts while no module is heard (GPS, steer, machine): with a module
+// on the network a simulated drive could switch real outputs (the host sends steer and section
+// PGNs in the simulator too). If a module turns up while it runs, the demo ends with a warning
+// to check steering and sections. Stops with "End demo"; the flag lives in this tab only.
+// Ending never sends a command that switches steering or sections: the host only has toggles
+// for them (autosteer.toggle, section.master, section.manual), and a toggle sent from a stale
+// tick could switch them on. Explicit off commands would need a host change (docs/).
+// demo:begin
+const TabletDemo = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); fn(e); });
+  const KEY = 'aow.demo';
+  let active = false, simBefore = false; // simBefore: the simulator was already on; ending leaves it on
+  try { const v = sessionStorage.getItem(KEY); active = !!v; simBefore = v === 'sim'; } catch (_) { /* blocked storage: off */ }
+  const band = el('div'); band.id = 'tui-demo'; band.hidden = true; band.setAttribute('translate', 'no');
+  band.addEventListener('pointerdown', e => e.stopPropagation());
+  const bt = el('span', 'dm-t'), stop = el('button', 'tp-btn');
+  band.append(bt, stop);
+  document.body.appendChild(band);
+  onTap(stop, () => end(''));
+  const save = () => { try { if (active) sessionStorage.setItem(KEY, simBefore ? 'sim' : '1'); else sessionStorage.removeItem(KEY); } catch (_) { /* ignore */ } };
+  // Real GPS = data that isn't the simulator's (as TabletSimGuard); steer and machine modules by the host's flags.
+  const modules = () => { const s = statusBar || {}; return !!((s.gpsOk && s.gpsSentence && s.gpsSentence !== 'SIM') || s.autoSteerOk || s.machineOk); };
+  function start() {
+    if (connState !== 'connected' || !statusBar) { showToast(T(tr('No connection to the guidance computer.'))); return; }
+    if (!iHoldControl) { showToast(T(tr('Only the device that has control can start the demo.'))); return; }
+    if (modules()) { showToast(T(tr('A module is connected: the demo only runs without modules, so nothing real is switched.'))); return; }
+    active = true; simBefore = !!statusBar.simEnabled; save();
+    if (!statusBar.simEnabled) transport.send('sim.toggleEnable');
+    if (!statusBar.simPanelVisible) transport.send('sim.togglePanel');
+    render();
+  }
+  function end(why) {
+    if (!active) return;
+    if (statusBar && statusBar.simEnabled && !simBefore) transport.send('sim.toggleEnable');
+    active = false; save();
+    if (why) showToast(T(why), 15000);
+    render();
+  }
+  function render() {
+    // A module heard while the demo runs: end at once and tell the operator to check.
+    if (active && connState === 'connected' && modules()) end(tr('Demo ended – kit detected. Check steering and sections.'));
+    if (band.hidden === active) band.hidden = !active;
+    document.documentElement.toggleAttribute('data-tui-demo', active);
+    if (!active) return;
+    bt.textContent = T(tr('DEMO – simulator only, no real outputs'));
+    stop.textContent = T(tr('End demo'));
+  }
+  setInterval(render, 250);
+
+  // --- Menu tile (setup) --------------------------------------------------------------------
+  const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M10 8l4 2-4 2z" fill="currentColor"/><path d="M8 20h8M12 16v4"/></svg>';
+  setInterval(() => {
+    const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
+    const s = m.querySelector('.tui-tiles.tui-s'); if (!s) return;
+    let t = s.querySelector('[data-tile="demo"]');
+    if (!t) {
+      t = el('button', 'tui-tile setup'); t.dataset.tile = 'demo'; t.innerHTML = IC + '<span></span>';
+      onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); if (active) end(''); else start(); });
+      s.appendChild(t);
+    }
+    const lbl = T(active ? tr('End demo') : tr('Demo mode'));
+    if (t.querySelector('span').textContent !== lbl) t.querySelector('span').textContent = lbl;
+  }, 300);
+  return { start, end, get active() { return active; } };
+})();
+// demo:end
+
+// ===== Long press = explanation (feature/bedienung-2) =========================================
+// Holding one of the main buttons or tiles for LONG_MS shows a short explanation instead of
+// acting. A short press acts as before, only on release: the press is held back (capture phase)
+// and given to the button when the finger lifts, so a long press never switches anything.
+// Texts describe what the button does today (from the help and the buttons' own titles).
+// Not here, on purpose: buttons that switch steering, sections, U-turn, the headland (hydraulic
+// lift), the track or the demo (it switches the simulator). They act at once on touch, as before;
+// their explanation is in the help ("Buttons that act at once").
+// explain:begin
+const TabletExplain = (() => {
+  const T = k => I18n.text(k);
+  const LONG_MS = 600, MOVE_PX = 12;
+  const TEXT = [
+    ['#bn-tracks', tr('Tracks: manage the AB lines and curves of this field.')],
+    ['#bn-quickab', tr('Quick AB line: makes a track quickly, e.g. "A+" through your position in the direction you drive.')],
+    ['#bn-abmenu', tr('AB line options: more ways to make and edit tracks.')],
+    ['#bn-delcontours', tr('Deletes the recorded contour paths.')],
+    ['#bn-nudge', tr('Shows how far the track is moved sideways. Tap to set it back to 0.')],
+    ['#bn-skipcycle', tr('U-turn skip rows: tap to choose how many rows (0–9) each U-turn skips.')],
+    ['#bn-skiptoggle', tr('U-turn skip mode: normal, alternative, or skip worked tracks.')],
+    ['#bn-flags', tr('Flags: set a marker at your position or on the map, and see the list.')],
+    ['#bn-tram', tr('Tram lines: changes how the tram lines are shown.')],
+    ['#tui-menu-btn', tr('Menu: fields and jobs, field tools, help and setup.')],
+    ['#tui-sb-steer', tr('Steering status: on, off, no line, or a fault such as "Not steering".')],
+    ['#tui-sb-ready', tr('Ready to steer: green = all set, yellow = check first, red = something steering needs is missing. Tap for the list.')],
+    ['#sb-fixbtn', tr('GPS: the fix quality. Solid frame = RTK Fix, dashed = RTK Float, dotted = DGPS/GPS. Tap for details.')],
+    ['#sb-modbtn', tr('Modules: whether the steer, machine and GPS modules are heard. Tap for details.')],
+    ['#sb-fs', tr('Fullscreen on or off.')],
+    ['[data-tile="ln-fieldops"]', tr('Fields and Jobs: open, create or import a field, and start or resume a job.')],
+    ['[data-tile="ln-fieldtools"]', tr('Field Tools: boundary, headland, flags and other tools for the open field.')],
+    ['[data-tile="pages"]', tr('Work pages: choose which displays each page shows.')],
+    ['[data-tile="quick"]', tr('Quick bar: choose the buttons in the quick bar.')],
+    ['[data-tile="ln-vehicle"]', tr('Vehicle & Tool: profiles and dimensions of the vehicle and the tool.')],
+    ['[data-tile="ln-autosteer"]', tr('AutoSteer: settings of the steering and the steer module.')],
+    ['[data-tile="ln-network"]', tr('Network & GPS: modules, GPS receiver and NTRIP.')],
+    ['[data-tile="ln-tools"]', tr('Tools & Wizards: setup assistants and calibration.')],
+    ['[data-tile="ln-screenalerts"]', tr('Screen & Alerts: display and alarm settings.')],
+    ['[data-tile="ln-filemenu"]', tr('App & Files: app settings, folders and files.')],
+    ['[data-tile="language"]', tr('Language of the app.')],
+    ['[data-tile="tb-help"]', tr('Help: short guides for the main tasks.')],
+    ['[data-tile="tb-info"]', tr('Info: version, licence and source of this app.')],
+    ['[data-tile="tb-diag"]', tr('Diagnosis for support: a file with the state of this system to send to support.')],
+    ['[data-tile="tbk"]', tr('Back up and restore: one file with vehicles, tools, fields and NTRIP profiles.')],
+    ['[data-tile="eama"]', tr('Fields from eAMA: import field boundaries from an eAMA Shapefile export.')],
+    ['[data-tile="work"]', tr('Start work: step by step to field, track, direction and the ready light.')],
+    ['[data-tile="setup1"]', tr('First setup: language, vehicle, tool, NTRIP, kit check and the direction trap.')],
+  ];
+  const SEL = TEXT.map(t => t[0]).join(',');
+  const textFor = node => { for (const [s, t] of TEXT) if (node.matches(s)) return t; return null; };
+  const pop = document.createElement('div'); pop.id = 'tui-explain'; pop.hidden = true; pop.setAttribute('translate', 'no');
+  document.body.appendChild(pop);
+  let press = null, swallowClick = false, hideAt = 0;
+
+  function show(node, text) {
+    pop.textContent = T(text);
+    pop.hidden = false;
+    const r = node.getBoundingClientRect(), w = Math.min(360, window.innerWidth - 20);
+    pop.style.maxWidth = w + 'px';
+    const ph = pop.offsetHeight, pw = pop.offsetWidth;
+    let x = Math.min(Math.max(10, r.left + r.width / 2 - pw / 2), window.innerWidth - pw - 10);
+    let y = r.bottom + 8; if (y + ph > window.innerHeight - 10) y = Math.max(10, r.top - ph - 8);
+    pop.style.left = x + 'px'; pop.style.top = y + 'px';
+    hideAt = performance.now() + 8000;
+  }
+  setInterval(() => { if (!pop.hidden && performance.now() > hideAt) pop.hidden = true; }, 500);
+
+  window.addEventListener('pointerdown', e => {
+    if (e.__aowReplay || !e.isTrusted) return; // code that presses a button for the operator acts at once
+    if (!pop.hidden && !pop.contains(e.target)) pop.hidden = true;
+    const node = e.target instanceof Element ? e.target.closest(SEL) : null;
+    if (!node || node.disabled) return;
+    e.stopImmediatePropagation();
+    const init = { bubbles: true, cancelable: true, composed: true, clientX: e.clientX, clientY: e.clientY,
+      pointerId: e.pointerId, pointerType: e.pointerType, isPrimary: e.isPrimary, button: e.button, buttons: e.buttons };
+    press = { node, x: e.clientX, y: e.clientY, init, timer: setTimeout(() => {
+      const t = textFor(node); press = null; swallowClick = true; if (t) show(node, t);
+    }, LONG_MS) };
+  }, true);
+  const release = (e, act) => {
+    if (!press) return;
+    clearTimeout(press.timer);
+    const p = press; press = null;
+    if (!act) return;
+    const ev = new PointerEvent('pointerdown', p.init); ev.__aowReplay = true;
+    p.node.dispatchEvent(ev);
+  };
+  window.addEventListener('pointerup', e => { if (swallowClick) setTimeout(() => { swallowClick = false; }, 400); release(e, true); }, true);
+  window.addEventListener('pointercancel', e => release(e, false), true);
+  window.addEventListener('pointermove', e => { if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > MOVE_PX) release(e, false); }, true);
+  window.addEventListener('click', e => { if (swallowClick) { swallowClick = false; e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+  window.addEventListener('contextmenu', e => { if (e.target instanceof Element && e.target.closest(SEL)) e.preventDefault(); }, true);
+  return { show };
+})();
+// explain:end
+
+// ===== Start work (feature/bedienung-2) =======================================================
+// One button that walks through: field → track → direction → ready light, then the drive view.
+// Each step only opens what exists (Fields and Jobs, the track manager, the direction card's
+// own two answers) and moves on by itself when the state is there. It finishes only on a green
+// ready light and never switches steering on: that stays the operator's Steer button.
+const TabletWork = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
+  const sheet = el('div', 'tui-sheet tb-sheet tbk-sheet'); sheet.id = 'tui-work'; sheet.setAttribute('translate', 'no');
+  sheet.innerHTML = '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>';
+  const scrim = el('div', 'tp-scrim');
+  const mini = el('div'); mini.id = 'tui-work-mini'; mini.hidden = true; mini.setAttribute('translate', 'no');
+  document.body.append(scrim, sheet, mini);
+  for (const n of [sheet, scrim, mini]) n.addEventListener('pointerdown', e => e.stopPropagation());
+  const shT = sheet.querySelector('.t'), shB = sheet.querySelector('.tui-sh-body');
+  let running = false, last = '';
+  const isOpen = () => sheet.classList.contains('open');
+  const openSheet = () => { if (typeof lnCloseAll === 'function') lnCloseAll(); sheet.classList.add('open'); scrim.classList.add('open'); last = ''; render(); };
+  const park = () => { sheet.classList.remove('open'); scrim.classList.remove('open'); last = ''; render(); }; // keep going in the mini bar
+  const stop = () => { running = false; park(); };
+  onTap(sheet.querySelector('.x'), stop); onTap(scrim, park);
+  function start() { running = true; openSheet(); }
+
+  const dual = () => { const g = config && config.gps; return !!(g && g.isDualGps && statusBar && !statusBar.dualHeadingMissing); };
+  const steps = () => {
+    const op = tick && tick.op, field = !!(scene && scene.hasField);
+    return [
+      { k: 'field', t: tr('Field'), done: field, v: field ? (fieldOps && fieldOps.activeField) || '' : tr('No field') },
+      { k: 'track', t: tr('Track'), done: field && !!(op && op.autoSteerAvail), v: op && op.autoSteerAvail ? (tick.lineLabel || tr('selected')) : tr('No line') },
+      { k: 'dir', t: tr('Direction'), done: dual() || (typeof TabletSteerConfirm !== 'undefined' && TabletSteerConfirm.confirmed),
+        v: dual() ? tr('dual antenna') : (TabletSteerConfirm && TabletSteerConfirm.confirmed) ? tr('confirmed') : tr('not confirmed since the start') },
+      { k: 'ready', t: tr('Ready to steer'), done: TabletReady.level === 2, v: TabletReady.level === 2 ? tr('Ready') : TabletReady.level === 1 ? tr('Check') : tr('Not ready') },
+    ];
+  };
+  function actions(step) {
+    const box = el('div', 'tb-row');
+    const btn = (label, fn, pri) => { const b = el('button', 'tp-btn' + (pri ? ' pri big' : ''), T(label)); onTap(b, fn); box.appendChild(b); return b; };
+    if (step.k === 'field') {
+      btn(tr('Fields and Jobs'), () => { park(); openFieldsAndJobs(); }, true);
+    } else if (step.k === 'track') {
+      btn(tr('Tracks'), () => { park(); openTracksManager(); }, true);
+      btn(tr('Quick AB line'), () => { park(); const q = document.getElementById('bn-quickab'); if (q) q.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); });
+    } else if (step.k === 'dir') {
+      btn(tr('Yes'), () => { TabletSteerConfirm.confirm(); render(); }, true);
+      btn(tr('No – learn the direction again'), () => {
+        if (!iHoldControl) { showToast(T(tr('Take control to reset the direction'))); return; }
+        transport.send('heading.resetDirection'); showToast(T(tr('Direction reset. Drive forward above 1.5 kph.')));
+      });
+    } else if (step.k === 'ready') {
+      btn(tr('Show the list'), () => { park(); const r = document.getElementById('tui-sb-ready'); if (r) r.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); }, true);
+    }
+    return box;
+  }
+  const HELP = {
+    field: tr('Open the field you work, or create one: Fields and Jobs.'),
+    track: tr('Choose the track to drive, or make one (e.g. "A+" through your position).'),
+    dir: tr('Does the vehicle face the way it drives? With one antenna the direction is learned from the first travel; backing first, it is learned the wrong way round.'),
+    ready: tr('The ready light must be green. Tap it for what is still missing.'),
+  };
+  function render() {
+    const ss = steps(), cur = ss.findIndex(s => !s.done), allDone = cur < 0;
+    const key = JSON.stringify([running, isOpen(), ss.map(s => [s.done, s.v]), I18n.language, iHoldControl]);
+    if (key === last) return;
+    last = key;
+    // Mini bar: the wizard keeps going while another panel is open.
+    const showMini = running && !isOpen();
+    if (mini.hidden === showMini) mini.hidden = !showMini;
+    if (showMini) {
+      mini.innerHTML = '';
+      const s = allDone ? null : ss[cur];
+      mini.appendChild(el('span', 'wm-t', T(tr('Start work')) + ' · ' + (allDone ? T(tr('Ready')) : (cur + 1) + '/4 ' + T(s.t))));
+      const b = el('button', 'tp-btn pri', T(allDone ? tr('Finish') : tr('Back to the steps'))); onTap(b, () => allDone ? finish() : openSheet()); mini.appendChild(b);
+      const x = el('button', 'tp-btn', '✕'); onTap(x, stop); mini.appendChild(x);
+    }
+    if (!isOpen()) return;
+    shT.textContent = T(tr('Start work'));
+    shB.innerHTML = '';
+    const box = el('div', 'tb-box');
+    ss.forEach((s, i) => {
+      const r = el('div', 'tw-step' + (s.done ? ' done' : i === cur ? ' cur' : ''));
+      r.append(el('span', 'tw-n', s.done ? '✓' : String(i + 1)), el('span', 'tw-t', T(s.t)), el('span', 'tw-v', T(s.v)));
+      box.appendChild(r);
+      if (i === cur) { box.appendChild(el('div', 'tp-note', T(HELP[s.k]))); box.appendChild(actions(s)); }
+    });
+    if (allDone) {
+      box.appendChild(el('div', 'tp-note', T(tr('All set. Switch steering on yourself with the Steer button when you drive.'))));
+      const b = el('button', 'tp-btn pri big', T(tr('To the drive view'))); onTap(b, finish); box.appendChild(b);
+    }
+    if (!iHoldControl) box.appendChild(el('div', 'tp-note warn', T(tr('View only: another screen has control'))));
+    shB.appendChild(box);
+  }
+  function finish() {
+    if (TabletReady.level !== 2) { last = ''; openSheet(); return; } // never past a light that isn't green
+    running = false; park();
+    if (typeof lnCloseAll === 'function') lnCloseAll();
+    if (TabletTerminal.mode !== 'drive') TabletTerminal.setMode('drive');
+  }
+  setInterval(render, 400);
+
+  // --- Menu tile (in the field) ---------------------------------------------------------------
+  const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16l13-8z"/></svg>';
+  setInterval(() => {
+    const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
+    const f = m.querySelector('.tui-tiles.tui-f'); if (!f || f.querySelector('[data-tile="work"]')) return;
+    const t = el('button', 'tui-tile field'); t.dataset.tile = 'work'; t.innerHTML = IC + '<span></span>';
+    t.querySelector('span').textContent = T(tr('Start work'));
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); start(); });
+    f.insertBefore(t, f.firstChild);
+  }, 300);
+  return { start };
+})();
+
+// ===== First setup (feature/bedienung-2) ======================================================
+// A guide through the first setup: language, vehicle, tool and working width (the existing
+// profile cards and their wizard, TabletProfiles), NTRIP (Network & GPS), a live kit check
+// (modules, GPS, IMU as the ready light sees them; the bench checklist for more) and the
+// direction trap. It enters no values itself: everything is typed in the existing dialogs, an
+// empty field stays empty. Shown by itself once, while no vehicle profile exists (on the device
+// that has control), skippable at every step, and again any time from the menu ("First setup").
+const TabletFirstSetup = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
+  const KEY = 'aow.firstSetup';
+  const lsOk = () => { try { return localStorage.getItem(KEY); } catch (_) { return 'blocked'; } };
+  const mark = v => { try { localStorage.setItem(KEY, v); } catch (_) { /* ignore */ } };
+  const sheet = el('div', 'tui-sheet tb-sheet tbk-sheet'); sheet.id = 'tui-setup1'; sheet.setAttribute('translate', 'no');
+  sheet.innerHTML = '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>';
+  const scrim = el('div', 'tp-scrim');
+  document.body.append(scrim, sheet);
+  for (const n of [sheet, scrim]) n.addEventListener('pointerdown', e => e.stopPropagation());
+  const shT = sheet.querySelector('.t'), shB = sheet.querySelector('.tui-sh-body');
+  let step = 0, last = '';
+  const isOpen = () => sheet.classList.contains('open');
+  const hide = () => { sheet.classList.remove('open'); scrim.classList.remove('open'); };
+  const close = () => { hide(); mark('done'); };
+  onTap(sheet.querySelector('.x'), close); onTap(scrim, close);
+  function open(at) {
+    if (typeof lnCloseAll === 'function') lnCloseAll();
+    if (typeof at === 'number') step = at;
+    sheet.classList.add('open'); scrim.classList.add('open'); last = ''; render();
+  }
+  // Open an existing panel; the guide waits in the background and comes back with "Back to setup".
+  const goPanel = id => { hide(); TabletTerminal.setMode('setup'); const b = document.getElementById(id); if (b) b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); showBack(); };
+  const back = el('button', 'tp-btn pri'); back.id = 'tui-setup1-back'; back.hidden = true; document.body.appendChild(back);
+  back.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); back.hidden = true; open(); });
+  function showBack() { back.textContent = '↩ ' + T(tr('Back to first setup')); back.hidden = false; }
+
+  const STEPS = [
+    { k: 'lang', t: tr('Language') },
+    { k: 'vehicle', t: tr('Vehicle profile') },
+    { k: 'tool', t: tr('Tool and working width') },
+    { k: 'ntrip', t: tr('NTRIP') },
+    { k: 'kit', t: tr('Check the kit') },
+    { k: 'dir', t: tr('The direction trap') },
+  ];
+  const lv = l => l === 2 ? '✓' : l === 1 ? '!' : '✗';
+  function body(s, box) {
+    const note = t => box.appendChild(el('div', 'tp-note', T(t)));
+    const row = el('div', 'tb-row'), btn = (label, fn, pri) => { const b = el('button', 'tp-btn' + (pri ? ' pri' : ''), T(label)); onTap(b, fn); row.appendChild(b); return b; };
+    if (s.k === 'lang') {
+      const cur = appInfo ? appInfo.currentLanguage : '';
+      for (const l of (appInfo ? appInfo.languages : [])) {
+        const b = el('button', 'tp-btn' + (l.code === cur ? ' pri' : ''), l.name);
+        onTap(b, () => transport.send('app.setLanguage|' + l.code)); row.appendChild(b);
+      }
+    } else if (s.k === 'vehicle') {
+      note(tr('Choose or create the profile of your tractor. The profile wizard asks for the dimensions; measure them, nothing is filled in for you.'));
+      const v = config && config.vehicle;
+      if (v) note(T(tr('Wheelbase')) + ': ' + (v.wheelbase > 0 ? fmtUnit(v.wheelbase, 'm') : '—'));
+      btn(tr('Vehicle & Tool'), () => { hide(); TabletProfiles.open(); showBack(); }, true);
+    } else if (s.k === 'tool') {
+      note(tr('Choose or create the profile of your tool. The working width comes from its sections.'));
+      const tw = typeof sectionsWidthM === 'function' ? sectionsWidthM() : 0;
+      note(T(tr('Working width')) + ': ' + (tw > 0 ? fmtUnit(tw, 'm') : '—'));
+      btn(tr('Vehicle & Tool'), () => { hide(); TabletProfiles.open(); showBack(); }, true);
+    } else if (s.k === 'ntrip') {
+      note(tr('For RTK corrections over the internet: an NTRIP profile with caster, port, mount point, user and password from your provider (e.g. APOS).'));
+      const sb = statusBar || {};
+      note(T(tr('NTRIP')) + ': ' + (sb.ntripConnected ? T(tr('connected')) : sb.ntripStatus ? T(sb.ntripStatus) : '—'));
+      btn(tr('Network & GPS'), () => goPanel('ln-network'), true);
+    } else if (s.k === 'kit') {
+      note(tr('Power on the kit and connect it. The list follows live.'));
+      const list = el('div', 'fs1-list');
+      const KIT = [tr('Connection'), tr('GPS'), tr('Steer module'), tr('IMU')]; // line and direction belong to the work, not the kit
+      for (const [l, k, v] of TabletReady.checks().filter(c => KIT.includes(c[1]))) {
+        const r = el('div', 'fs1-r'); r.dataset.lv = String(l);
+        r.append(el('span', 'fs1-i', lv(l)), el('span', 'fs1-k', T(k)), el('span', 'fs1-v', T(v)));
+        list.appendChild(r);
+      }
+      box.appendChild(list);
+      btn(tr('Network & GPS'), () => goPanel('ln-network'));
+      if (typeof TabletBench !== 'undefined') btn(tr('Bench checklist'), () => { hide(); TabletBench.open(); showBack(); });
+    } else if (s.k === 'dir') {
+      for (const t of [
+        tr('With one antenna the system learns which way the vehicle faces from the first travel.'),
+        tr('If you back up first (e.g. out of the shed), it learns the direction the wrong way round: the steering then runs for the wrong direction.'),
+        tr('After every start, drive forward first or confirm the direction on the card ("Does the vehicle face the way it drives?").'),
+        tr('The ready light stays yellow until the direction is confirmed.'),
+      ]) note(t);
+    }
+    if (row.children.length) box.appendChild(row);
+  }
+  function render() {
+    if (!isOpen()) return;
+    const s = STEPS[step];
+    const key = JSON.stringify([step, I18n.language, appInfo && appInfo.currentLanguage, s.k === 'kit' ? TabletReady.checks() : 0,
+      s.k === 'ntrip' ? [statusBar && statusBar.ntripConnected, statusBar && statusBar.ntripStatus] : 0, s.k === 'tool' && typeof sectionsWidthM === 'function' ? sectionsWidthM() : 0,
+      s.k === 'vehicle' && config && config.vehicle ? config.vehicle.wheelbase : 0]);
+    if (key === last) return;
+    last = key;
+    shT.textContent = T(tr('First setup')) + ' · ' + (step + 1) + '/' + STEPS.length;
+    shB.innerHTML = '';
+    const box = el('div', 'tb-box');
+    box.appendChild(el('div', 'tb-lbl', T(s.t)));
+    body(s, box);
+    const nav = el('div', 'tb-row');
+    const prev = el('button', 'tp-btn', '← ' + T(tr('Back'))); prev.disabled = step === 0; onTap(prev, () => { step--; last = ''; render(); });
+    const next = el('button', 'tp-btn pri big', step === STEPS.length - 1 ? T(tr('Finish')) : T(tr('Next')) + ' →');
+    onTap(next, () => { if (step === STEPS.length - 1) { close(); return; } step++; last = ''; render(); });
+    const skip = el('button', 'tp-btn quiet', T(tr('Skip setup'))); onTap(skip, close);
+    nav.append(prev, next, skip);
+    box.appendChild(nav);
+    box.appendChild(el('div', 'tp-note', T(tr('You can open the first setup again any time: Menu → First setup.'))));
+    shB.appendChild(box);
+  }
+  setInterval(render, 500);
+  // First start on this device: once, on the device that has control, not during a demo.
+  const auto = setInterval(() => {
+    if (lsOk()) { clearInterval(auto); return; }
+    // Only while no vehicle profile exists yet (the profile list the client already has).
+    if (profiles && profiles.vehicles && profiles.vehicles.length) { clearInterval(auto); return; }
+    if (connState === 'connected' && iHoldControl && appInfo && config && profiles && !(typeof TabletDemo !== 'undefined' && TabletDemo.active)) {
+      clearInterval(auto); mark('shown'); open(0);
+    }
+  }, 1000);
+
+  // --- Menu tile (setup) ----------------------------------------------------------------------
+  const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16M6 16l9-9 3 3-9 9H6z"/><path d="M13 9l3 3"/></svg>';
+  setInterval(() => {
+    const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
+    const sBox = m.querySelector('.tui-tiles.tui-s'); if (!sBox || sBox.querySelector('[data-tile="setup1"]')) return;
+    const t = el('button', 'tui-tile setup'); t.dataset.tile = 'setup1'; t.innerHTML = IC + '<span></span>';
+    t.querySelector('span').textContent = T(tr('First setup'));
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(0); });
+    sBox.insertBefore(t, sBox.firstChild);
+  }, 300);
+  return { open };
+})();
+
+// ── GeoAT (fork, eAMA import): MGI / Austria Lambert (EPSG:31287) → ETRS89 ──────────────────
+// Inside the BEV grid: "MGI to ETRS89 (5)" (EPSG accuracy 0.15 m), NTv2 grid AT_GIS_GRID 2014 as
+// PROJ ships it (wwwroot/geo/at_bev_AT_GIS_GRID.tif; BEV, CC BY 4.0; fetched only when an
+// import needs it, SHA-256 in GeoAT.GRID_SHA256). Outside it: "MGI to ETRS89 (1)", 7-parameter Helmert, EPSG
+// accuracy 1.5 m, also in the grid's zero-filled margin (see shift()); the result then carries
+// grid: false and the UI must say so. Same steps as PROJ:
+// inverse LCC 2SP on Bessel 1841, then hgridshift (bilinear) or Helmert with height 0.
+// Tested against pyproj by Tests/web/geo-at.test.mjs (begin/end markers are read by that test).
+// geo-at:begin
+const GeoAT = (() => {
+  const GRID_SHA256 = '852d58612498f7ef08541e65f25f52f2a7f35f6020fd7e8250f7fa6eaa5ac599';
+  const D2R = Math.PI / 180;
+
+  // Austria Lambert (LCC 2SP), on Bessel 1841 for MGI (EPSG:31287) and on GRS80 for ETRS89
+  // (EPSG:3416). Easting/northing → latitude/longitude in radians on that ellipsoid.
+  const A = 6377397.155, INVF = 299.1528128, E2 = (2 - 1 / INVF) / INVF;
+  const LAT0 = 47.5, LON0 = 13 + 20 / 60, LAT1 = 49, LAT2 = 46, FE = 400000, FN = 400000;
+  function lambertInverse(a, e2) {
+    const e = Math.sqrt(e2);
+    const mf = p => Math.cos(p) / Math.sqrt(1 - e2 * Math.sin(p) ** 2);
+    const tf = p => { const es = e * Math.sin(p); return Math.tan(Math.PI / 4 - p / 2) / ((1 - es) / (1 + es)) ** (e / 2); };
+    const n = (Math.log(mf(LAT1 * D2R)) - Math.log(mf(LAT2 * D2R))) / (Math.log(tf(LAT1 * D2R)) - Math.log(tf(LAT2 * D2R)));
+    const f = mf(LAT1 * D2R) / (n * tf(LAT1 * D2R) ** n), rho0 = a * f * tf(LAT0 * D2R) ** n;
+    return (east, north) => {
+      const dx = east - FE, dy = rho0 - (north - FN);
+      const t = (Math.sign(n) * Math.hypot(dx, dy) / (a * f)) ** (1 / n);
+      let phi = Math.PI / 2 - 2 * Math.atan(t);
+      for (let i = 0; i < 15; i++) {
+        const es = e * Math.sin(phi);
+        const next = Math.PI / 2 - 2 * Math.atan(t * ((1 - es) / (1 + es)) ** (e / 2));
+        if (Math.abs(next - phi) < 1e-14) { phi = next; break; }
+        phi = next;
+      }
+      return [phi, Math.atan2(dx, dy) / n + LON0 * D2R];
+    };
+  }
+  const inverseLambert = lambertInverse(A, E2);
+  const GRS80_F = 1 / 298.257222101, inverseLambertEtrs = lambertInverse(6378137, GRS80_F * (2 - GRS80_F));
+
+  // "MGI to ETRS89 (1)": position-vector Helmert, Bessel → GRS80, height 0 on Bessel.
+  function helmert(phi, lam) {
+    const s = Math.sin(phi), nu = A / Math.sqrt(1 - E2 * s * s);
+    const x = nu * Math.cos(phi) * Math.cos(lam), y = nu * Math.cos(phi) * Math.sin(lam), z = nu * (1 - E2) * s;
+    const sec = D2R / 3600, rx = 5.137 * sec, ry = 1.474 * sec, rz = 5.297 * sec, k = 1 + 2.4232e-6;
+    const X = 577.326 + k * (x - rz * y + ry * z), Y = 90.129 + k * (rz * x + y - rx * z), Z = 463.919 + k * (-ry * x + rx * y + z);
+    const a = 6378137, f = 1 / 298.257222101, e2 = f * (2 - f), p = Math.hypot(X, Y);
+    let lat = Math.atan2(Z, p * (1 - e2));
+    for (let i = 0; i < 10; i++) {
+      const sl = Math.sin(lat), next = Math.atan2(Z + e2 * (a / Math.sqrt(1 - e2 * sl * sl)) * sl, p);
+      if (Math.abs(next - lat) < 1e-14) { lat = next; break; }
+      lat = next;
+    }
+    return [lat / D2R, Math.atan2(Y, X) / D2R];
+  }
+
+  // Minimal GeoTIFF reader for this one file: little-endian, tiled, planar, float32, Adobe
+  // deflate, floating-point predictor (3), PixelIsPoint. Anything else is rejected.
+  async function readGrid(bytes) {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (dv.getUint16(0, false) !== 0x4949 || dv.getUint16(2, true) !== 42) throw new Error('grid: not a little-endian TIFF');
+    const ifd = dv.getUint32(4, true), tags = {};
+    const SIZE = { 1: 1, 2: 1, 3: 2, 4: 4, 12: 8, 16: 8 };
+    for (let i = 0, cnt = dv.getUint16(ifd, true); i < cnt; i++) {
+      const o = ifd + 2 + i * 12, tag = dv.getUint16(o, true), type = dv.getUint16(o + 2, true), count = dv.getUint32(o + 4, true);
+      const sz = SIZE[type]; if (!sz) continue;
+      const at = sz * count > 4 ? dv.getUint32(o + 8, true) : o + 8, vals = [];
+      for (let j = 0; j < count && type !== 2; j++) {
+        const p = at + j * sz;
+        vals.push(type === 3 ? dv.getUint16(p, true) : type === 4 ? dv.getUint32(p, true) : type === 12 ? dv.getFloat64(p, true) : type === 16 ? Number(dv.getBigUint64(p, true)) : dv.getUint8(p));
+      }
+      tags[tag] = vals;
+    }
+    const v = t => (tags[t] || [])[0];
+    const w = v(256), h = v(257), tw = v(322), th = v(323), offs = tags[324], lens = tags[325];
+    if (v(259) !== 8 || v(317) !== 3 || v(284) !== 2 || v(277) !== 2 || (tags[258] || []).some(b => b !== 32)
+        || (tags[339] || []).some(f => f !== 3) || !offs || offs.length !== lens.length) throw new Error('grid: unsupported TIFF layout');
+    const keys = tags[34735] || [];
+    for (let i = 4; i < keys.length; i += 4) if (keys[i] === 1025 && keys[i + 3] !== 2) throw new Error('grid: not PixelIsPoint');
+    const scale = tags[33550], tie = tags[33922];
+    const across = Math.ceil(w / tw), down = Math.ceil(h / th), perPlane = across * down;
+    const planes = [new Float32Array(w * h), new Float32Array(w * h)];
+    for (let k = 0; k < offs.length; k++) {
+      const plane = Math.floor(k / perPlane), tx = (k % perPlane) % across, ty = Math.floor((k % perPlane) / across);
+      const z = new Uint8Array(await new Response(new Blob([bytes.subarray(offs[k], offs[k] + lens[k])]).stream()
+        .pipeThrough(new DecompressionStream('deflate'))).arrayBuffer());
+      const rowBytes = tw * 4, out = new DataView(new ArrayBuffer(rowBytes));
+      for (let r = 0; r < th; r++) {
+        const row = z.subarray(r * rowBytes, (r + 1) * rowBytes);
+        for (let i = 1; i < rowBytes; i++) row[i] = (row[i] + row[i - 1]) & 0xff; // undo byte differencing
+        for (let i = 0; i < tw; i++) for (let b = 0; b < 4; b++) out.setUint8(i * 4 + b, row[b * tw + i]); // MSB-first byte planes
+        const gy = ty * th + r; if (gy >= h) break;
+        for (let i = 0; i < tw; i++) { const gx = tx * tw + i; if (gx < w) planes[plane][gy * w + gx] = out.getFloat32(i * 4, false); }
+      }
+    }
+    // Band 0 latitude offset, band 1 longitude offset (positive east), both arc-seconds.
+    return { w, h, lon0: tie[3], lat0: tie[4], dlon: scale[0], dlat: scale[1], dLat: planes[0], dLon: planes[1] };
+  }
+
+  let grid = null, loading = null;
+  async function sha256Hex(bytes) {
+    const d = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    return [...d].map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  // Fetches and decodes the grid once (bytes may be passed in instead). Resolves to true, or
+  // false when it is missing, damaged or its checksum does not match; then every point uses the
+  // Helmert fallback, marked grid: false. A failed load is retried on the next call.
+  function load(bytes) {
+    if (grid) return Promise.resolve(true);
+    if (!loading) loading = (async () => {
+      try {
+        if (!bytes) {
+          const res = await fetch('/geo/at_bev_AT_GIS_GRID.tif');
+          if (!res.ok) throw new Error('grid: HTTP ' + res.status);
+          bytes = await res.arrayBuffer();
+        }
+        const buf = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+        if (await sha256Hex(buf) !== GRID_SHA256) throw new Error('grid: checksum mismatch');
+        grid = await readGrid(buf);
+        return true;
+      } catch (e) { console.warn('GeoAT:', e.message); loading = null; return false; }
+    })();
+    return loading;
+  }
+
+  // Bilinear grid shift at an MGI position (degrees), or null outside the grid.
+  function shift(latDeg, lonDeg) {
+    if (!grid) return null;
+    const fx = (lonDeg - grid.lon0) / grid.dlon, fy = (grid.lat0 - latDeg) / grid.dlat;
+    if (!(fx >= 0 && fy >= 0 && fx <= grid.w - 1 && fy <= grid.h - 1)) return null;
+    const x = Math.min(Math.floor(fx), grid.w - 2), y = Math.min(Math.floor(fy), grid.h - 2), u = fx - x, t = fy - y;
+    const at = (b, i, j) => b[(y + j) * grid.w + x + i];
+    // Outside Austria the grid holds 0/0 instead of no-data (the real shift is about 110 m
+    // everywhere). PROJ interpolates those zeros; a cell with such a corner counts as outside.
+    for (let j = 0; j < 2; j++) for (let i = 0; i < 2; i++) if (at(grid.dLat, i, j) === 0 && at(grid.dLon, i, j) === 0) return null;
+    const bil = b => (1 - u) * (1 - t) * at(b, 0, 0) + u * (1 - t) * at(b, 1, 0) + (1 - u) * t * at(b, 0, 1) + u * t * at(b, 1, 1);
+    const sLat = bil(grid.dLat), sLon = bil(grid.dLon);
+    return Number.isFinite(sLat) && Number.isFinite(sLon) ? [sLat / 3600, sLon / 3600] : null;
+  }
+
+  // EPSG:31287 easting/northing (m) → ETRS89 { lat, lon } in degrees. approx: true (grid: false)
+  // means the 1.5 m Helmert fallback was used (outside the grid, or grid not loaded).
+  function toEtrs89(e, n) {
+    const [phi, lam] = inverseLambert(e, n);
+    const s = shift(phi / D2R, lam / D2R);
+    if (s) return { lat: phi / D2R + s[0], lon: lam / D2R + s[1], grid: true, approx: false };
+    const [lat, lon] = helmert(phi, lam);
+    return { lat, lon, grid: false, approx: true };
+  }
+  // EPSG:3416 (ETRS89 / Austria Lambert): projection only, no datum change.
+  function etrsLambertToEtrs89(e, n) {
+    const [phi, lam] = inverseLambertEtrs(e, n);
+    return { lat: phi / D2R, lon: lam / D2R, grid: false, approx: false };
+  }
+
+  return { load, toEtrs89, etrsLambertToEtrs89, GRID_SHA256 };
+})();
+// geo-at:end
+
+// ── EamaShape (fork, eAMA import): ZIP + Shapefile + .prj, all in the client ──────────────
+// ZIP: methods stored (0) and deflate (8), no encryption, no ZIP64. Shapefile: Polygon (5),
+// PolygonZ (15), PolygonM (25); Z/M are ignored. Rings per the Shapefile rule: clockwise = outer,
+// counter-clockwise = hole, each hole goes to the smallest outer ring that contains it. .dbf text
+// in the .cpg codepage, else from the language driver byte, else Windows-1252. Numbers keep the
+// text as written (`raw`) and are not rounded. The .prj WKT is parsed: MGI / Austria Lambert
+// and ETRS89 / Austria Lambert are accepted, everything else is refused with a reason.
+// Tested by Tests/web/eama-shape.test.mjs (begin/end markers are read by that test).
+// eama-shape:begin
+const EamaShape = (() => {
+  const LIMIT = 200 * 1024 * 1024; // uncompressed bytes per file
+
+  // --- ZIP --------------------------------------------------------------------------------------
+  async function inflateRaw(data) {
+    return new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());
+  }
+  // → [{ name, method, size, read() }]; throws Error('zip:<code>').
+  function readZip(bytes) {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    let eocd = -1;
+    for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 22 - 65535); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    if (eocd < 0) throw new Error('zip:notzip');
+    const count = dv.getUint16(eocd + 10, true), cdOff = dv.getUint32(eocd + 16, true);
+    if (count === 0xffff || cdOff === 0xffffffff) throw new Error('zip:zip64');
+    const out = [];
+    for (let i = 0, p = cdOff; i < count; i++) {
+      if (p + 46 > bytes.length || dv.getUint32(p, true) !== 0x02014b50) throw new Error('zip:damaged');
+      const flags = dv.getUint16(p + 8, true), method = dv.getUint16(p + 10, true);
+      const csize = dv.getUint32(p + 20, true), size = dv.getUint32(p + 24, true);
+      const nlen = dv.getUint16(p + 28, true), xlen = dv.getUint16(p + 30, true), clen = dv.getUint16(p + 32, true);
+      const local = dv.getUint32(p + 42, true);
+      const nb = bytes.subarray(p + 46, p + 46 + nlen);
+      const name = new TextDecoder(flags & 0x800 ? 'utf-8' : 'windows-1252').decode(nb);
+      p += 46 + nlen + xlen + clen;
+      if (name.endsWith('/')) continue;
+      out.push({ name, method, size, async read() {
+        if (flags & 1) throw new Error('zip:encrypted');
+        if (method !== 0 && method !== 8) throw new Error('zip:method');
+        if (size > LIMIT) throw new Error('zip:toolarge');
+        if (local + 30 > bytes.length || dv.getUint32(local, true) !== 0x04034b50) throw new Error('zip:damaged');
+        const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
+        const data = bytes.subarray(start, start + csize);
+        if (data.length !== csize) throw new Error('zip:damaged');
+        let r;
+        try { r = method === 0 ? data : await inflateRaw(data); } catch (_) { throw new Error('zip:damaged'); }
+        if (r.length !== size) throw new Error('zip:damaged');
+        return r;
+      } });
+    }
+    return out;
+  }
+
+  // --- .prj (WKT 1 and WKT 2) -----------------------------------------------------------------
+  function parseWkt(text) {
+    let i = 0;
+    const ws = () => { while (i < text.length && /\s/.test(text[i])) i++; };
+    function node() {
+      ws(); const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(text.slice(i)); if (!m) throw new Error('wkt');
+      i += m[0].length; ws();
+      const open = text[i]; if (open !== '[' && open !== '(') throw new Error('wkt');
+      const close = open === '[' ? ']' : ')', args = []; i++;
+      for (;;) {
+        ws();
+        if (text[i] === '"') { let s = ''; i++; for (;;) { if (i >= text.length) throw new Error('wkt'); if (text[i] === '"') { if (text[i + 1] === '"') { s += '"'; i += 2; continue; } i++; break; } s += text[i++]; } args.push(s); }
+        else if (/[-+0-9.]/.test(text[i])) { const n = /^[-+]?[0-9.]+(?:[eE][-+]?\d+)?/.exec(text.slice(i))[0]; i += n.length; args.push(Number(n)); }
+        else if (/^[A-Za-z_][A-Za-z0-9_]*\s*[\],)]/.test(text.slice(i))) { const w = /^[A-Za-z_][A-Za-z0-9_]*/.exec(text.slice(i))[0]; i += w.length; args.push({ enum: w }); } // WKT 2: north, Cartesian
+        else args.push(node());
+        ws();
+        if (text[i] === ',') { i++; continue; }
+        if (text[i] === close) { i++; break; }
+        throw new Error('wkt');
+      }
+      return { key: m[0].toUpperCase(), args };
+    }
+    const root = node(); ws();
+    if (i !== text.length) throw new Error('wkt');
+    return root;
+  }
+  const kids = (n, ...keys) => n.args.filter(a => typeof a === 'object' && keys.includes(a.key));
+  const kid = (n, ...keys) => kids(n, ...keys)[0];
+  const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const PARAM = {
+    falseeasting: 'fe', eastingatfalseorigin: 'fe', falsenorthing: 'fn', northingatfalseorigin: 'fn',
+    centralmeridian: 'lon0', longitudeoforigin: 'lon0', longitudeoffalseorigin: 'lon0',
+    standardparallel1: 'lat1', latitudeof1ststandardparallel: 'lat1',
+    standardparallel2: 'lat2', latitudeof2ndstandardparallel: 'lat2',
+    latitudeoforigin: 'lat0', latitudeoffalseorigin: 'lat0', scalefactor: 'k',
+  };
+  const near = (a, b, tol) => typeof a === 'number' && Math.abs(a - b) <= tol;
+  // → { ok: true, datum: 'MGI'|'ETRS89', name } or { ok: false, err: 'prjunreadable'|'prjunsupported', name, why }
+  function parsePrj(text) {
+    let root;
+    try { root = parseWkt(String(text).replace(/^﻿/, '').trim()); } catch (_) { return { ok: false, err: 'prjunreadable', name: '', why: 'WKT' }; }
+    const name = typeof root.args[0] === 'string' ? root.args[0] : '';
+    const no = why => ({ ok: false, err: 'prjunsupported', name, why });
+    if (!['PROJCS', 'PROJCRS', 'PROJECTEDCRS'].includes(root.key)) return no('not projected');
+    const geo = kid(root, 'GEOGCS', 'BASEGEOGCRS', 'BASEGEODCRS', 'GEOGCRS', 'GEODCRS');
+    const datum = geo && kid(geo, 'DATUM', 'GEODETICDATUM', 'TRF', 'ENSEMBLE', 'DATUMENSEMBLE');
+    const ell = datum && kid(datum, 'SPHEROID', 'ELLIPSOID');
+    if (!geo || !datum || !ell) return no('no datum');
+    const dname = norm(datum.args[0]), a = ell.args[1], invf = ell.args[2];
+    const pm = kid(geo, 'PRIMEM', 'PRIMEMERIDIAN');
+    if (pm && !near(pm.args[1], 0, 1e-12)) return no('prime meridian');
+    let d = '';
+    if (near(a, 6377397.155, 1e-3) && near(invf, 299.1528128, 1e-6) && /mgi|militargeographische/.test(dname) && !/1901|balkan/.test(dname)) d = 'MGI';
+    else if (near(a, 6378137, 1e-3) && near(invf, 298.257222101, 1e-6) && /etrs|europeanterrestrial/.test(dname)) d = 'ETRS89';
+    if (!d) return no('datum ' + datum.args[0]);
+    const method = kid(root, 'PROJECTION') || kid(kid(root, 'CONVERSION') || { args: [] }, 'METHOD');
+    const mname = method ? norm(method.args[0]) : '';
+    if (!/lambert(conformalconic|conicconformal)/.test(mname) || /1sp/.test(mname)) return no('projection ' + (method ? method.args[0] : '?'));
+    const p = {};
+    for (const n of [...kids(root, 'PARAMETER'), ...kids(kid(root, 'CONVERSION') || { args: [] }, 'PARAMETER')]) {
+      const k = PARAM[norm(n.args[0])]; if (!k) return no('parameter ' + n.args[0]);
+      const au = kid(n, 'ANGLEUNIT'); // WKT 2 may give each angle its own unit
+      if (au && k !== 'fe' && k !== 'fn' && k !== 'k' && !near(au.args[1], Math.PI / 180, 1e-15)) return no('angle unit ' + au.args[0]);
+      const lu = kid(n, 'LENGTHUNIT');
+      if (lu && !near(lu.args[1], 1, 1e-12)) return no('unit ' + lu.args[0]);
+      p[k] = n.args[1];
+    }
+    const pars = [p.lat1, p.lat2].sort((x, y) => x - y);
+    if (!(near(p.fe, 400000, 1e-3) && near(p.fn, 400000, 1e-3) && near(p.lon0, 13 + 20 / 60, 1e-7) && near(p.lat0, 47.5, 1e-7)
+        && near(pars[0], 46, 1e-7) && near(pars[1], 49, 1e-7) && (p.k === undefined || near(p.k, 1, 1e-12)))) return no('parameters');
+    const unit = kid(root, 'UNIT', 'LENGTHUNIT') || kid(kid(root, 'CS') || { args: [] }, 'UNIT', 'LENGTHUNIT')
+      || (kids(root, 'AXIS').map(x => kid(x, 'LENGTHUNIT', 'UNIT')).find(Boolean));
+    if (!unit || !near(unit.args[1], 1, 1e-12)) return no('unit');
+    return { ok: true, datum: d, name };
+  }
+
+  // --- .shp ----------------------------------------------------------------------------------------
+  const ringArea2 = r => { let s = 0; for (let i = 0, j = r.length - 1; i < r.length; j = i++) s += (r[i][0] - r[j][0]) * (r[i][1] + r[j][1]); return s; }; // > 0 clockwise
+  function inRing(pt, r) {
+    let c = false;
+    for (let i = 0, j = r.length - 1; i < r.length; j = i++)
+      if ((r[i][1] > pt[1]) !== (r[j][1] > pt[1]) && pt[0] < (r[j][0] - r[i][0]) * (pt[1] - r[i][1]) / (r[j][1] - r[i][1]) + r[i][0]) c = !c;
+    return c;
+  }
+  // → [{ parts: [{ outer: [[x, y]…], holes: [[[x, y]…]…] }] } | null], index = record order
+  function parseShp(bytes) {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (bytes.length < 100 || dv.getInt32(0, false) !== 9994) throw new Error('shp:damaged');
+    const type = dv.getInt32(32, true);
+    if (![0, 5, 15, 25].includes(type)) throw new Error('shp:type');
+    const end = Math.min(bytes.length, dv.getInt32(24, false) * 2), out = [];
+    for (let p = 100; p + 8 <= end;) {
+      const len = dv.getInt32(p + 4, false) * 2, r = p + 8; p = r + len;
+      if (p > end || len < 4) throw new Error('shp:damaged');
+      const st = dv.getInt32(r, true);
+      if (st === 0) { out.push(null); continue; }
+      if (![5, 15, 25].includes(st)) throw new Error('shp:type');
+      const np = dv.getInt32(r + 36, true), npt = dv.getInt32(r + 40, true), pts = r + 44 + np * 4;
+      if (np < 1 || npt < 0 || pts + npt * 16 > p) throw new Error('shp:damaged');
+      const rings = [];
+      for (let k = 0; k < np; k++) {
+        const a = dv.getInt32(r + 44 + k * 4, true), b = k + 1 < np ? dv.getInt32(r + 48 + k * 4, true) : npt;
+        if (a < 0 || b > npt || b - a < 4) { if (b - a >= 0 && b - a < 4) continue; throw new Error('shp:damaged'); }
+        const ring = [];
+        for (let q = a; q < b; q++) ring.push([dv.getFloat64(pts + q * 16, true), dv.getFloat64(pts + q * 16 + 8, true)]);
+        const f = ring[0], l = ring[ring.length - 1];
+        if (f[0] === l[0] && f[1] === l[1]) ring.pop();
+        rings.push(ring);
+      }
+      const outers = rings.filter(x => ringArea2(x) > 0).map(o => ({ outer: o, holes: [], area: ringArea2(o) }));
+      for (const h of rings.filter(x => ringArea2(x) <= 0)) {
+        const host = outers.filter(o => inRing(h[0], o.outer)).sort((x, y) => x.area - y.area)[0];
+        if (host) host.holes.push(h); else outers.push({ outer: h.slice().reverse(), holes: [], area: -ringArea2(h) }); // stray hole: kept as its own part
+      }
+      out.push({ parts: outers.map(o => ({ outer: o.outer, holes: o.holes })) });
+    }
+    return out;
+  }
+
+  // --- .dbf ----------------------------------------------------------------------------------------
+  const LDID = { 0x01: 'ibm437', 0x02: 'ibm850', 0x03: 'windows-1252', 0x57: 'windows-1252', 0x58: 'windows-1252', 0x64: 'ibm852', 0xc8: 'windows-1250' };
+  function encodingOf(cpg, ldid) {
+    const c = norm(cpg || '');
+    const fromCpg = { utf8: 'utf-8', 65001: 'utf-8', 1252: 'windows-1252', ansi1252: 'windows-1252', cp1252: 'windows-1252', windows1252: 'windows-1252',
+      88591: 'iso-8859-1', iso88591: 'iso-8859-1', 1250: 'windows-1250', windows1250: 'windows-1250', 28591: 'iso-8859-1', 885915: 'iso-8859-15', iso885915: 'iso-8859-15' }[c];
+    const want = fromCpg || LDID[ldid] || 'windows-1252';
+    try { new TextDecoder(want); return want; } catch (_) { return 'windows-1252'; }
+  }
+  // → { encoding, fields: [{ name, type, len, dec }], rows: [{ <name>: { raw, value } }] }
+  function parseDbf(bytes, cpg) {
+    const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    if (bytes.length < 33) throw new Error('dbf:damaged');
+    const n = dv.getUint32(4, true), hlen = dv.getUint16(8, true), rlen = dv.getUint16(10, true);
+    const encoding = encodingOf(cpg, bytes[29]), dec = new TextDecoder(encoding);
+    const fields = [];
+    for (let p = 32, off = 1; p + 32 <= hlen && bytes[p] !== 0x0d; p += 32) {
+      const nb = bytes.subarray(p, p + 11), z = nb.indexOf(0);
+      const f = { name: dec.decode(z >= 0 ? nb.subarray(0, z) : nb).trim(), type: String.fromCharCode(bytes[p + 11]), len: bytes[p + 16], dec: bytes[p + 17], off };
+      off += f.len; fields.push(f);
+    }
+    if (hlen + n * rlen > bytes.length) throw new Error('dbf:damaged');
+    const rows = [];
+    for (let i = 0; i < n; i++) {
+      const r = hlen + i * rlen, row = {};
+      for (const f of fields) {
+        const raw = dec.decode(bytes.subarray(r + f.off, r + f.off + f.len)).trim();
+        const num = (f.type === 'N' || f.type === 'F') && raw !== '' && !/^\*+$/.test(raw) ? Number(raw) : null;
+        row[f.name] = { raw, value: num !== null && Number.isFinite(num) ? num : (f.type === 'N' || f.type === 'F' ? null : raw) };
+      }
+      rows.push(row);
+    }
+    return { encoding, fields: fields.map(({ off, ...f }) => f), rows };
+  }
+
+  // --- Whole ZIP -----------------------------------------------------------------------------------
+  // → { layers: [{ name, prj, encoding, fields, rows, shapes }] } or throws Error('<area>:<code>').
+  // A layer without .prj, or with an unsupported one, comes back with prj.ok false and no shapes.
+  async function load(bytes) {
+    const entries = readZip(bytes);
+    const byBase = new Map();
+    for (const e of entries) {
+      const m = /^(.*)\.(shp|dbf|prj|cpg)$/i.exec(e.name); if (!m || /(^|\/)__MACOSX\//.test(e.name)) continue;
+      const k = m[1]; if (!byBase.has(k)) byBase.set(k, {});
+      byBase.get(k)[m[2].toLowerCase()] = e;
+    }
+    const layers = [];
+    for (const [base, f] of byBase) {
+      if (!f.shp) continue;
+      const name = base.split('/').pop();
+      if (!f.dbf) throw new Error('dbf:missing');
+      const prj = f.prj ? parsePrj(new TextDecoder('utf-8').decode(await f.prj.read())) : { ok: false, err: 'noprj', name: '', why: '' };
+      const dbf = parseDbf(await f.dbf.read(), f.cpg ? new TextDecoder('utf-8').decode(await f.cpg.read()).trim() : '');
+      const shapes = prj.ok ? parseShp(await f.shp.read()) : [];
+      if (prj.ok && shapes.length !== dbf.rows.length) throw new Error('shp:count');
+      layers.push({ name, prj, encoding: dbf.encoding, fields: dbf.fields, rows: dbf.rows, shapes });
+    }
+    if (!layers.length) throw new Error('zip:noshp');
+    return { layers };
+  }
+
+  // --- Records -------------------------------------------------------------------------------------
+  // Columns: provisional guesses until a real eAMA export confirms the names.
+  function columns(fields) {
+    const find = re => (fields.find(f => re.test(f.name)) || {}).name;
+    return {
+      fs: find(/^(FS_?(NR|NUMMER|KENNUNG)|FELDSTUECK|FS)$/i) || find(/^FS/i),
+      sl: find(/^(SL_?(NR|NUMMER)|SCHLAG_?NR|SCHLAG|SL)$/i),
+      use: find(/SNAR|NUTZ|KULTUR|BEZ/i),
+      area: find(/FL(AECHE)?.*HA|_HA$|^HA$/i),
+    };
+  }
+  const val = (row, c) => (c && row[c] && row[c].raw) || '';
+  const clean = s => s.replace(/[\\/:*?"<>|\t\r\n]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80);
+  // The name a record gets: field and plot number and use, as in the file; else layer + number.
+  function recordName(row, c, kind, layerName, i) {
+    const bits = kind === 'sl'
+      ? [val(row, c.fs) && 'FS ' + val(row, c.fs), val(row, c.sl) && 'S ' + val(row, c.sl)].filter(Boolean).join(' · ') // "/" can't be in a folder name
+      : (val(row, c.fs) && 'FS ' + val(row, c.fs));
+    return clean([bits, val(row, c.use)].filter(Boolean).join(' ')) || clean(layerName + ' ' + (i + 1));
+  }
+  // Indices of the records without geometry: a null shape, or no ring with at least 3 points.
+  const withoutGeometry = l => (l.shapes || []).flatMap((sh, i) => !sh || !sh.parts.length ? [i] : []);
+
+  return { load, readZip, parsePrj, parseShp, parseDbf, columns, val, clean, recordName, withoutGeometry };
+})();
+// eama-shape:end
+
+// ── TabletEama (fork): "Fields from eAMA" ─────────────────────────────────────────────────────
+// Reads an eAMA Shapefile ZIP picked on this device (EamaShape), converts with GeoAT. All in the
+// browser; the host gets the finished rings (field.fromGeo) and creates each field like From KML.
+// Also the help for the QGIS → KML route.
+const TabletEama = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
+  const STILL_MPS = 0.15;
+  const ERR = {
+    'zip:notzip': tr('The file is not a readable ZIP file.'),
+    'zip:zip64': tr('This ZIP file uses a format the app cannot read (ZIP64, encryption or an unusual compression).'),
+    'zip:encrypted': tr('This ZIP file uses a format the app cannot read (ZIP64, encryption or an unusual compression).'),
+    'zip:method': tr('This ZIP file uses a format the app cannot read (ZIP64, encryption or an unusual compression).'),
+    'zip:damaged': tr('The ZIP file is damaged.'),
+    'zip:toolarge': tr('The file is too large.'),
+    'zip:noshp': tr('The ZIP file contains no Shapefile (.shp).'),
+    'dbf:missing': tr('The Shapefile has no attribute table (.dbf).'),
+    'shp:type': tr('The Shapefile contains no areas (polygons).'),
+  };
+  const DAMAGED = tr('The Shapefile is damaged ({f}).');
+  const PRJ = {
+    noprj: tr('No coordinate system (.prj) in the ZIP file. Without it nothing is imported.'),
+    prjunreadable: tr('The coordinate system (.prj) cannot be read. Nothing is imported.'),
+    prjunsupported: tr('Coordinate system not supported: {f}. Supported are MGI / Austria Lambert and ETRS89 / Austria Lambert. Nothing is imported.'),
+  };
+  const ACCURACY = tr('eAMA boundaries are drawn on aerial photos for the subsidy application, not measured with RTK. Before using automatic U-turns or section control at the boundary, drive the boundary with RTK.');
+  const APPROX = tr('Accuracy about 1.5 m');
+  const RES = { ok: tr('created'), skip: tr('skipped, name exists'), fail: tr('failed') };
+  let st = { busy: false, file: '', err: '', layers: null, grid: null };
+  let kind = 'sl', items = [], empty = [], conflict = 'skip', run = null, help = false;
+
+  const { columns, val, clean, recordName } = EamaShape;
+  const area2 = r => { let s = 0; for (let i = 0, j = r.length - 1; i < r.length; j = i++) s += (r[j][0] + r[i][0]) * (r[j][1] - r[i][1]); return s / 2; };
+
+  function buildItems() {
+    items = []; empty = [];
+    for (const l of st.layers || []) {
+      if (!l.prj.ok) continue;
+      const c = columns(l.fields);
+      // Records without geometry are not imported; the summary names them (record number as in
+      // the file, and the name the record would have had).
+      for (const i of EamaShape.withoutGeometry(l)) empty.push({ layer: l.name, rec: i + 1, name: recordName(l.rows[i] || {}, c, kind, l.name, i) });
+      l.shapes.forEach((sh, i) => {
+        if (!sh) return;
+        const row = l.rows[i];
+        sh.parts.forEach((part, j) => {
+          let name = recordName(row, c, kind, l.name, i);
+          if (sh.parts.length > 1) name += ' ' + T(tr('part')) + ' ' + (j + 1);
+          // Shapefile rings: outer clockwise, holes counter-clockwise. The field takes them the
+          // KML way round (outer counter-clockwise), so only the order of the points is reversed.
+          const conv = r => r.slice().reverse().map(([x, y]) => l.prj.datum === 'MGI' ? GeoAT.toEtrs89(x, y) : GeoAT.etrsLambertToEtrs89(x, y));
+          const rings = [conv(part.outer), ...part.holes.map(conv)];
+          items.push({
+            name, sel: true, rec: i, part: j, parts: sh.parts.length, src: part,
+            use: val(row, c.use), fileArea: val(row, c.area), areaM2: area2(part.outer) - part.holes.reduce((s, h) => s + Math.abs(area2(h)), 0),
+            rings, approx: rings.some(r => r.some(p => p.approx)), holes: part.holes.length,
+          });
+        });
+      });
+    }
+  }
+
+  function lockReason() {
+    if (connState !== 'connected') return tr('No connection to the guidance computer.');
+    if (!lastTick || performance.now() - lastTick.t > 2000) return tr('No current data from the guidance computer.');
+    if (!iHoldControl) return tr('Only the device that has control can import.');
+    if (tick && tick.op && tick.op.autoSteer) return tr('Steering is on. Switch steering off to import.');
+    if (Math.abs(lastTick.speed || 0) > STILL_MPS) return tr('The vehicle is moving. Stop to import.');
+    return '';
+  }
+  const existing = () => new Set(((fieldOps && fieldOps.fields) || []).map(f => String(f.name || f).toLowerCase()));
+
+  // Final names: never overwrite. A name that exists (or repeats in this import) is skipped,
+  // or gets " (2)", " (3)" … when that was chosen.
+  function plan() {
+    const taken = existing(), out = [];
+    for (const it of items) {
+      if (!it.sel) continue;
+      let name = it.name, k = 2;
+      if (taken.has(name.toLowerCase())) {
+        if (conflict === 'skip') { out.push({ it, name, skip: true }); continue; }
+        while (taken.has((name + ' (' + k + ')').toLowerCase())) k++;
+        name = name + ' (' + k + ')';
+      }
+      taken.add(name.toLowerCase()); out.push({ it, name, skip: false });
+    }
+    return out;
+  }
+
+  // Sends one field as ≤ 900-byte commands (the host reads 1 KB frames), then waits until the
+  // host has created and opened it.
+  async function sendField(name, rings) {
+    const enc = new TextEncoder();
+    transport.send('field.fromGeo|begin');
+    rings.forEach((r, k) => {
+      let buf = [];
+      const flush = () => { if (buf.length) transport.send('field.fromGeo|ring\t' + k + '\t' + buf.join(';')); buf = []; };
+      for (const p of r) {
+        const s = p.lat + ',' + p.lon;
+        if (enc.encode('field.fromGeo|ring\t' + k + '\t' + buf.concat(s).join(';')).length > 900) flush();
+        buf.push(s);
+      }
+      flush();
+    });
+    transport.send('field.fromGeo|create\t' + name);
+    return waitActive(name);
+  }
+  async function waitActive(name) {
+    const t0 = performance.now();
+    while (performance.now() - t0 < 20000) {
+      await new Promise(r => setTimeout(r, 250));
+      if (fieldOps && (fieldOps.activeField || '') === name && (!name || existing().has(name.toLowerCase()))) return true;
+    }
+    return false;
+  }
+  async function create() {
+    const todo = plan(), before = (fieldOps && fieldOps.activeField) || '';
+    run = { busy: true, i: 0, n: todo.length, res: [], aborted: false, back: '' }; render();
+    for (const p of todo) {
+      if (p.skip) { run.res.push({ name: p.name, r: 'skip' }); continue; }
+      const why = lockReason();
+      if (why) { run.res.push({ name: p.name, r: 'fail', why }); run.aborted = true; break; }
+      run.i++; render();
+      const ok = await sendField(p.name, p.it.rings);
+      run.res.push({ name: p.name, r: ok ? 'ok' : 'fail', approx: p.it.approx });
+      if (!ok) { run.aborted = true; break; } // the host did not confirm: stop rather than pile up commands
+    }
+    // Leave the field the operator had open (or none) as it was before the import.
+    if (run.res.some(x => x.r === 'ok') && connState === 'connected') {
+      transport.send(before ? 'field.openOnly|' + before : 'field.close');
+      run.back = (await waitActive(before)) ? '' : (before || '-');
+    }
+    run.busy = false; render();
+  }
+
+  // --- Sheet --------------------------------------------------------------------------------
+  const sheet = el('div', 'tui-sheet tb-sheet tbk-sheet');
+  sheet.id = 'tui-eama'; sheet.setAttribute('translate', 'no');
+  sheet.innerHTML = '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>';
+  const scrim = el('div', 'tp-scrim');
+  const input = el('input'); input.type = 'file'; input.accept = '.zip,application/zip'; input.style.display = 'none';
+  document.body.append(scrim, sheet, input);
+  for (const n of [sheet, scrim]) n.addEventListener('pointerdown', e => e.stopPropagation());
+  const shT = sheet.querySelector('.t'), shB = sheet.querySelector('.tui-sh-body');
+  const close = () => { if (run && run.busy) return; sheet.classList.remove('open'); scrim.classList.remove('open'); };
+  onTap(sheet.querySelector('.x'), close); onTap(scrim, close);
+  const isOpen = () => sheet.classList.contains('open');
+  function open() {
+    if (typeof lnCloseAll === 'function') lnCloseAll();
+    sheet.classList.add('open'); scrim.classList.add('open');
+    render();
+  }
+
+  input.addEventListener('change', async () => {
+    const f = input.files && input.files[0]; input.value = '';
+    if (!f) return;
+    st = { busy: true, file: f.name, err: '', layers: null, grid: null }; items = []; run = null; render();
+    try {
+      const { layers } = await EamaShape.load(new Uint8Array(await f.arrayBuffer()));
+      const grid = layers.some(l => l.prj.ok && l.prj.datum === 'MGI') ? await GeoAT.load() : null;
+      st = { busy: false, file: f.name, err: '', layers, grid };
+      buildItems();
+    } catch (e) {
+      const code = String(e && e.message || e);
+      st = { busy: false, file: f.name, err: T(ERR[code] || DAMAGED).replace('{f}', code), layers: null, grid: null };
+    }
+    render();
+  });
+
+  function sketch(src) {
+    const all = src.outer.concat(...src.holes);
+    const xs = all.map(p => p[0]), ys = all.map(p => p[1]);
+    const x0 = Math.min(...xs), y1 = Math.max(...ys), sc = 44 / Math.max(Math.max(...xs) - x0, y1 - Math.min(...ys), 1e-9);
+    const d = [src.outer, ...src.holes].map(r => 'M' + r.map(p => ((p[0] - x0) * sc + 2).toFixed(1) + ' ' + ((y1 - p[1]) * sc + 2).toFixed(1)).join('L') + 'Z').join('');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 48 48'); svg.setAttribute('width', '48'); svg.setAttribute('height', '48');
+    svg.innerHTML = '<path fill-rule="evenodd" fill="currentColor" fill-opacity="0.25" stroke="currentColor" stroke-width="1.5"/>';
+    svg.firstChild.setAttribute('d', d);
+    return svg;
+  }
+
+  function render() {
+    if (!isOpen()) return;
+    shT.textContent = T(tr('Fields from eAMA'));
+    const top = shB.scrollTop;
+    shB.innerHTML = '';
+    const box = el('div', 'tb-box');
+    box.appendChild(el('div', '', T(tr('Import the boundaries of your fields from an eAMA Shapefile export (ZIP), straight from this device, e.g. from Downloads.'))));
+    box.appendChild(el('div', 'tp-note warn', T(ACCURACY)));
+    const row = el('div', 'tb-row');
+    const pick = el('button', 'tp-btn pri big', T(tr('Choose ZIP file')));
+    pick.disabled = st.busy || !!(run && run.busy);
+    onTap(pick, () => input.click());
+    row.appendChild(pick);
+    if (st.busy) row.appendChild(el('span', 'tp-note', T(tr('Reading the file…'))));
+    box.appendChild(row);
+    if (st.file) { const fn = el('div', 'tp-note'); fn.textContent = st.file; box.appendChild(fn); }
+    if (st.err) box.appendChild(el('div', 'tp-note bad', st.err));
+    for (const l of st.layers || []) {
+      const lb = el('div', 'tp-note');
+      if (!l.prj.ok) { lb.className = 'tp-note bad'; lb.textContent = l.name + ': ' + T(PRJ[l.prj.err]).replace('{f}', l.prj.name || '?'); box.appendChild(lb); continue; }
+      lb.textContent = l.name + ' · ' + (l.prj.datum === 'MGI' ? T(st.grid ? tr('Coordinate system: MGI / Austria Lambert, converted with the BEV grid') : tr('Coordinate system: MGI / Austria Lambert')) : T(tr('Coordinate system: ETRS89 / Austria Lambert')))
+        + ' · ' + tr('{n} areas', { n: l.shapes.length }) + ' · ' + T(tr('Columns')) + ': ' + l.fields.map(f => f.name).join(', ') + ' · ' + l.encoding;
+      box.appendChild(lb);
+      if (l.prj.datum === 'MGI' && st.grid === false) box.appendChild(el('div', 'tp-note warn', T(tr('The BEV grid could not be loaded.')) + ' ' + T(APPROX)));
+    }
+    if (empty.length) {
+      const d = el('div', 'tp-note warn');
+      d.textContent = tr('{n} records without geometry are not imported: {list}', { n: empty.length,
+        list: empty.map(e => tr('no. {r}', { r: e.rec }) + (e.name ? ' (' + e.name + ')' : '')).join(', ') });
+      box.appendChild(d);
+    }
+    shB.appendChild(box);
+
+    if (items.length) {
+      const lb = el('div', 'tb-box');
+      // Feldstücke / Schläge: provisional; the real export decides which columns name a field.
+      const kr = el('div', 'tb-row');
+      kr.appendChild(el('span', 'tb-lbl', T(tr('The file contains'))));
+      for (const [k, t] of [['sl', tr('Fields (Schläge)')], ['fs', tr('Plots (Feldstücke)')]]) {
+        const b = el('button', 'tp-btn' + (kind === k ? ' pri' : ''), T(t));
+        b.disabled = !!(run && run.busy);
+        onTap(b, () => { kind = k; buildItems(); run = null; render(); });
+        kr.appendChild(b);
+      }
+      lb.appendChild(kr);
+      const sr = el('div', 'tb-row');
+      const nSel = items.filter(i => i.sel).length;
+      const all = el('button', 'tp-btn quiet', nSel === items.length ? T(tr('Select none')) : T(tr('Select all')));
+      onTap(all, () => { const on = nSel !== items.length; items.forEach(i => { i.sel = on; }); render(); });
+      sr.appendChild(all);
+      sr.appendChild(el('span', 'tp-note', tr('{n} of {m} selected', { n: nSel, m: items.length })));
+      lb.appendChild(sr);
+      const taken = existing(), list = el('div', 'tbk-list');
+      items.forEach(it => {
+        const r = el('div', 'tbk-it' + (it.sel ? ' on' : ''));
+        const ck = el('button', 'tbk-ck', it.sel ? '✓' : '');
+        onTap(ck, () => { it.sel = !it.sel; render(); });
+        r.appendChild(ck);
+        const nm = el('span', 'tbk-nm');
+        const inp = el('input', 'tp-in'); inp.value = it.name; inp.setAttribute('translate', 'no'); inp.style.cssText = 'width:100%;text-align:left;font:inherit;font-weight:700';
+        inp.addEventListener('change', () => { it.name = clean(inp.value) || it.name; render(); });
+        nm.appendChild(inp);
+        const info = [it.use, it.fileArea && T(tr('file')) + ' ' + it.fileArea + ' ha', T(tr('boundary')) + ' ' + fmtArea(it.areaM2)];
+        if (it.holes) info.push(tr('Inner boundaries: {n}', { n: it.holes }));
+        if (it.parts > 1) info.push(tr('area in {n} parts: each part becomes a field', { n: it.parts }));
+        nm.appendChild(el('small', '', info.filter(Boolean).join(' · ')));
+        if (taken.has(it.name.toLowerCase())) nm.appendChild(el('small', 'tbk-ch', T(tr('A field with this name exists.'))));
+        if (it.approx) nm.appendChild(el('small', 'tbk-ch', T(APPROX)));
+        r.appendChild(nm);
+        r.appendChild(sketch(it.src));
+        list.appendChild(r);
+      });
+      lb.appendChild(list);
+      if (items.some(it => it.sel && taken.has(it.name.toLowerCase()))) {
+        const cr = el('div', 'tb-row');
+        cr.appendChild(el('span', 'tp-note', T(tr('Name exists:'))));
+        for (const [k, t] of [['skip', tr('skip')], ['suffix', tr('create as "… (2)"')]]) {
+          const b = el('button', 'tp-btn' + (conflict === k ? ' pri' : ''), T(t));
+          onTap(b, () => { conflict = k; render(); });
+          cr.appendChild(b);
+        }
+        lb.appendChild(cr);
+        lb.appendChild(el('div', 'tp-note', T(tr('Existing fields are never overwritten.'))));
+      }
+      const why = lockReason();
+      const gr = el('div', 'tb-row');
+      const go = el('button', 'tp-btn pri big', T(tr('Create as fields')));
+      go.disabled = !nSel || !!why || !!(run && run.busy);
+      onTap(go, create);
+      gr.appendChild(go);
+      if (why) gr.appendChild(el('span', 'tp-note warn', T(why)));
+      lb.appendChild(gr);
+      lb.appendChild(el('div', 'tp-note', T(tr('Each new field is opened once while it is created; afterwards the field open before (or none) is open again.'))));
+      if (run) {
+        if (run.busy) lb.appendChild(el('div', 'tp-note', tr('Creating field {i} of {n}…', { i: run.i, n: run.n })));
+        if (run.aborted) {
+          const done = run.res.filter(x => x.r === 'ok').map(x => x.name);
+          lb.appendChild(el('div', 'tp-note bad', done.length ? tr('Stopped. Already created: {f}', { f: done.join(', ') }) : T(tr('Stopped. No field was created.'))));
+        }
+        if (run.back) lb.appendChild(el('div', 'tp-note warn', run.back === '-' ? T(tr('Could not close the last created field.')) : tr('Could not open {f} again.', { f: run.back })));
+        for (const x of run.res) {
+          const d = el('div', 'tp-note' + (x.r === 'fail' ? ' bad' : ''));
+          d.textContent = x.name + ': ' + T(RES[x.r]) + (x.why ? ' – ' + T(x.why) : '') + (x.r === 'ok' && x.approx ? ' · ' + T(APPROX) : '');
+          lb.appendChild(d);
+        }
+      }
+      shB.appendChild(lb);
+    }
+
+    // Help: the export in eAMA, and the route without this import (QGIS → KML → "From KML")
+    const hb = el('div', 'tb-box');
+    const ht = el('button', 'tp-btn quiet', (help ? '▾ ' : '▸ ') + T(tr('Help: export from eAMA, or the route via QGIS')));
+    onTap(ht, () => { help = !help; render(); });
+    hb.appendChild(ht);
+    if (help) {
+      const ol = el('ol', 'tp-note');
+      for (const s of [
+        tr('In eAMA: Flächen → INVEKOS-GIS → Extras → GIS-Datenexport. Format "Shapefile", export type "beantragte Schläge" (or "Feldstücke"), then "Anfordern"; when the status says "Abgeschlossen", "Laden" saves the ZIP. The menus may have changed since.'),
+        tr('Here: "Choose ZIP file" and pick that ZIP.'),
+        tr('Without this import: open the ZIP in QGIS, select one field, Export → Save selected features as → KML with CRS EPSG:4326. Copy the KML into the Import folder and use Fields → From KML. One file per field; a KML with several fields becomes one field with holes.'),
+      ]) ol.appendChild(el('li', '', T(s)));
+      hb.appendChild(ol);
+    }
+    hb.appendChild(el('div', 'tp-note', T(tr('Coordinate conversion with the grid AT_GIS_GRID of the BEV (Bundesamt für Eich- und Vermessungswesen), licence CC BY 4.0.'))));
+    shB.appendChild(hb);
+    shB.scrollTop = top;
+  }
+  // Lock state and field list change without a tap here; re-render only then, and not while typing.
+  setInterval(() => {
+    if (!isOpen() || document.activeElement?.closest?.('#tui-eama')) return;
+    const key = JSON.stringify([lockReason(), ((fieldOps && fieldOps.fields) || []).map(f => f.name), I18n.language]);
+    if (key !== render.key) { render.key = key; render(); }
+  }, 1000);
+
+  // --- Menu tile (setup) --------------------------------------------------------------------
+  const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/></svg>';
+  setInterval(() => {
+    const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
+    const s = m.querySelector('.tui-tiles.tui-s'); if (!s || s.querySelector('[data-tile="eama"]')) return;
+    const t = el('button', 'tui-tile setup'); t.dataset.tile = 'eama'; t.innerHTML = IC + '<span></span>';
+    t.querySelector('span').textContent = T(tr('Fields from eAMA'));
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(); });
+    s.appendChild(t);
+  }, 300);
+  return { open };
 })();

@@ -48,12 +48,19 @@ jobs:
 
       # Language files are translated on Weblate; a PR edits only the English source.
       # Weblate's own PRs (from its fork, as the weblate user) are how they arrive.
+      # HEAD is the PR's merge commit; its first parent is the base branch as merged,
+      # so a Weblate merge on develop while the PR is open isn't counted against it
+      # (pull_request.base.sha can be older than that).
       # Fork: de.json is maintained here (tablet UI, docs/Glossar-DE.md) and may change.
       - name: Check language files are untouched
         if: github.event_name == 'pull_request' && github.event.pull_request.user.login != 'weblate'
         run: |
-          git fetch --no-tags --depth=1 origin ${{ github.event.pull_request.base.sha }}
-          changed=$(git diff --name-only ${{ github.event.pull_request.base.sha }} HEAD -- 'Shared/AgOpenWeb.RemoteServer/wwwroot/i18n/*.json' | grep -v -E '/(en|de)\.json$' || true)
+          git fetch --no-tags --depth=2 origin ${{ github.sha }}
+          changed=$(git diff --name-only HEAD^1 HEAD -- 'Shared/AgOpenWeb.RemoteServer/wwwroot/i18n/*.json' | grep -v -E '/(en|de)\.json$' || true)
+          # Fork: a file identical to upstream's develop came in with an upstream merge (Weblate there).
+          if [ -n "$changed" ] && git fetch --no-tags --depth=1 https://github.com/AgOpenGPS-Official/AgOpenWeb develop; then
+            changed=$(for f in $changed; do git diff --quiet FETCH_HEAD HEAD -- "$f" || echo "$f"; done)
+          fi
           if [ -n "$changed" ]; then
             echo "::error::Language files are maintained on Weblate (Docs/TRANSLATIONS.md); only en.json (in this fork also de.json) changes in a PR:"
             echo "$changed"
@@ -67,11 +74,25 @@ jobs:
             node --check "Shared/AgOpenWeb.RemoteServer/wwwroot/$f"
           done
 
+      # The bug report Workers (Tools/bugreport-worker): plain node --test, no packages needed.
+      - name: Bug report Worker tests
+        run: node --test Tools/bugreport-worker/test/*.test.js
+
+      # Fork: web client tests (Tests/web): geodesy (GeoAT, eAMA import) against PROJ reference
+      # points, ZIP/Shapefile reader, and the long-press browser test. Playwright + Chromium for the browser test
+      # (long-press.test.mjs), installed outside the repo; tests without a browser need neither.
+      - name: Run web client tests
+        run: |
+          npm install --no-save --prefix "$RUNNER_TEMP/pw" playwright@1.63.0
+          "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
+          AOW_REQUIRE_BROWSER=1 NODE_PATH="$RUNNER_TEMP/pw/node_modules" node --test Tests/web/*.test.mjs
+
       - name: Run Model Tests
         run: dotnet test Tests/AgOpenWeb.Models.Tests/ --verbosity normal
 
+      # The hot-path budgets run in their own job (below), in Release.
       - name: Run Service Tests
-        run: dotnet test Tests/AgOpenWeb.Services.Tests/ --verbosity normal
+        run: dotnet test Tests/AgOpenWeb.Services.Tests/ --verbosity normal --filter "TestCategory!=HotPath"
 
       - name: Run ViewModels Tests
         run: dotnet test Tests/AgOpenWeb.ViewModels.Tests/ --verbosity normal
@@ -81,6 +102,65 @@ jobs:
 
       - name: Run Guidance Algorithm Tests
         run: dotnet run --project TestRunner/TestRunner.csproj
+
+  # Work budgets for the GPS cycle and the 100 Hz control tick (Performance/HotPathBudgetTests):
+  # a large field driven through the real pipeline, every cycle held to a budget of polygon
+  # edges, coverage lookups, offset points and bytes allocated. Counts, not time, so the
+  # runner's speed doesn't matter; Release only because it is five times faster than Debug.
+  hot-path-budgets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Run hot-path budgets
+        run: dotnet test Tests/AgOpenWeb.Services.Tests/ -c Release --filter "TestCategory=HotPath" --verbosity normal
+
+  # Every translated label must fit the English layout (Docs/TRANSLATIONS.md): the app runs
+  # headless and Tools/i18n-limits.py --check measures each translation in place. Roboto
+  # stands in for the system font, as on the Android tablets. The container fixes the fonts,
+  # so a local run in the same image measures the same (the baseline was made that way).
+  translations-fit:
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright/python:v1.64.0-noble
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install Playwright and Roboto
+        run: |
+          apt-get update -qq && apt-get install -y -qq fonts-roboto libicu74 curl
+          pip install playwright==1.64.0
+          mkdir -p ~/.config/fontconfig
+          cat > ~/.config/fontconfig/fonts.conf <<'EOF'
+          <?xml version="1.0"?>
+          <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+          <fontconfig>
+            <alias binding="strong"><family>system-ui</family><prefer><family>Roboto</family></prefer></alias>
+            <alias binding="strong"><family>sans-serif</family><prefer><family>Roboto</family></prefer></alias>
+          </fontconfig>
+          EOF
+          fc-cache -f
+
+      - name: Build Desktop
+        run: dotnet build Platforms/AgOpenWeb.Desktop/AgOpenWeb.Desktop.csproj -p:DesktopOnly=true
+
+      # One step: the headless app lives only as long as the step that started it.
+      - name: Check translations fit
+        shell: bash
+        run: |
+          AGOPENWEB_DATA="$RUNNER_TEMP/aow" Platforms/AgOpenWeb.Desktop/bin/Debug/net10.0/AgOpenWeb.Desktop --headless > "$RUNNER_TEMP/app.log" 2>&1 &
+          for i in $(seq 60); do curl -sf -o /dev/null http://localhost:5174/ && break; sleep 1; done
+          curl -sf -o /dev/null http://localhost:5174/ || { cat "$RUNNER_TEMP/app.log"; exit 1; }
+          python3 Tools/i18n-limits.py --check
 
   # Compile-check each platform head (no packaging — build-deploy-bundles.yml does the publishes).
   # The Desktop and Android heads compile on every PR so a broken head is caught before
@@ -127,30 +207,5 @@ jobs:
       - name: Compile Android
         run: dotnet build Platforms/AgOpenWeb.Android/AgOpenWeb.Android.csproj -c Release
 
-  build-ios:
-    runs-on: macos-26
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Select Xcode 26.4.1
-        # The .NET for iOS workload is pinned to 26.4.x via dotnet-ios-rollback.json to match
-        # Xcode_26.4.1.app on macos-26 (the runner's 26.5 beta has no downloaded iOS platform).
-        run: sudo xcode-select -s /Applications/Xcode_26.4.1.app
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Install iOS workload (pinned to 26.4.x)
-        run: |
-          for i in 1 2 3; do
-            dotnet workload install ios \
-              --from-rollback-file .github/workflows/dotnet-ios-rollback.json \
-              && break
-            echo "Attempt $i failed, retrying in 10s..."
-            sleep 10
-          done
-
-      - name: Compile iOS
-        run: dotnet build Platforms/AgOpenWeb.iOS/AgOpenWeb.iOS.csproj -c Debug -f net10.0-ios -r iossimulator-arm64
+  # Fork: build-ios runs only in fork-prerelease.yml (job ios). In PRs it waited 15 min for a
+  # macos-26 runner and was cancelled every time (docs/Host-Aenderungen.md §12).
