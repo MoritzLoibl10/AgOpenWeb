@@ -49,6 +49,10 @@ public sealed class RemoteServerHost
     public void ShowToast(string message)
         => _ = _ws?.BroadcastAsync(WireCodec.EncodeToast(message));
 
+    /// <summary>Fork (host-paket D, #11): the same with a translation key and its values as JSON.</summary>
+    public void ShowToast(string message, string key, string argsJson)
+        => _ = _ws?.BroadcastAsync(WireCodec.EncodeToast(message, key, argsJson));
+
     /// <summary>Broadcast a module hardware message (PGN 221, #110).</summary>
     public void ShowHardwareMessage(string text, int seconds, bool warning)
         => _ = _ws?.BroadcastAsync(WireCodec.EncodeHardwareMessage(text, seconds, warning));
@@ -446,6 +450,30 @@ public sealed class RemoteServerHost
             if (!File.Exists(path)) return SimpleWebServer.Response.NotFound;
             return SimpleWebServer.Response.Bytes(File.ReadAllBytes(path), "application/zip",
                 new[] { ("Content-Disposition", "attachment"), ("Cache-Control", "no-store") });
+        });
+
+        // Work log on the guidance computer (fork, feature/host-paket): GET reads it, like
+        // everything else observers see; POST merges the tablet's copy in (only the screen
+        // holding control, like any change) and replies with the merged log.
+        server.MapGet("/worklog", () => SimpleWebServer.Response.Text(
+            AgOpenWeb.Services.WorkLog.WorkLogStore.Read(AgOpenWeb.Services.AppDataRoot.Documents).ToJsonString(),
+            "application/json", new[] { ("Cache-Control", "no-store") }));
+        server.MapPost("/worklog", AgOpenWeb.Services.WorkLog.WorkLogStore.MaxBytes, req =>
+        {
+            if (!req.Query.TryGetValue("client", out var c) || !Guid.TryParse(c, out var client) || !authority.HoldsFresh(client))
+                return Task.FromResult(new SimpleWebServer.Response(403, "text/plain", "view only"u8.ToArray()));
+            var doc = AgOpenWeb.Services.WorkLog.WorkLogStore.Parse(req.Body);
+            if (doc is null) return Task.FromResult(new SimpleWebServer.Response(400, "text/plain", "not a work log"u8.ToArray()));
+            try
+            {
+                var merged = AgOpenWeb.Services.WorkLog.WorkLogStore.MergeInto(AgOpenWeb.Services.AppDataRoot.Documents, doc);
+                return Task.FromResult(SimpleWebServer.Response.Text(merged.ToJsonString(), "application/json",
+                    new[] { ("Cache-Control", "no-store") }));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return Task.FromResult(new SimpleWebServer.Response(503, "text/plain", "busy"u8.ToArray()));
+            }
         });
 
         await server.StartAsync().ConfigureAwait(false);

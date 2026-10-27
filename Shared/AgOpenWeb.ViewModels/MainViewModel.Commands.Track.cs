@@ -383,7 +383,7 @@ public partial class MainViewModel
             // Need at least 3 points for a valid curve
             if (_recordedCurvePoints.Count < 3)
             {
-                ReportFailure($"Need at least 3 points for a curve (have {_recordedCurvePoints.Count})");
+                ReportFailure("Need at least 3 points for a curve (have {n})", ("n", _recordedCurvePoints.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
                 return;
             }
 
@@ -455,7 +455,7 @@ public partial class MainViewModel
             // Need at least 2 points for a valid track
             if (_drawnCurvePoints.Count < 2)
             {
-                ReportFailure($"Need at least 2 points (have {_drawnCurvePoints.Count})");
+                ReportFailure("Need at least 2 points (have {n})", ("n", _drawnCurvePoints.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
                 return;
             }
 

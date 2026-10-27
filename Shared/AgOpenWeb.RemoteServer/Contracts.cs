@@ -498,7 +498,8 @@ public record GpsConfigDto(
     double HeadingFusionWeight,
     bool ReverseDetection,
     bool RtkLostAlarm,
-    int RtkLostAction);  // 0 Warn, 1 Pause AutoSteer
+    int RtkLostAction,   // 0 Warn, 1 Pause AutoSteer
+    int MinFixQuality);  // fork (host-paket D): the guidance gate's minimum fix quality; sent at the frame's end
 
 /// <summary>Data Sources → Roll tab (ConfigStore.Ahrs).</summary>
 public record RollConfigDto(
@@ -554,9 +555,12 @@ public record FieldOpsDto(
 public record FieldEntryDto(string Name, bool HasDistance, double DistanceKm, double AreaHa);
 
 /// <summary>One job row (mirrors JobSummary). Status: 0 InProgress, 1 Done, 2 Abandoned.
-/// LastOpened is a preformatted "yyyy-MM-dd HH:mm" string.</summary>
+/// LastOpened is a preformatted "yyyy-MM-dd HH:mm" string. Fork (host-paket C, append-only):
+/// StartedMs / EndedMs are the job's StartedAt / EndedAt as Unix milliseconds, 0 = none (a
+/// running job has no end; resuming clears it).</summary>
 public record JobEntryDto(
-    string FieldName, string TaskName, string WorkType, int Status, string LastOpened, string Notes);
+    string FieldName, string TaskName, string WorkType, int Status, string LastOpened, string Notes,
+    double StartedMs = 0, double EndedMs = 0);
 
 /// <summary>AgShare read-frame (Phase 9 Field Ops) — cloud sync settings + transient action
 /// state. Settings come from ConfigStore.Connections; Status/Busy/CloudFields are the live
@@ -586,7 +590,8 @@ public record AppInfoDto(
     IReadOnlyList<AppLogDto> Logs,
     string BugReportStatus,
     string BugReportSendStatus,
-    string BackupStatus = ""); // append-only (fork): profile backup state as JSON
+    string BackupStatus = "", // append-only (fork): profile backup state as JSON
+    string FirstSetup = "");  // append-only (fork, host-paket D): "", "shown" or "done"
 
 /// <summary>Field Tools read-frame. Grows per sub-increment (append-only). Import
 /// Tracks: the other fields on disk that have saved tracks (current field excluded).

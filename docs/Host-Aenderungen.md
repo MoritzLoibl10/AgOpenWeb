@@ -316,3 +316,82 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
   `long-press.test.mjs` fehl statt übersprungen zu werden.
 - **Hinweis:** Auf diesem Branch gab es den Schritt noch nicht (er liegt sonst nur in
   `feature/eama-import`, dort ohne Browser). Beim Zusammenführen bleibt diese Fassung.
+
+## 14. Host-Paket A: eindeutige Aus-Befehle (feature/host-paket, Oktober 2026)
+- **Dateien:** `Shared/AgOpenWeb.ViewModels/MainViewModel.SwitchOff.cs` (neu: `AutoSteerOff()`,
+  `AllSectionsOff()`), `Shared/AgOpenWeb.RemoteWiring/RemoteServerWiring.cs` (zwei `case`-Zeilen
+  `autosteer.off`, `sections.alloff`). Test: `Tests/AgOpenWeb.ViewModels.Tests/SwitchOffTests.cs`.
+- **Verhalten:** Nur ausschalten, nie einschalten. `AutoSteerOff` ruft den vorhandenen Lenkknopf-Befehl
+  nur, wenn die Lenkung an ist (derselbe Weg wie beim Abgeben der Bedienung). `AllSectionsOff` ruft
+  ebenso die vorhandenen Befehle für Handbetrieb und Automatik nur, wenn sie an sind, und für eine
+  einzeln eingeschaltete Teilbreite (#316) `SetAllSections(Off)` wie bei GPS-Verlust. Ist nichts an,
+  passiert nichts; Wiederholen ist harmlos. Regelung, Wende und Sicherheitsabschaltungen unverändert.
+- **Bedienung:** Beide Befehle brauchen die Bedienung wie jeder andere (nicht in `ObserverIds`).
+- **Client:** `TabletDemo` sendet beim Beenden beide Befehle statt nichts (vorher: Umschaltbefehle,
+  dann gar keine). Andere Client-Stellen, die „aus“ meinen, gibt es nicht; die Knöpfe bleiben Umschalter.
+- **Beim Merge von upstream:** neue Datei, zwei Zeilen im `switch`; ohne Konflikt zu erwarten.
+
+## 15. Host-Paket B: Arbeitsprotokoll am Lenkrechner (feature/host-paket, Oktober 2026)
+- **Dateien:** `Shared/AgOpenWeb.Services/WorkLog/WorkLogStore.cs` (neu), `RemoteServerHost.cs`
+  (Routen `GET /worklog`, `POST /worklog?client=<id>`), `Profile/ProfileBackupService.cs` (Ordner
+  `WorkLog` im Backup). Tests: `Tests/AgOpenWeb.Services.Tests/WorkLogStoreTests.cs`,
+  `Tests/web/worklog.test.mjs` (Zusammenführen im Client).
+- **Ablage:** eine Datei `WorkLog/worklog.json` im Datenordner (`AppDataRoot.Documents`), im Format
+  des Clients (`aow-worklog`, Version 1, `entries`, `deleted`). Schreiben über `.tmp` und Umbenennen;
+  eine unlesbare Datei wird als `worklog.json.unreadable-<Zeit>` beiseitegelegt, nicht überschrieben.
+- **Zusammenführen:** nach `id`, ohne Doppel; die zuletzt geänderte Fassung gilt (`mod`, dann `end`);
+  gelöschte IDs bleiben gelöscht; offene Sitzungen werden nicht gespeichert. Gleiche Regel im Client
+  (`WorkLogCore.merge`).
+- **Bedienung:** Schreiben nur mit der Bedienung (Client-ID wie bei `/bugreports/attach`), sonst 403.
+  Lesen für alle (Beobachter sehen alles). Höchstens 8 MB je Anfrage.
+- **Backup:** `WorkLog/worklog.json` wird mitgesichert; beim Einspielen zusammengeführt statt ersetzt.
+  Vorschau: „+ N“ neue oder geänderte Einträge, sonst „gleich“.
+- **Lenk-, Regel- und Sicherheitslogik:** nicht berührt.
+- **Beim Merge von upstream:** neue Datei; im Backup-Dienst vier kleine Stellen (`Roots`, `Collect`,
+  `IsAllowed`, `Group`/`Apply`/`Compare`); in `RemoteServerHost` ein Block vor `StartAsync`.
+
+## 16. Host-Paket C: Auftragsbeginn und -ende an den Client (feature/host-paket, Oktober 2026)
+- **Dateien:** `Contracts.cs` (`JobEntryDto` + `StartedMs`, `EndedMs`, angehängt mit Vorgabe 0),
+  `SceneProjector.cs` (füllt beide aus `Job.StartedAt`/`EndedAt`; Fingerabdruck nimmt beide mit, damit
+  das Schließen eines Auftrags die Liste neu schickt), `WireCodec.cs` und `transport.js` (je Auftrag
+  zwei `f64` nach den Notizen). Test: `Tests/AgOpenWeb.RemoteServer.Tests/FieldOpsJobTimesTests.cs`.
+- **Werte:** nur, was der Host hat: `StartedAt` (beim Anlegen), `EndedAt` (beim Schließen, beim
+  Fortsetzen gelöscht), als Unix-Millisekunden; 0 = keiner.
+- **Strecke nicht gesendet:** `Job.DistanceTraveledMeters` wird im Host nirgends berechnet (nur
+  gelesen und geschrieben, laut Kommentar „beim Schließen“, aber ohne Code dafür); es wäre immer 0.
+  Das Protokoll nimmt weiter die Tagesstrecke (`fieldData.tripDistanceM`) des Hosts.
+- **Client:** Das Arbeitsprotokoll nimmt den Auftragsbeginn des Hosts als Sitzungsbeginn, wenn der
+  Auftrag während der Sitzung neu angelegt wurde, und das Auftragsende, wenn die Sitzung mit dem
+  Schließen des Auftrags endete; sonst die Tablet-Uhr. Ergäbe die Mischung ein Ende vor dem Beginn,
+  gilt die Tablet-Uhr. Die Detailansicht nennt, was vom Lenkrechner kommt.
+- **Beim Merge von upstream:** Der Datensatz ist nur hinten verlängert; ändert upstream die
+  Auftragszeile im FieldOps-Rahmen, beide Seiten (`WireCodec`, `transport.js`) gleich nachziehen.
+
+## 17. Host-Paket D: kleinere Punkte (feature/host-paket, Oktober 2026)
+- **Einrichtungsstatus am Lenkrechner:** `PersistentAppState.FirstSetup` ("", "shown", "done") in
+  `appstate.json` (`PersistentStateService.ApplySnapshot` übernimmt ihn), gesendet am Ende des
+  AppInfo-Rahmens (`AppInfoDto.FirstSetup`, `WireCodec`, `transport.js`), gesetzt mit dem Befehl
+  `setup.first|shown|done` (`RemoteServerWiring.cs`; „done“ wird nicht zurückgesetzt). Der Client
+  liest den Host-Wert vor dem eigenen Browser-Speicher und meldet einen dort schon vorhandenen Stand
+  einmal an den Host.
+- **MinFixQuality an den Client:** `GpsConfigDto.MinFixQuality`, gesendet als `i32` am Ende des
+  Config-Rahmens. Die Ampel prüft die Fix-Qualität jetzt wie der Host (`GpsFixQualityValidator`:
+  Qualität kleiner als Minimum wird abgelehnt); ohne den Wert (älterer Host) wie bisher „RTK Fix“.
+  Die Ampel wertet nach Güte (RTK Fix > RTK Float > DGPS/PPS > GPS; 0 und 6–8 kein Fix) und
+  verlangt zusätzlich, dass der Host die Zahl annimmt: nie lockerer als der Host, RTK Float bei
+  Vorgabe 4 nicht grün. Der Host vergleicht die NMEA-Zahl (Float 5 besteht die Vorgabe 4); das ist
+  nur gemeldet, `docs/Upstream-Issues.md` Punkt 5. Test: `Tests/web/ready.test.mjs`.
+- **1-KB-Grenze (Offene Punkte 7):** `WebSocketHub` sammelt die Stücke einer Nachricht bis
+  `EndOfMessage` (`CommandAssembler.cs`, neu) und führt den Befehl einmal ganz aus; über 64 KB wird
+  die Nachricht ganz verworfen. Test: `CommandAssemblerTests.cs`.
+- **field.fromGeo:** liegt nur im eAMA-Branch (#19), nicht in diesem Stapel; die stückweise
+  Übertragung bleibt dort unverändert (siehe Bericht).
+- **Englische Host-Meldungen (Offene Punkte 11):** Die 21 Fehlermeldungen mit Werten im Text
+  (`ReportFailure($"…")`) gehen jetzt als Schlüssel mit Platzhaltern (`{error}`, `{n}`, `{file}`,
+  `{path}`) und den Werten: neue Überladung `ReportFailure(key, (name, value)…)` im ViewModel,
+  `LastFailureKey` während des Ereignisses, Toast-Rahmen hinten um Schlüssel und Werte (JSON)
+  verlängert. `FailureReported` bekommt weiter den englischen Satz. Der Client übersetzt den Satz,
+  die Werte bleiben wie sie sind; die Schlüssel stehen in `TabletHostText` (für `en.json`).
+  Tests: `KeyedFailureTests.cs`, `ToastKeyTests`; Einrichtungsstatus im Vollständigkeitstest von
+  `PersistentStateServiceTests`.
+- **Lenk-, Regel- und Sicherheitslogik:** nicht berührt (nur Texte der Meldungen).

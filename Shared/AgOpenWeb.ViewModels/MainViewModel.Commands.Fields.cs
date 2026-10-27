@@ -161,7 +161,7 @@ public partial class MainViewModel
             }
             catch (Exception ex)
             {
-                ReportFailure($"Error deleting field: {ex.Message}");
+                ReportFailure("Error deleting field: {error}", ("error", ex.Message));
             }
         });
 
@@ -226,7 +226,7 @@ public partial class MainViewModel
             }
             catch (Exception ex)
             {
-                ReportFailure($"Error creating field: {ex.Message}");
+                ReportFailure("Error creating field: {error}", ("error", ex.Message));
             }
         });
 
@@ -307,7 +307,7 @@ public partial class MainViewModel
             }
             catch (Exception ex)
             {
-                ReportFailure($"Error creating field: {ex.Message}");
+                ReportFailure("Error creating field: {error}", ("error", ex.Message));
             }
         });
 
@@ -457,7 +457,7 @@ public partial class MainViewModel
             }
             catch (Exception ex)
             {
-                ReportFailure($"Error importing KML: {ex.Message}");
+                ReportFailure("Error importing KML: {error}", ("error", ex.Message));
             }
         });
 
@@ -646,7 +646,7 @@ public partial class MainViewModel
             }
             catch (Exception ex)
             {
-                ReportFailure($"Error importing ISO-XML: {ex.Message}");
+                ReportFailure("Error importing ISO-XML: {error}", ("error", ex.Message));
             }
         });
 

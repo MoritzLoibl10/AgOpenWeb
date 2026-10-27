@@ -440,7 +440,7 @@ const transport = RemoteTransport.create({
   onControlState(s) { lastControl = s; updateControlUi(); claimSeatIfFree(); Vt.render(); },
   onSound(id) { Sounds.play(id); },
   onPrompt(p) { hostPrompt = p; renderHostPrompt(); },
-  onToast(msg) { showToast(msg); },
+  onToast(msg, key, args) { showToast(key ? TabletHostText.keyed(msg, key, args) : msg); },
   onHardwareMessage(text, seconds, warning) { showHardwareMessage(text, seconds, warning); },
   onDrivePick(fields) { showDrivePick(fields); },
   onVt(m, t) { Vt.message(m, t); },
@@ -10148,6 +10148,21 @@ const TabletHostText = (() => {
     tr('Steer module stopped steering (kickout, switch or button)'),
     tr('This track has no ends to adjust'),
     tr('Too few points to smooth (need at least 5)')]);
+  // Host-paket D (#11): the host's failure texts with values, sent as a key with {name}
+  // placeholders and the values; the sentence is translated, the values (error messages, file
+  // names, counts) stay as they are. Listed so the extractor finds the keys.
+  const KEYED = new Set([
+    tr('Error creating boundary: {error}'), tr('Error deleting field: {error}'), tr('Error creating field: {error}'),
+    tr('Error importing KML: {error}'), tr('Error importing ISO-XML: {error}'), tr('Debug dump failed: {error}'),
+    tr('Bug report capture failed: {error}'), tr('Bug report saved (no details): {path}'), tr('Bug report failed: {error}'),
+    tr('Need at least 3 points for a curve (have {n})'), tr('Need at least 2 points (have {n})'), tr('Save failed: {error}'),
+    tr('Failed to load: {file}'), tr('Failed to load: {error}'), tr('Import failed: {error}'),
+    tr('Need at least 3 points for contour (have {n})'), tr('Failed to open field: {error}'), tr('Error parsing KML: {error}'),
+    tr('Error importing KML boundary: {error}')]);
+  function keyed(msg, key, args) {
+    let a = null; try { a = JSON.parse(args); } catch (_) { /* no values */ }
+    return KEYED.has(key) && a && typeof a === 'object' ? tr(key, a) : msg;
+  }
   showToast = (orig => function (msg, ms) { return orig(typeof msg === 'string' && tuiIsDe() && TOASTS.has(msg) ? I18n.text(msg) : msg, ms); })(showToast);
   function de(s) {
     if (!tuiIsDe()) return s;
@@ -10172,7 +10187,7 @@ const TabletHostText = (() => {
   // Where the host's texts are shown: status bar, GPS popup, Network IO, System Data, NTRIP test.
   const IDS = ['sb-fix', 'sb-gps-d', 'gc-fix', 'nio-ntrip-status', 'nio-ntrip-rx', 'sd-fix', 'nte-teststatus'];
   for (const id of IDS) { const e = document.getElementById(id); if (e) obs.observe(e, { subtree: true, childList: true, characterData: true }); }
-  return { de };
+  return { de, keyed };
 })();
 
 // ===== Tablet UI (Phase 4a): product look, help, support diagnosis ====================
@@ -10403,7 +10418,7 @@ const TabletBrand = (() => {
     { id: 'demo', t: tr('Demo mode'), steps: [
       tr('Demo only without the kit connected.'),
       tr('Menu → "Demo mode" starts the simulator; a striped "DEMO" band shows it runs.'),
-      tr('If a module is detected, the demo ends: then check steering and sections yourself.'),
+      tr('If a module is detected, the demo ends and steering and sections are switched off: check them anyway.'),
       tr('"End demo" on the band or in the menu stops it.')] },
     { id: 'usb', t: tr('Back up profiles by USB copy'), warn: tr('Not checked on a real tablet yet.'), steps: [
       tr('Easier: Setup → Menu → "Back up and restore" makes one file and restores it from the Import folder.'),
@@ -11050,7 +11065,7 @@ const TabletBackup = (() => {
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
   const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
   const STILL_MPS = 0.15;
-  const KIND = { vehicle: tr('Vehicle'), tool: tr('Tool'), field: tr('Field'), ntrip: tr('NTRIP profile') };
+  const KIND = { vehicle: tr('Vehicle'), tool: tr('Tool'), field: tr('Field'), ntrip: tr('NTRIP profile'), worklog: tr('Work log') };
   const STATE = { new: tr('new'), overwrites: tr('overwrites'), same: tr('same') };
   const ERR = {
     notzip: tr('The file is not a readable ZIP file.'),
@@ -11248,9 +11263,11 @@ const TabletBackup = (() => {
 // module not heard, no line). Yellow = steering works but check first: no IMU heard, or with one
 // antenna the direction not yet confirmed on the card "Does the vehicle face the way it drives?"
 // (TabletSteerConfirm; driving forward can't be told from backing with one antenna, so only the
-// confirmation counts). The module flags are the host's own (gpsOk / autoSteerOk / imuOk); RTK
-// fix = NMEA fix quality 4, the host's default minimum (MinFixQuality, not sent to the client).
-// Tap it for the list. In the demo mode (TabletDemo) it says "Demo" instead.
+// confirmation counts). The module flags are the host's own (gpsOk / autoSteerOk / imuOk); the
+// fix is judged against the host's MinFixQuality (fixOk below), never looser than the host.
+// Tap it for the list. In the demo mode (TabletDemo) it says "Demo" instead. Tested by
+// Tests/web/ready.test.mjs (block ready:begin/end).
+// ready:begin
 const TabletReady = (() => {
   const T = k => I18n.text(k);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
@@ -11266,6 +11283,17 @@ const TabletReady = (() => {
   let last = '';
 
   const live = () => connState === 'connected' && !!lastTick && performance.now() - lastTick.t < 2000;
+  // Fix quality by goodness, not by its NMEA number: RTK Fix (4) > RTK Float (5) > DGPS (2) and
+  // PPS (3) > GPS (1); 0 and the estimated/manual/simulated kinds (6, 7, 8) count as no fix. Green
+  // needs both: the host's own gate (GpsFixQualityValidator: number < MinFixQuality is refused)
+  // and at least the goodness of the minimum, so the light is never looser than the host and
+  // RTK Float is not green when the minimum is RTK Fix. No minimum known (older host): RTK Fix.
+  const RANK = { 4: 4, 5: 3, 2: 2, 3: 2, 1: 1 };
+  const rank = q => RANK[q] || 0;
+  function fixOk(q, minQ) {
+    if (minQ == null) return q === 4;
+    return q >= minQ && rank(q) >= rank(minQ) && rank(q) > 0;
+  }
   // [level, label, detail]: level 2 = ok, 1 = check, 0 = missing.
   function checks() {
     const s = statusBar || {}, op = tick && tick.op, gps = config && config.gps;
@@ -11273,7 +11301,12 @@ const TabletReady = (() => {
     const out = [];
     if (s.gpsSentence === 'SIM') out.push([1, tr('GPS'), tr('Simulator: not a real position')]);
     else if (s.gpsLost || !s.gpsOk) out.push([0, tr('GPS'), tr('No GPS data')]);
-    else out.push([s.fixQuality === 4 ? 2 : 0, tr('GPS'), (s.fixText || '') + (s.fixQuality === 4 ? '' : ' – ' + T(tr('steering needs RTK Fix')))]);
+    else {
+      const minQ = gps && Number.isInteger(gps.minFixQuality) ? gps.minFixQuality : null, q = s.fixQuality | 0;
+      const ok = fixOk(q, minQ);
+      out.push([ok ? 2 : 0, tr('GPS'), (s.fixText || '') + (ok ? '' : ' – ' + (minQ != null
+        ? tr('the guidance computer needs fix quality {n} or higher (now {q})', { n: minQ, q }) : T(tr('steering needs RTK Fix'))))]);
+    }
     out.push([s.autoSteerOk ? 2 : 0, tr('Steer module'), s.autoSteerOk ? tr('connected') : tr('not heard')]);
     // An IMU module's hello (imuOk), or the steer module's IMU heading in PGN 253 (AiO boards).
     const sd = s.systemData, imu = !!s.imuOk || !!(sd && typeof sd.imuHeading === 'number' && Number.isFinite(sd.imuHeading));
@@ -11306,8 +11339,9 @@ const TabletReady = (() => {
     pop.appendChild(el('div', 'rd-n', T(tr('Display only. Steering is switched on with the Steer button as before.'))));
   }
   setInterval(render, 300);
-  return { checks, get level() { return Math.min(...checks().map(c => c[0])); } };
+  return { checks, fixOk, get level() { return Math.min(...checks().map(c => c[0])); } };
 })();
+// ready:end
 
 // ===== Demo mode (feature/bedienung-1) ========================================================
 // For showing the app: the existing simulator as the GPS source, with a striped "DEMO" band that
@@ -11315,9 +11349,9 @@ const TabletReady = (() => {
 // on the network a simulated drive could switch real outputs (the host sends steer and section
 // PGNs in the simulator too). If a module turns up while it runs, the demo ends with a warning
 // to check steering and sections. Stops with "End demo"; the flag lives in this tab only.
-// Ending never sends a command that switches steering or sections: the host only has toggles
-// for them (autosteer.toggle, section.master, section.manual), and a toggle sent from a stale
-// tick could switch them on. Explicit off commands would need a host change (docs/).
+// Ending switches steering and sections off with the host's explicit off commands
+// (autosteer.off, sections.alloff: off only, harmless when nothing is on), never with a toggle,
+// which sent from a stale tick could switch them on.
 // demo:begin
 const TabletDemo = (() => {
   const T = k => I18n.text(k);
@@ -11346,6 +11380,7 @@ const TabletDemo = (() => {
   }
   function end(why) {
     if (!active) return;
+    transport.send('autosteer.off'); transport.send('sections.alloff');
     if (statusBar && statusBar.simEnabled && !simBefore) transport.send('sim.toggleEnable');
     active = false; save();
     if (why) showToast(T(why), 15000);
@@ -11601,8 +11636,19 @@ const TabletFirstSetup = (() => {
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
   const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
   const KEY = 'aow.firstSetup';
-  const lsOk = () => { try { return localStorage.getItem(KEY); } catch (_) { return 'blocked'; } };
-  const mark = v => { try { localStorage.setItem(KEY, v); } catch (_) { /* ignore */ } };
+  // Kept on the guidance computer too (host-paket D: appInfo.firstSetup, command setup.first), so
+  // another tablet or a cleared browser doesn't start the guide again; this browser's copy stays.
+  const local = () => { try { return localStorage.getItem(KEY); } catch (_) { return 'blocked'; } };
+  const lsOk = () => (appInfo && appInfo.firstSetup) || local();
+  const mark = v => {
+    try { localStorage.setItem(KEY, v); } catch (_) { /* ignore */ }
+    if (iHoldControl) transport.send('setup.first|' + v);
+  };
+  // A host that doesn't know yet what this browser already did learns it (once it can tell).
+  setInterval(() => {
+    const l = local();
+    if (iHoldControl && appInfo && appInfo.firstSetup === '' && (l === 'shown' || l === 'done')) transport.send('setup.first|' + l);
+  }, 5000);
   const sheet = el('div', 'tui-sheet tb-sheet tbk-sheet'); sheet.id = 'tui-setup1'; sheet.setAttribute('translate', 'no');
   sheet.innerHTML = '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>';
   const scrim = el('div', 'tp-scrim');
@@ -11854,20 +11900,24 @@ const TabletLegal = (() => {
 // the host's: worked area of the job (Status.workedAreaSqM), ground covered once
 // (fieldData.actualAreaSqM), trip distance (fieldData.tripDistanceM), each at the start and at
 // the end of the session; the session's own share is the difference. Times are this tablet's
-// clock. Activity, product, amount and note are free text the operator types. Stored only in
-// this browser (localStorage); docs/Arbeitsdoku.md says what a store on the guidance computer
-// would need. The pure part (step, csv, sums) is tested by Tests/web/worklog.test.mjs.
+// clock. Activity, product, amount and note are free text the operator types. Kept in this
+// browser (localStorage) and on the guidance computer (/worklog, WorkLog/worklog.json), merged by
+// entry id: the later change wins (mod, then end), a deleted id stays deleted (host-paket B). The
+// pure part (step, merge, csv, sums) is tested by Tests/web/worklog.test.mjs.
 // worklog:begin
 const WorkLogCore = (() => {
   const GAP_MS = 5 * 60 * 1000; // a reload or a short drop within this continues the session
   const num = v => typeof v === 'number' && Number.isFinite(v) ? v : null;
   // state: { entries: [...], open: entry|null }; s: snapshot of what the client sees; now: ms.
   function step(state, s, now) {
-    const st = { entries: state.entries, open: state.open };
+    const st = { entries: state.entries, open: state.open, deleted: state.deleted || [] };
     const active = !!(s && s.live && s.control && s.field && s.job);
     const o = st.open;
     if (o && (!active || o.field !== s.field || o.job !== s.job || now - o.seenAt > GAP_MS)) {
-      st.entries = st.entries.concat([{ ...o, open: false }]); st.open = null;
+      // Closed because the job or field was closed or changed (not a lost link or control):
+      // the host's job end can stand in for this tablet's clock (ended()).
+      const byJob = !!(s && s.live && s.control) && now - o.seenAt <= GAP_MS && (!s.field || !s.job || o.field !== s.field || o.job !== s.job);
+      st.entries = st.entries.concat([{ ...o, open: false, byJob }]); st.open = null;
     }
     if (!active) return st;
     const vals = { worked: num(s.worked), actual: num(s.actual), trip: num(s.trip) };
@@ -11876,6 +11926,8 @@ const WorkLogCore = (() => {
         workType: s.workType || '', start: now, end: now, seenAt: now,
         workedStart: vals.worked, workedEnd: vals.worked, actualStart: vals.actual, actualEnd: vals.actual,
         tripStart: vals.trip, tripEnd: vals.trip, tool: s.tool || '', vehicle: s.vehicle || '', widthM: num(s.widthM),
+        // A job newly started on the host while this tablet watched: its start is the host's.
+        hostStart: s.jobNew && num(s.jobStart) > 0 ? s.jobStart : null, hostEnd: null,
         activity: '', product: '', amount: '', note: '', open: true };
       return st;
     }
@@ -11895,13 +11947,22 @@ const WorkLogCore = (() => {
   const delta = (a, b) => a == null || b == null || b < a ? null : b - a;
   const sessionArea = e => delta(e.workedStart, e.workedEnd);
   const overlap = e => e.workedEnd != null && e.actualEnd != null && e.workedEnd >= e.actualEnd ? e.workedEnd - e.actualEnd : null;
-  const season = e => new Date(e.start).getFullYear();
+  // Host-paket C: the host's job start and end (Job.StartedAt / EndedAt) where they mark this
+  // session's start or end, else this tablet's clock; both from one clock if they disagree.
+  function ended(e, job) {
+    if (!e.byJob || e.hostEnd != null || !job || !(num(job.endedMs) > 0)) return e;
+    return { ...e, hostEnd: job.endedMs, byJob: false };
+  }
+  const hostOk = e => (e.hostEnd != null ? e.hostEnd : e.end) >= (e.hostStart != null ? e.hostStart : e.start);
+  const t0 = e => e.hostStart != null && hostOk(e) ? e.hostStart : e.start;
+  const t1 = e => e.hostEnd != null && hostOk(e) ? e.hostEnd : e.end;
+  const season = e => new Date(t0(e)).getFullYear();
   function sums(entries) {
     const out = new Map();
     for (const e of entries) {
       const k = e.field + '\u0000' + season(e);
       const r = out.get(k) || { field: e.field, season: season(e), count: 0, ms: 0, areaSqM: 0, areaMissing: 0 };
-      r.count++; r.ms += Math.max(0, e.end - e.start);
+      r.count++; r.ms += Math.max(0, t1(e) - t0(e));
       const a = sessionArea(e); if (a == null) r.areaMissing++; else r.areaSqM += a;
       out.set(k, r);
     }
@@ -11919,24 +11980,39 @@ const WorkLogCore = (() => {
   const cell = v => { const t = String(v == null ? '' : v); return /[;"\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
   function csv(entries, head) {
     const rows = [head];
-    for (const e of entries) rows.push([e.field, e.job, e.workType, dDate(e.start), dTime(e.start), dTime(e.end), dur(e.end - e.start),
+    for (const e of entries) rows.push([e.field, e.job, e.workType, dDate(t0(e)), dTime(t0(e)), dTime(t1(e)), dur(t1(e) - t0(e)),
       ha(sessionArea(e)), ha(e.workedEnd), ha(e.actualEnd), ha(overlap(e)), metres(delta(e.tripStart, e.tripEnd)),
       e.tool, widthTxt(e.widthM), e.vehicle, e.activity, e.product, e.amount, e.note]);
     return '﻿' + rows.map(r => r.map(cell).join(';')).join('\r\n') + '\r\n';
   }
-  return { step, sums, csv, sessionArea, overlap, season, delta, dDate, dTime, dur, ha, GAP_MS };
+  // Same rule as WorkLogStore.Merge on the host: union by id, the later change wins, deleted
+  // ids removed, open sessions not taken (each device keeps its own until it closes).
+  function merge(a, b) {
+    const deleted = [...new Set([...(a.deleted || []), ...(b.deleted || [])].filter(x => typeof x === 'string' && x))].sort();
+    const gone = new Set(deleted), byId = new Map();
+    const newer = (x, y) => (num(x.mod) || 0) !== (num(y.mod) || 0) ? (num(x.mod) || 0) > (num(y.mod) || 0) : (num(x.end) || 0) > (num(y.end) || 0);
+    for (const d of [a, b]) for (const e of d.entries || []) {
+      if (!e || typeof e.id !== 'string' || !e.id || num(e.start) == null || gone.has(e.id) || e.open === true) continue;
+      const h = byId.get(e.id); if (!h || newer(e, h)) byId.set(e.id, e);
+    }
+    const entries = [...byId.values()].sort((x, y) => x.start - y.start || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+    return { entries, deleted };
+  }
+  return { step, merge, ended, t0, t1, sums, csv, sessionArea, overlap, season, delta, dDate, dTime, dur, ha, GAP_MS };
 })();
 // worklog:end
 
-// Recorder + overview sheet for WorkLogCore (feature/arbeitsdoku).
+// Recorder + overview sheet for WorkLogCore (feature/arbeitsdoku). Tested by
+// Tests/web/worklog-ui.test.mjs (block worklog-ui:begin/end).
+// worklog-ui:begin
 const TabletWorkLog = (() => {
   const T = k => I18n.text(k);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
   const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
   const KEY = 'aow.worklog.v1';
   const C = WorkLogCore;
-  let state = { entries: [], open: null }, storeOk = true, dirty = false, lastSave = 0;
-  try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); if (v && Array.isArray(v.entries)) state = { entries: v.entries, open: v.open || null }; }
+  let state = { entries: [], open: null, deleted: [] }, storeOk = true, dirty = false, lastSave = 0;
+  try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); if (v && Array.isArray(v.entries)) state = { entries: v.entries, open: v.open || null, deleted: Array.isArray(v.deleted) ? v.deleted : [] }; }
   catch (_) { storeOk = false; }
   function save(force) {
     const now = Date.now();
@@ -11945,23 +12021,74 @@ const TabletWorkLog = (() => {
   }
   window.addEventListener('pagehide', () => save(true));
 
+  // --- Guidance computer -------------------------------------------------------------------------
+  // The tablet holding control sends its copy and takes the merged log back; an observer only
+  // reads. Every 30 s and soon after a change; the local copy stays the buffer when the host is away.
+  // unsent: this tablet has entries the host's copy hasn't (e.g. a session left open when the
+  // ignition went off, closed at the next start): sent as soon as this tablet holds control,
+  // not only at the next 30 s round (an observer's read doesn't deliver them).
+  let hostAt = 0, hostErr = false, syncing = false, syncSoon = false, unsent = true;
+  async function sync() {
+    if (syncing || connState !== 'connected') return;
+    syncing = true; syncSoon = false;
+    try {
+      const mine = { format: 'aow-worklog', version: 1, entries: state.entries, deleted: state.deleted };
+      const r = iHoldControl && myClientId
+        ? await fetch('/worklog?client=' + encodeURIComponent(myClientId), { method: 'POST', body: JSON.stringify(mine) })
+        : await fetch('/worklog', { cache: 'no-store' });
+      if (!r.ok) throw new Error(String(r.status));
+      const v = await r.json();
+      if (!v || v.format !== 'aow-worklog' || !Array.isArray(v.entries)) throw new Error('format');
+      const m = C.merge({ entries: state.entries, deleted: state.deleted }, v); // changes made meanwhile stay
+      state = { entries: m.entries, deleted: m.deleted, open: state.open && !m.deleted.includes(state.open.id) ? state.open : null };
+      const onHost = new Set(v.entries.map(e => e && e.id));
+      unsent = state.entries.some(e => !onHost.has(e.id));
+      save(true); hostAt = Date.now(); hostErr = false;
+    } catch (_) { hostErr = true; }
+    syncing = false; last = ''; if (isOpen()) render();
+  }
+  const changed = () => { save(true); syncSoon = true; };
+  setInterval(() => { if (syncSoon || (unsent && iHoldControl) || Date.now() - hostAt > 30000) sync(); }, 3000);
+
   // --- Recording -------------------------------------------------------------------------------
   function snapshot() {
     const s = statusBar || {}, fd = s.fieldData || {};
     const field = fieldOps && fieldOps.activeField || '', job = s.jobName || '';
     const j = fieldOps && (fieldOps.jobs || []).find(x => x.fieldName === field && x.taskName === job);
+    // A job started on the host while this tablet watched: the previous tick (live, with control)
+    // had no job or another one, and the job is new (opened in the minute it started; a resumed
+    // job was opened later). Then its start is the session's start.
+    const live = connState === 'connected' && !!lastTick && performance.now() - lastTick.t < 2000;
+    const key = field && job ? field + '\u0000' + job : '';
+    const jobNew = !!(j && key && prevKey !== null && prevKey !== key && j.status === 0 && j.startedMs > 0 && j.lastOpened === hostMinute(j.startedMs));
+    prevKey = live && iHoldControl ? key : null;
     return {
-      live: connState === 'connected' && !!lastTick && performance.now() - lastTick.t < 2000,
-      control: !!iHoldControl, field, job, workType: j ? j.workType : '',
+      live,
+      control: !!iHoldControl, field, job, workType: j ? j.workType : '', jobStart: j ? j.startedMs : null, jobNew,
       worked: s.workedAreaSqM, actual: fd.actualAreaSqM, trip: fd.tripDistanceM,
       tool: profiles ? profiles.activeTool : '', vehicle: profiles ? profiles.activeVehicle : '',
       widthM: typeof sectionsWidthM === 'function' && sectionsWidthM() > 0 ? sectionsWidthM() : null,
     };
   }
+  let prevKey = null; // field+job of the previous tick while live with control; null = not watched
+  const p2 = n => String(n).padStart(2, '0');
+  const hostMinute = ms => { const d = new Date(ms); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()); };
   setInterval(() => {
-    const before = state.entries.length, wasOpen = !!state.open;
+    let before = state.entries.length; const wasOpen = !!state.open;
     state = C.step(state, snapshot(), Date.now());
-    save(state.entries.length !== before || wasOpen !== !!state.open);
+    // The host's end for a session closed with its job, once the job list shows it (a few s later).
+    const jobs = fieldOps && fieldOps.jobs || [];
+    if (state.entries.some(e => e.byJob)) {
+      const now = Date.now();
+      state = { ...state, entries: state.entries.map(e => {
+        if (!e.byJob) return e;
+        const x = C.ended(e, jobs.find(j => j.fieldName === e.field && j.taskName === e.job));
+        return x.byJob && now - e.end > 60000 ? { ...x, byJob: false } : x; // not reported within a minute: tablet clock
+      }) };
+      before = -1;
+    }
+    const moved = state.entries.length !== before || wasOpen !== !!state.open;
+    save(moved); if (moved) { syncSoon = true; if (state.entries.length > Math.max(0, before)) unsent = true; }
     if (isOpen()) render();
   }, 2000);
 
@@ -11985,7 +12112,7 @@ const TabletWorkLog = (() => {
     const q = fText.trim().toLowerCase();
     return all().filter(e => (!fField || e.field === fField) && (!fSeason || String(C.season(e)) === fSeason)
       && (!q || [e.field, e.job, e.workType, e.tool, e.vehicle, e.activity, e.product, e.amount, e.note].join(' ').toLowerCase().includes(q)))
-      .sort((a, b) => a.field.localeCompare(b.field) || b.start - a.start);
+      .sort((a, b) => a.field.localeCompare(b.field) || C.t0(b) - C.t0(a));
   }
   const HEAD = () => [tr('Field'), tr('Job'), tr('Work type'), tr('Date'), tr('Start'), tr('End'), tr('Duration (h:mm)'), tr('Area this session (ha)'),
     tr('Job area total (ha)'), tr('Covered once, job total (ha)'), tr('Overlap, job total (ha)'), tr('Distance (m)'), tr('Tool'), tr('Working width (m)'), tr('Vehicle'),
@@ -12001,7 +12128,7 @@ const TabletWorkLog = (() => {
   }
   function render() {
     if (!isOpen()) return;
-    const list = filtered(), key = JSON.stringify([list.map(e => [e.id, e.end, e.activity, e.product, e.amount, e.note]), fField, fSeason, fText, edit, msg, storeOk, I18n.language]);
+    const list = filtered(), key = JSON.stringify([list.map(e => [e.id, e.end, e.hostEnd, e.activity, e.product, e.amount, e.note]), fField, fSeason, fText, edit, msg, storeOk, hostAt, hostErr, I18n.language]);
     if (key === last) return;
     if (document.activeElement && sheet.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // don't rebuild under the cursor
     last = key;
@@ -12010,7 +12137,9 @@ const TabletWorkLog = (() => {
     if (edit) { renderEdit(); return; }
     const box = el('div', 'tb-box');
     box.appendChild(el('div', 'tp-note', T(tr('One entry per working session, recorded on this tablet while it has control and a job is open. Areas and distance come from the guidance computer.'))));
-    box.appendChild(el('div', 'tp-note warn', T(tr('Stored only on this tablet (in the browser). Back it up with "Save as file".'))));
+    box.appendChild(el('div', hostAt && !hostErr ? 'tp-note' : 'tp-note warn', hostAt && !hostErr
+      ? T(tr('Also stored on the guidance computer (last at {t}). A running session is stored when it ends.', { t: C.dTime(hostAt) }))
+      : T(tr('Not stored on the guidance computer yet: kept on this tablet until it can be. "Save as file" makes an extra copy.'))));
     if (!storeOk) box.appendChild(el('div', 'tp-note bad', T(tr('This browser does not store data: entries are lost when the page is closed.'))));
     if (msg) box.appendChild(el('div', 'tp-note', T(msg)));
     // Filters
@@ -12036,7 +12165,7 @@ const TabletWorkLog = (() => {
     for (const e of list) {
       const r = el('button', 'tbk-it wl-it' + (e.open ? ' on' : ''));
       const nm = el('span', 'tbk-nm');
-      nm.appendChild(el('small', '', C.dDate(e.start) + ' · ' + C.dTime(e.start) + '–' + (e.open ? T(tr('running')) : C.dTime(e.end)) + ' · ' + C.dur(e.end - e.start) + ' h'));
+      nm.appendChild(el('small', '', C.dDate(C.t0(e)) + ' · ' + C.dTime(C.t0(e)) + '–' + (e.open ? T(tr('running')) : C.dTime(C.t1(e))) + ' · ' + C.dur(C.t1(e) - C.t0(e)) + ' h'));
       nm.appendChild(el('b', '', e.field + ' · ' + e.job));
       const a = C.sessionArea(e);
       nm.appendChild(el('small', '', [a == null ? T(tr('area: —')) : fmtArea(a), e.tool, e.widthM != null ? fmtUnit(e.widthM, 'm') : '', e.activity, e.product, e.amount].filter(Boolean).join(' · ')));
@@ -12062,9 +12191,11 @@ const TabletWorkLog = (() => {
   function renderEdit() {
     const e = all().find(x => x.id === edit); if (!e) { edit = null; render(); return; }
     const box = el('div', 'tb-box');
-    box.appendChild(el('div', 'tb-lbl', e.field + ' · ' + e.job + ' · ' + C.dDate(e.start)));
+    box.appendChild(el('div', 'tb-lbl', e.field + ' · ' + e.job + ' · ' + C.dDate(C.t0(e))));
     const a = C.sessionArea(e), ov = C.overlap(e), tr0 = C.delta(e.tripStart, e.tripEnd);
-    for (const [k, v] of [[tr('Time'), C.dTime(e.start) + '–' + (e.open ? T(tr('running')) : C.dTime(e.end)) + ' (' + C.dur(e.end - e.start) + ' h)'],
+    const src = (e.hostStart != null || e.hostEnd != null) && C.t0(e) === (e.hostStart != null ? e.hostStart : e.start) && C.t1(e) === (e.hostEnd != null ? e.hostEnd : e.end)
+      ? ' · ' + T(e.hostStart != null && e.hostEnd != null ? tr('start and end from the guidance computer') : e.hostStart != null ? tr('start from the guidance computer') : tr('end from the guidance computer')) : '';
+    for (const [k, v] of [[tr('Time'), C.dTime(C.t0(e)) + '–' + (e.open ? T(tr('running')) : C.dTime(C.t1(e))) + ' (' + C.dur(C.t1(e) - C.t0(e)) + ' h)' + src],
       [tr('Area this session'), a == null ? '—' : fmtArea(a)], [tr('Job area total'), e.workedEnd == null ? '—' : fmtArea(e.workedEnd)],
       [tr('Overlap, job total'), ov == null ? '—' : fmtArea(ov)], [tr('Distance'), tr0 == null ? '—' : fmtUnit(tr0, 'm', 0)],
       [tr('Tool'), e.tool || '—'], [tr('Working width'), e.widthM == null ? '—' : fmtUnit(e.widthM, 'm')], [tr('Vehicle'), e.vehicle || '—'], [tr('Work type'), e.workType || '—']])
@@ -12077,15 +12208,15 @@ const TabletWorkLog = (() => {
     }
     const r = el('div', 'tb-row');
     const ok = el('button', 'tp-btn pri big', T(tr('Save'))); onTap(ok, () => {
-      const upd = x => x.id === e.id ? { ...x, ...Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value.trim()])) } : x;
-      state = { entries: state.entries.map(upd), open: state.open ? upd(state.open) : null }; save(true); edit = null; last = ''; render();
+      const upd = x => x.id === e.id ? { ...x, ...Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value.trim()])), mod: Date.now() } : x;
+      state = { entries: state.entries.map(upd), open: state.open ? upd(state.open) : null, deleted: state.deleted }; changed(); edit = null; last = ''; render();
     });
     const back = el('button', 'tp-btn', '← ' + T(tr('Back'))); onTap(back, () => { edit = null; last = ''; render(); });
     const del = el('button', 'tp-btn quiet', T(tr('Delete entry'))); del.disabled = !!e.open;
     let armed = false;
     onTap(del, () => {
       if (!armed) { armed = true; del.textContent = T(tr('Tap again to delete')); return; }
-      state = { entries: state.entries.filter(x => x.id !== e.id), open: state.open }; save(true); edit = null; last = ''; render();
+      state = { entries: state.entries.filter(x => x.id !== e.id), open: state.open, deleted: state.deleted.concat([e.id]) }; changed(); edit = null; last = ''; render();
     });
     r.append(ok, back, del); box.appendChild(r);
     shB.appendChild(box);
@@ -12115,7 +12246,8 @@ const TabletWorkLog = (() => {
       if (!v || v.format !== 'aow-worklog' || !Array.isArray(v.entries)) throw new Error('format');
       const have = new Set(all().map(e => e.id));
       const add = v.entries.filter(e => e && e.id && !have.has(e.id) && typeof e.field === 'string' && typeof e.start === 'number').map(e => ({ ...e, open: false }));
-      state = { entries: state.entries.concat(add), open: state.open }; save(true);
+      const m = C.merge({ entries: state.entries, deleted: state.deleted }, { entries: add });
+      state = { entries: m.entries, open: state.open, deleted: m.deleted }; changed();
       msg = tr('{n} entries loaded; entries already here are kept.', { n: add.length });
     } catch (_) { msg = tr('Not a work log file of this app.'); }
     last = ''; render();
@@ -12132,7 +12264,7 @@ const TabletWorkLog = (() => {
         + '<p>' + s.map(r => esc(r.season + ': ' + tr('Sessions: {n}', { n: r.count }) + ' · ' + C.dur(r.ms) + ' h · ' + fmtArea(r.areaSqM))).join('<br>') + '</p>'
         + '<table><tr>' + [tr('Date'), tr('Time'), tr('Job'), tr('Area this session'), tr('Tool'), tr('Working width'), tr('Activity'), tr('Product / variety'), tr('Amount'), tr('Note')]
           .map(k => '<th>' + esc(T(k)) + '</th>').join('') + '</tr>'
-        + es.slice().sort((a, b) => a.start - b.start).map(e => '<tr>' + [C.dDate(e.start), C.dTime(e.start) + '–' + C.dTime(e.end), e.job,
+        + es.slice().sort((a, b) => a.start - b.start).map(e => '<tr>' + [C.dDate(C.t0(e)), C.dTime(C.t0(e)) + '–' + C.dTime(C.t1(e)), e.job,
           C.sessionArea(e) == null ? '—' : fmtArea(C.sessionArea(e)), e.tool, e.widthM == null ? '' : fmtUnit(e.widthM, 'm'), e.activity, e.product, e.amount, e.note]
           .map(v => '<td>' + esc(v) + '</td>').join('') + '</tr>').join('') + '</table>'
         + '<p class="wl-n">' + esc(T(NOTE)) + '</p></section>';
@@ -12155,5 +12287,6 @@ const TabletWorkLog = (() => {
     onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(); });
     f.appendChild(t);
   }, 300);
-  return { open, get entries() { return all(); } };
+  return { open, get entries() { return all(); }, get unsent() { return unsent; } };
 })();
+// worklog-ui:end

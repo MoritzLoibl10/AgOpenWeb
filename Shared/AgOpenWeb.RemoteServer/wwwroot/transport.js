@@ -234,7 +234,7 @@ window.RemoteTransport = {
           const fc = i32(); const fields = new Array(fc);
           for (let k = 0; k < fc; k++) fields[k] = { name: str(), hasDistance: !!u8(), distanceKm: f64(), areaHa: f64() };
           const jc = i32(); const jobs = new Array(jc);
-          for (let k = 0; k < jc; k++) jobs[k] = { fieldName: str(), taskName: str(), workType: str(), status: i32(), lastOpened: str(), notes: str() };
+          for (let k = 0; k < jc; k++) jobs[k] = { fieldName: str(), taskName: str(), workType: str(), status: i32(), lastOpened: str(), notes: str(), startedMs: f64(), endedMs: f64() };
           const wc = i32(); const workTypes = new Array(wc); for (let k = 0; k < wc; k++) workTypes[k] = str();
           const ic = i32(); const isoFiles = new Array(ic); for (let k = 0; k < ic; k++) isoFiles[k] = str();
           const kc = i32(); const kmlFiles = new Array(kc); for (let k = 0; k < kc; k++) kmlFiles[k] = str();
@@ -263,7 +263,8 @@ window.RemoteTransport = {
           for (let k = 0; k < gc; k++) logs[k] = { time: str(), level: i32(), message: str() };
           const bugReportStatus = str(), bugReportSendStatus = str();
           const backupStatus = o < dv.byteLength ? str() : ''; // append-only (fork): profile backup, JSON, after upstream's fields
-          handlers.onAppInfo && handlers.onAppInfo({ version, gitHash, currentLanguage, languages, directories, hotkeys, logs, bugReportStatus, bugReportSendStatus, backupStatus });
+          const firstSetup = o < dv.byteLength ? str() : null; // append-only (fork, host-paket D); null = host without it
+          handlers.onAppInfo && handlers.onAppInfo({ version, gitHash, currentLanguage, languages, directories, hotkeys, logs, bugReportStatus, bugReportSendStatus, backupStatus, firstSetup });
           break;
         }
         case TYPE.FIELD_TOOLS: {
@@ -354,6 +355,7 @@ window.RemoteTransport = {
             lineWidth: i32(), nudgeDistance: i32(), nextGuidanceTime: f64(), cmPerPixel: i32(),
             lightbarEnabled: !!u8(), steerBarEnabled: !!u8(), guidanceBarOn: !!u8(),
           };
+          gps.minFixQuality = o < dv.byteLength ? i32() : null; // append-only (fork, host-paket D)
           handlers.onConfig && handlers.onConfig({ vehicle, gps, roll, tool, uturn, tram, machine, display, autosteer });
           break;
         }
@@ -452,7 +454,10 @@ window.RemoteTransport = {
         }
         case TYPE.TOAST: {
           // One-shot refusal/failure notification (#109).
-          handlers.onToast && handlers.onToast(str());
+          const msg = str();
+          // Append-only (fork, host-paket D): translation key with {name} placeholders + values (JSON).
+          const key = o < dv.byteLength ? str() : '', args = o < dv.byteLength ? str() : '';
+          handlers.onToast && handlers.onToast(msg, key, args);
           break;
         }
         case TYPE.DRIVE_PICK: {

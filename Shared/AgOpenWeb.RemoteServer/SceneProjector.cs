@@ -521,7 +521,8 @@ public sealed class SceneProjector
 
         var jobs = _jobs.ListAllJobs()
             .Select(j => new JobEntryDto(j.FieldName, j.TaskName, j.WorkType, (int)j.Status,
-                j.LastOpenedAt.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture), j.Notes))
+                j.LastOpenedAt.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture), j.Notes,
+                UnixMs(j.StartedAt), j.EndedAt is { } end ? UnixMs(end) : 0))
             .ToList();
         var suggestions = _jobs.SuggestWorkTypes().ToList();
 
@@ -559,6 +560,9 @@ public sealed class SceneProjector
 
     // Re-send FieldOps on a field/job add/delete/open/area change (NOT on import-folder
     // changes — those refresh on connect / any field-job change, cheap enough).
+    // Local or unspecified times (DateTime.Now, as the job service stamps them) are local.
+    private static double UnixMs(System.DateTime t) => new System.DateTimeOffset(t).ToUnixTimeMilliseconds();
+
     public long FieldOpsFingerprint()
     {
         long h = 17;
@@ -571,6 +575,8 @@ public sealed class SceneProjector
             h = h * 31 + (j.TaskName?.GetHashCode() ?? 0);
             h = h * 31 + (int)j.Status;
             h = h * 31 + j.LastOpenedAt.Ticks.GetHashCode();
+            h = h * 31 + j.StartedAt.Ticks.GetHashCode();
+            h = h * 31 + (j.EndedAt?.Ticks.GetHashCode() ?? 0);
         }
         h = h * 31 + (_fields.ActiveField?.Name?.GetHashCode() ?? 0);
         return h;
@@ -701,7 +707,8 @@ public sealed class SceneProjector
                 (int)e.Level, e.Message))
             .ToList();
 
-        return new AppInfoDto(version, git, current, langs, dirs, hotkeys, logs, _state.BugReportStatus ?? "", _state.BugReportSendStatus ?? "", _state.BackupStatus ?? "");
+        return new AppInfoDto(version, git, current, langs, dirs, hotkeys, logs, _state.BugReportStatus ?? "", _state.BugReportSendStatus ?? "", _state.BackupStatus ?? "",
+            _persist.State.FirstSetup ?? "");
     }
 
     private static AppDirDto DirInfo(string name, string path) =>
@@ -731,6 +738,7 @@ public sealed class SceneProjector
         h = h * 31 + (_state.BugReportStatus?.GetHashCode() ?? 0);
         h = h * 31 + (_state.BugReportSendStatus?.GetHashCode() ?? 0);
         h = h * 31 + (_state.BackupStatus?.GetHashCode() ?? 0);
+        h = h * 31 + (_persist.State.FirstSetup?.GetHashCode() ?? 0);
         return h;
     }
 
@@ -778,7 +786,7 @@ public sealed class SceneProjector
                 v.ImuPivot, v.ImuHeight, v.ImuOffset),
             new GpsConfigDto(c.IsDualGps, c.DualHeadingOffset, c.DualReverseDistance, c.AutoDualFix,
                 c.DualSwitchSpeed, c.MinGpsStep, c.FixToFixDistance, c.HeadingFusionWeight,
-                c.ReverseDetection, c.RtkLostAlarm, c.RtkLostAction),
+                c.ReverseDetection, c.RtkLostAlarm, c.RtkLostAction, c.MinFixQuality),
             new RollConfigDto(a.RollZero, a.RollFilter, a.IsRollInvert),
             new ToolConfigDto(toolType, t.HitchType, t.HitchLength, t.TrailingHitchLength,
                 t.TankTrailingHitchLength, t.Length, t.LookAheadOnSetting, t.LookAheadOffSetting,
@@ -874,7 +882,7 @@ public sealed class SceneProjector
         h = h * 31 + (int)v.Type * 31 + v.HitchType;
         h = h * 31 + (c.IsDualGps ? 1 : 0) * 7 + (c.AutoDualFix ? 1 : 0) * 11
                    + (c.ReverseDetection ? 1 : 0) * 13 + (c.RtkLostAlarm ? 1 : 0) * 17
-                   + c.RtkLostAction * 19 + (a.IsRollInvert ? 1 : 0) * 23;
+                   + c.RtkLostAction * 19 + (a.IsRollInvert ? 1 : 0) * 23 + c.MinFixQuality * 29;
         foreach (var d in new[] { v.HitchLength, v.Wheelbase, v.TrackWidth, v.AntennaPivot,
                                   v.AntennaHeight, v.AntennaOffset, c.DualHeadingOffset,
                                   c.DualReverseDistance, c.DualSwitchSpeed, c.MinGpsStep,

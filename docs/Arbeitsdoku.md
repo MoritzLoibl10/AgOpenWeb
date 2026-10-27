@@ -18,12 +18,14 @@
 die ZIPs des Profil-Backups, `/bugreports/` nur Diagnose-ZIPs.
 
 ### Fehlt, bräuchte eine Host-Änderung (nicht gebaut)
-1. **Auftragszeiten und -strecke vom Host:** `Job.StartedAt`, `EndedAt`, `DistanceTraveledMeters`,
+1. **Auftragszeiten und -strecke vom Host** (Zeiten gebaut in `feature/host-paket`,
+   `docs/Host-Aenderungen.md` 16; die Strecke rechnet der Host nicht aus, sie bleibt die Tagesstrecke): `Job.StartedAt`, `EndedAt`, `DistanceTraveledMeters`,
    `AreaWorkedHectares` in `FieldOpsDto.Jobs` mitsenden (`SceneProjector`, `WireCodec`, `transport.js`).
-2. **Protokoll am Lenkrechner speichern:** z. B. `worklog.json` je Schlag neben `field.geojson`, mit
+2. **Protokoll am Lenkrechner speichern** (gebaut in `feature/host-paket`, als eine Datei
+   `WorkLog/worklog.json`, siehe Teil E): ursprünglich vorgeschlagen z. B. `worklog.json` je Schlag neben `field.geojson`, mit
    Befehl zum Schreiben und Route zum Lesen; damit stünde es allen Geräten zur Verfügung und läge in
    der Bug-Report- und Backup-Datei.
-3. **Protokoll im Profil-Backup:** Das Backup baut der Host (`backup.create`); Einträge aus dem
+3. **Protokoll im Profil-Backup** (gebaut in `feature/host-paket`): Das Backup baut der Host (`backup.create`); Einträge aus dem
    Browser-Speicher kann er nicht mitnehmen.
 4. **Downloads auf Android:** Die App-Ansicht (WebView) lädt im Browser erzeugte Dateien (CSV) nicht
    ohne Weiteres herunter und druckt nicht ohne Druck-Anbindung; beides wäre eine Änderung in
@@ -61,13 +63,22 @@ gezählt und genannt). Antippen eines Eintrags zeigt alle Werte und die vier Fre
   funktionieren beide (im Desktop-Fenster nicht eigens geprüft).
 
 ## Teil E – Ablage
-- **Wo:** im Browser-Speicher dieses Tablets (`localStorage`, Schlüssel `aow.worklog.v1`). Die
-  Einträge liegen damit **nur auf diesem Tablet**; ein anderes Gerät oder ein anderer Browser sieht
-  sie nicht. Löschen der Browser- bzw. App-Daten löscht sie mit. Das sagt auch die Übersicht.
+- **Wo:** im Browser-Speicher des Tablets (`localStorage`, Schlüssel `aow.worklog.v1`) und, seit
+  `feature/host-paket`, am Lenkrechner in `WorkLog/worklog.json` im Datenordner
+  (`docs/Host-Aenderungen.md` Abschnitt 15). Das Tablet bleibt Zwischenspeicher: Ist der Lenkrechner
+  nicht erreichbar, wird später abgeglichen.
+- **Abgleich:** alle 30 s und kurz nach jeder Änderung. Das Tablet mit der Bedienung schickt seine
+  Einträge (`POST /worklog`), der Lenkrechner führt sie zusammen und gibt das Ergebnis zurück; andere
+  Geräte lesen nur (`GET /worklog`). Gleiche Einträge (gleiche ID) gibt es nur einmal, die zuletzt
+  geänderte Fassung gilt (`mod`, sonst `end`), ein gelöschter Eintrag bleibt gelöscht (Liste `deleted`).
+  Eine laufende Sitzung geht erst an den Lenkrechner, wenn sie endet. Wurde sie nicht beendet
+  (Zündung aus ohne Schließen), schließt das Tablet sie beim nächsten Start mit dem Zeitpunkt, an
+  dem sie zuletzt lief, und liefert sie nach, sobald es die Bedienung hat
+  (Test: `Tests/web/worklog-ui.test.mjs`).
 - **Port:** Der Port 5174 darf sich nicht ändern, sonst ist der Browser-Speicher nicht mehr
-  erreichbar (er hängt an der Adresse `http://localhost:5174`).
+  erreichbar (er hängt an der Adresse `http://localhost:5174`). Der Lenkrechner hat die Einträge
+  trotzdem.
 - **Sichern:** „Als Datei sichern“ (JSON) und „Aus Datei laden“ (fügt hinzu, vorhandene Einträge
   bleiben, gleiche Einträge werden nicht doppelt geladen).
-- **Profil-Backup:** nicht möglich ohne Host-Änderung, weil der Host die Backup-Datei baut und den
-  Browser-Speicher nicht kennt (siehe Teil A, Punkt 3).
-- **Dauerhafte Ablage am Lenkrechner:** nur mit Host-Änderung (Teil A, Punkt 2).
+- **Profil-Backup:** nimmt `WorkLog/worklog.json` mit; beim Einspielen wird zusammengeführt, nicht
+  ersetzt (Sitzungen seit dem Backup bleiben). Die Vorschau nennt die Zahl der neuen Einträge.
