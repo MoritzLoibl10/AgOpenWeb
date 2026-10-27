@@ -377,8 +377,10 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
 - **MinFixQuality an den Client:** `GpsConfigDto.MinFixQuality`, gesendet als `i32` am Ende des
   Config-Rahmens. Die Ampel prüft die Fix-Qualität jetzt wie der Host (`GpsFixQualityValidator`:
   Qualität kleiner als Minimum wird abgelehnt); ohne den Wert (älterer Host) wie bisher „RTK Fix“.
-  Hinweis, nur gemeldet: Der Host vergleicht die NMEA-Zahl; RTK Float (5) liegt numerisch über
-  RTK Fix (4) und besteht damit die Vorgabe 4. Die Ampel zeigt das so an, wie der Host entscheidet.
+  Die Ampel wertet nach Güte (RTK Fix > RTK Float > DGPS/PPS > GPS; 0 und 6–8 kein Fix) und
+  verlangt zusätzlich, dass der Host die Zahl annimmt: nie lockerer als der Host, RTK Float bei
+  Vorgabe 4 nicht grün. Der Host vergleicht die NMEA-Zahl (Float 5 besteht die Vorgabe 4); das ist
+  nur gemeldet, `docs/Upstream-Issues.md` Punkt 5. Test: `Tests/web/ready.test.mjs`.
 - **1-KB-Grenze (Offene Punkte 7):** `WebSocketHub` sammelt die Stücke einer Nachricht bis
   `EndOfMessage` (`CommandAssembler.cs`, neu) und führt den Befehl einmal ganz aus; über 64 KB wird
   die Nachricht ganz verworfen. Test: `CommandAssemblerTests.cs`.

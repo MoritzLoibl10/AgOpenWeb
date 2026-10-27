@@ -71,7 +71,10 @@ gezählt und genannt). Antippen eines Eintrags zeigt alle Werte und die vier Fre
   Einträge (`POST /worklog`), der Lenkrechner führt sie zusammen und gibt das Ergebnis zurück; andere
   Geräte lesen nur (`GET /worklog`). Gleiche Einträge (gleiche ID) gibt es nur einmal, die zuletzt
   geänderte Fassung gilt (`mod`, sonst `end`), ein gelöschter Eintrag bleibt gelöscht (Liste `deleted`).
-  Eine laufende Sitzung geht erst an den Lenkrechner, wenn sie endet.
+  Eine laufende Sitzung geht erst an den Lenkrechner, wenn sie endet. Wurde sie nicht beendet
+  (Zündung aus ohne Schließen), schließt das Tablet sie beim nächsten Start mit dem Zeitpunkt, an
+  dem sie zuletzt lief, und liefert sie nach, sobald es die Bedienung hat
+  (Test: `Tests/web/worklog-ui.test.mjs`).
 - **Port:** Der Port 5174 darf sich nicht ändern, sonst ist der Browser-Speicher nicht mehr
   erreichbar (er hängt an der Adresse `http://localhost:5174`). Der Lenkrechner hat die Einträge
   trotzdem.

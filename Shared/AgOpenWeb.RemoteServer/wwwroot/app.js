@@ -11259,9 +11259,11 @@ const TabletBackup = (() => {
 // module not heard, no line). Yellow = steering works but check first: no IMU heard, or with one
 // antenna the direction not yet confirmed on the card "Does the vehicle face the way it drives?"
 // (TabletSteerConfirm; driving forward can't be told from backing with one antenna, so only the
-// confirmation counts). The module flags are the host's own (gpsOk / autoSteerOk / imuOk); RTK
-// fix = NMEA fix quality 4, the host's default minimum (MinFixQuality, not sent to the client).
-// Tap it for the list. In the demo mode (TabletDemo) it says "Demo" instead.
+// confirmation counts). The module flags are the host's own (gpsOk / autoSteerOk / imuOk); the
+// fix is judged against the host's MinFixQuality (fixOk below), never looser than the host.
+// Tap it for the list. In the demo mode (TabletDemo) it says "Demo" instead. Tested by
+// Tests/web/ready.test.mjs (block ready:begin/end).
+// ready:begin
 const TabletReady = (() => {
   const T = k => I18n.text(k);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
@@ -11277,6 +11279,17 @@ const TabletReady = (() => {
   let last = '';
 
   const live = () => connState === 'connected' && !!lastTick && performance.now() - lastTick.t < 2000;
+  // Fix quality by goodness, not by its NMEA number: RTK Fix (4) > RTK Float (5) > DGPS (2) and
+  // PPS (3) > GPS (1); 0 and the estimated/manual/simulated kinds (6, 7, 8) count as no fix. Green
+  // needs both: the host's own gate (GpsFixQualityValidator: number < MinFixQuality is refused)
+  // and at least the goodness of the minimum, so the light is never looser than the host and
+  // RTK Float is not green when the minimum is RTK Fix. No minimum known (older host): RTK Fix.
+  const RANK = { 4: 4, 5: 3, 2: 2, 3: 2, 1: 1 };
+  const rank = q => RANK[q] || 0;
+  function fixOk(q, minQ) {
+    if (minQ == null) return q === 4;
+    return q >= minQ && rank(q) >= rank(minQ) && rank(q) > 0;
+  }
   // [level, label, detail]: level 2 = ok, 1 = check, 0 = missing.
   function checks() {
     const s = statusBar || {}, op = tick && tick.op, gps = config && config.gps;
@@ -11285,10 +11298,8 @@ const TabletReady = (() => {
     if (s.gpsSentence === 'SIM') out.push([1, tr('GPS'), tr('Simulator: not a real position')]);
     else if (s.gpsLost || !s.gpsOk) out.push([0, tr('GPS'), tr('No GPS data')]);
     else {
-      // The host's own gate (Connections.MinFixQuality, GpsFixQualityValidator: quality < minimum is
-      // refused); before the host sent it (host-paket D): RTK Fix as before.
       const minQ = gps && Number.isInteger(gps.minFixQuality) ? gps.minFixQuality : null, q = s.fixQuality | 0;
-      const ok = minQ != null ? q >= minQ : q === 4;
+      const ok = fixOk(q, minQ);
       out.push([ok ? 2 : 0, tr('GPS'), (s.fixText || '') + (ok ? '' : ' – ' + (minQ != null
         ? tr('the guidance computer needs fix quality {n} or higher (now {q})', { n: minQ, q }) : T(tr('steering needs RTK Fix'))))]);
     }
@@ -11324,8 +11335,9 @@ const TabletReady = (() => {
     pop.appendChild(el('div', 'rd-n', T(tr('Display only. Steering is switched on with the Steer button as before.'))));
   }
   setInterval(render, 300);
-  return { checks, get level() { return Math.min(...checks().map(c => c[0])); } };
+  return { checks, fixOk, get level() { return Math.min(...checks().map(c => c[0])); } };
 })();
+// ready:end
 
 // ===== Demo mode (feature/bedienung-1) ========================================================
 // For showing the app: the existing simulator as the GPS source, with a striped "DEMO" band that
@@ -11986,7 +11998,9 @@ const WorkLogCore = (() => {
 })();
 // worklog:end
 
-// Recorder + overview sheet for WorkLogCore (feature/arbeitsdoku).
+// Recorder + overview sheet for WorkLogCore (feature/arbeitsdoku). Tested by
+// Tests/web/worklog-ui.test.mjs (block worklog-ui:begin/end).
+// worklog-ui:begin
 const TabletWorkLog = (() => {
   const T = k => I18n.text(k);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
@@ -12006,7 +12020,10 @@ const TabletWorkLog = (() => {
   // --- Guidance computer -------------------------------------------------------------------------
   // The tablet holding control sends its copy and takes the merged log back; an observer only
   // reads. Every 30 s and soon after a change; the local copy stays the buffer when the host is away.
-  let hostAt = 0, hostErr = false, syncing = false, syncSoon = false;
+  // unsent: this tablet has entries the host's copy hasn't (e.g. a session left open when the
+  // ignition went off, closed at the next start): sent as soon as this tablet holds control,
+  // not only at the next 30 s round (an observer's read doesn't deliver them).
+  let hostAt = 0, hostErr = false, syncing = false, syncSoon = false, unsent = true;
   async function sync() {
     if (syncing || connState !== 'connected') return;
     syncing = true; syncSoon = false;
@@ -12020,12 +12037,14 @@ const TabletWorkLog = (() => {
       if (!v || v.format !== 'aow-worklog' || !Array.isArray(v.entries)) throw new Error('format');
       const m = C.merge({ entries: state.entries, deleted: state.deleted }, v); // changes made meanwhile stay
       state = { entries: m.entries, deleted: m.deleted, open: state.open && !m.deleted.includes(state.open.id) ? state.open : null };
+      const onHost = new Set(v.entries.map(e => e && e.id));
+      unsent = state.entries.some(e => !onHost.has(e.id));
       save(true); hostAt = Date.now(); hostErr = false;
     } catch (_) { hostErr = true; }
     syncing = false; last = ''; if (isOpen()) render();
   }
   const changed = () => { save(true); syncSoon = true; };
-  setInterval(() => { if (syncSoon || Date.now() - hostAt > 30000) sync(); }, 3000);
+  setInterval(() => { if (syncSoon || (unsent && iHoldControl) || Date.now() - hostAt > 30000) sync(); }, 3000);
 
   // --- Recording -------------------------------------------------------------------------------
   function snapshot() {
@@ -12065,7 +12084,7 @@ const TabletWorkLog = (() => {
       before = -1;
     }
     const moved = state.entries.length !== before || wasOpen !== !!state.open;
-    save(moved); if (moved) syncSoon = true;
+    save(moved); if (moved) { syncSoon = true; if (state.entries.length > Math.max(0, before)) unsent = true; }
     if (isOpen()) render();
   }, 2000);
 
@@ -12264,5 +12283,6 @@ const TabletWorkLog = (() => {
     onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(); });
     f.appendChild(t);
   }, 300);
-  return { open, get entries() { return all(); } };
+  return { open, get entries() { return all(); }, get unsent() { return unsent; } };
 })();
+// worklog-ui:end

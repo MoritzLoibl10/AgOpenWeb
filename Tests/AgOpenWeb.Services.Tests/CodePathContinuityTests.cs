@@ -143,9 +143,11 @@ public class CodePathContinuityTests
         var hub = Path.Combine(RepoRoot(), "Shared", "AgOpenWeb.RemoteServer", "WebSocketHub.cs");
         var lines = File.ReadAllLines(hub);
         var textUses = lines.Select((l, i) => (l, i)).Where(x => x.l.Contains("WebSocketMessageType.Text")).ToList();
-        Assert.That(textUses.Select(x => x.l.Trim()), Is.EqualTo(new[]
+        // The one use, with the line after it: a text message goes whole to the command path
+        // (fork, host-paket D: pieces joined by CommandAssembler, run once at the message's end).
+        Assert.That(textUses.Select(x => x.l.Trim() + " " + lines[x.i + 1].Trim()), Is.EqualTo(new[]
         {
-            "if (res.MessageType == WebSocketMessageType.Text", // fork (host-paket D): pieces joined by CommandAssembler
+            "if (res.MessageType == WebSocketMessageType.Text && cmd.Add(buf.AsSpan(0, res.Count), res.EndOfMessage) is { } msg)",
         }), "WebSocketHub uses WebSocketMessageType.Text somewhere new. Host → client goes out " +
             "as binary frames encoded by WireCodec (add a DTO in Contracts.cs, encode it in " +
             "WireCodec.cs, decode it in transport.js); client → host is the one id|arg text frame.");
