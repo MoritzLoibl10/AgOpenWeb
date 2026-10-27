@@ -1376,6 +1376,11 @@
       :is(button, select, input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=hidden]), summary):not(
         .ln-btn, .bn-btn, .rn-btn, .sec-btn, .osb-btn, #campad button, #simbar *, #statusbar button, #sim-launch) {
       min-height: var(--tui-tap); min-width: var(--tui-tap); }
+    /* Surface sweep (Tools/ui-sweep.mjs): the field builder's track buttons as wide as their text,
+       and the offset pad's grid as tall as its glove-size buttons (they overlapped). */
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #fieldbuilder .fb-act { min-width: max-content; }
+    :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #offsetfix .of-dpad {
+      grid-template-columns: repeat(3, max(56px, var(--tui-tap))); grid-template-rows: repeat(3, var(--tui-tap)); }
     /* Bars sized above; the clock gives way to the wider bottom nav on narrow screens. */
     @media (max-width: 1199px) { :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #clock { display: none; } }
     :root:is([data-tui-scale="large"], [data-tui-scale="glove"]) .ln-panel {
