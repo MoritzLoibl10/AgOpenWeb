@@ -12050,6 +12050,8 @@ const TabletWorkLog = (() => {
     btn(tr('Export CSV'), () => download('arbeitsprotokoll.csv', 'text/csv;charset=utf-8', C.csv(list, HEAD())), true);
     btn(tr('Copy CSV'), () => copy(C.csv(list, HEAD()).replace(/^﻿/, '')));
     btn(tr('Print page per field'), () => printFields(list));
+    btn(tr('Save as file'), () => download('arbeitsprotokoll.json', 'application/json', JSON.stringify({ format: 'aow-worklog', version: 1, entries: all() }, null, 1)));
+    btn(tr('Load from file'), () => fileIn.click());
     box.appendChild(er);
     box.appendChild(el('div', 'tp-note', T(NOTE)));
     shB.appendChild(box);
@@ -12104,6 +12106,19 @@ const TabletWorkLog = (() => {
     catch (_) { msg = tr('Copying is not possible in this browser.'); }
     last = ''; render();
   }
+  fileIn.addEventListener('change', async () => {
+    const f = fileIn.files && fileIn.files[0]; fileIn.value = ''; if (!f) return;
+    try {
+      const v = JSON.parse(await f.text());
+      if (!v || v.format !== 'aow-worklog' || !Array.isArray(v.entries)) throw new Error('format');
+      const have = new Set(all().map(e => e.id));
+      const add = v.entries.filter(e => e && e.id && !have.has(e.id) && typeof e.field === 'string' && typeof e.start === 'number').map(e => ({ ...e, open: false }));
+      state = { entries: state.entries.concat(add), open: state.open }; save(true);
+      msg = tr('{n} entries loaded; entries already here are kept.', { n: add.length });
+    } catch (_) { msg = tr('Not a work log file of this app.'); }
+    last = ''; render();
+  });
+
   // --- Print: one page per field, through the browser's print (save as PDF there) -------------
   const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   function printFields(list) {

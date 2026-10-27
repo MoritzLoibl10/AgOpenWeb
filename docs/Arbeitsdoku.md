@@ -59,3 +59,13 @@ gezählt und genannt). Antippen eines Eintrags zeigt alle Werte und die vier Fre
 - **Grenzen:** In der Android- und iOS-App-Ansicht gibt es weder Download noch Drucken (keine
   Anbindung in `Platforms/`); dort bleibt „CSV kopieren“. Im Browser am PC und im Desktop-Fenster
   funktionieren beide (im Desktop-Fenster nicht eigens geprüft).
+
+## Teil E – Ablage
+- **Wo:** im Browser-Speicher dieses Tablets (`localStorage`, Schlüssel `aow.worklog.v1`). Die
+  Einträge liegen damit **nur auf diesem Tablet**; ein anderes Gerät oder ein anderer Browser sieht
+  sie nicht. Löschen der Browser- bzw. App-Daten löscht sie mit. Das sagt auch die Übersicht.
+- **Sichern:** „Als Datei sichern“ (JSON) und „Aus Datei laden“ (fügt hinzu, vorhandene Einträge
+  bleiben, gleiche Einträge werden nicht doppelt geladen).
+- **Profil-Backup:** nicht möglich ohne Host-Änderung, weil der Host die Backup-Datei baut und den
+  Browser-Speicher nicht kennt (siehe Teil A, Punkt 3).
+- **Dauerhafte Ablage am Lenkrechner:** nur mit Host-Änderung (Teil A, Punkt 2).
