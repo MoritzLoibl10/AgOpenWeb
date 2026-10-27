@@ -150,3 +150,13 @@ test('broken ZIP: empty, cut short, without .shp, without .dbf, counts that diff
   await assert.rejects(EamaShape.load(zip({ 'a.shp': shp([[square(0, 0)]]), 'a.prj': prjMgi })), /dbf:missing/);
   await assert.rejects(EamaShape.load(zip({ 'a.shp': shp([[square(0, 0)]]), 'a.dbf': dbf(2), 'a.prj': prjMgi })), /shp:count/);
 });
+
+test('records without geometry: found with their number and their name as in the file', async () => {
+  const { layers } = await EamaShape.load(zip({ 'a.shp': shp([[square(639000, 524000)], null, [[[0, 0], [1, 1], [0, 0]]]]), 'a.dbf': dbf(3), 'a.prj': prjMgi }));
+  const l = layers[0];
+  assert.deepEqual(EamaShape.withoutGeometry(l), [1, 2]);
+  const c = EamaShape.columns(l.fields);
+  assert.equal(c.fs, 'FS_NR');
+  assert.deepEqual(EamaShape.withoutGeometry(l).map(i => [i + 1, EamaShape.recordName(l.rows[i], c, 'sl', l.name, i)]), [[2, 'FS 2'], [3, 'FS 3']]);
+  assert.equal(EamaShape.recordName({}, {}, 'sl', 'schlaege', 4), 'schlaege 5', 'no columns: layer and number');
+});

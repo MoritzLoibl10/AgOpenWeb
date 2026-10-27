@@ -1652,5 +1652,7 @@
   "● RECORDING…": "● AUFZEICHNUNG…",
   "✎ Edit": "✎ Bearbeiten",
   "✕ Cancel": "✕ Abbrechen",
-  "＋ Add": "＋ Hinzufügen"
+  "＋ Add": "＋ Hinzufügen",
+  "{n} records without geometry are not imported: {list}": "{n} Datensätze ohne Geometrie werden nicht übernommen: {list}",
+  "no. {r}": "Nr. {r}"
 }

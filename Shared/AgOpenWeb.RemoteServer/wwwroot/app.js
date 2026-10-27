@@ -12109,7 +12109,30 @@ const EamaShape = (() => {
     return { layers };
   }
 
-  return { load, readZip, parsePrj, parseShp, parseDbf };
+  // --- Records -------------------------------------------------------------------------------------
+  // Columns: provisional guesses until a real eAMA export confirms the names.
+  function columns(fields) {
+    const find = re => (fields.find(f => re.test(f.name)) || {}).name;
+    return {
+      fs: find(/^(FS_?(NR|NUMMER|KENNUNG)|FELDSTUECK|FS)$/i) || find(/^FS/i),
+      sl: find(/^(SL_?(NR|NUMMER)|SCHLAG_?NR|SCHLAG|SL)$/i),
+      use: find(/SNAR|NUTZ|KULTUR|BEZ/i),
+      area: find(/FL(AECHE)?.*HA|_HA$|^HA$/i),
+    };
+  }
+  const val = (row, c) => (c && row[c] && row[c].raw) || '';
+  const clean = s => s.replace(/[\\/:*?"<>|\t\r\n]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80);
+  // The name a record gets: field and plot number and use, as in the file; else layer + number.
+  function recordName(row, c, kind, layerName, i) {
+    const bits = kind === 'sl'
+      ? [val(row, c.fs) && 'FS ' + val(row, c.fs), val(row, c.sl) && 'S ' + val(row, c.sl)].filter(Boolean).join(' · ') // "/" can't be in a folder name
+      : (val(row, c.fs) && 'FS ' + val(row, c.fs));
+    return clean([bits, val(row, c.use)].filter(Boolean).join(' ')) || clean(layerName + ' ' + (i + 1));
+  }
+  // Indices of the records without geometry: a null shape, or no ring with at least 3 points.
+  const withoutGeometry = l => (l.shapes || []).flatMap((sh, i) => !sh || !sh.parts.length ? [i] : []);
+
+  return { load, readZip, parsePrj, parseShp, parseDbf, columns, val, clean, recordName, withoutGeometry };
 })();
 // eama-shape:end
 
@@ -12143,35 +12166,24 @@ const TabletEama = (() => {
   const APPROX = tr('Accuracy about 1.5 m');
   const RES = { ok: tr('created'), skip: tr('skipped, name exists'), fail: tr('failed') };
   let st = { busy: false, file: '', err: '', layers: null, grid: null };
-  let kind = 'sl', items = [], conflict = 'skip', run = null, help = false;
+  let kind = 'sl', items = [], empty = [], conflict = 'skip', run = null, help = false;
 
-  // Columns: provisional guesses until a real eAMA export confirms the names.
-  function columns(fields) {
-    const find = re => (fields.find(f => re.test(f.name)) || {}).name;
-    return {
-      fs: find(/^(FS_?(NR|NUMMER|KENNUNG)|FELDSTUECK|FS)$/i) || find(/^FS/i),
-      sl: find(/^(SL_?(NR|NUMMER)|SCHLAG_?NR|SCHLAG|SL)$/i),
-      use: find(/SNAR|NUTZ|KULTUR|BEZ/i),
-      area: find(/FL(AECHE)?.*HA|_HA$|^HA$/i),
-    };
-  }
-  const val = (row, c) => (c && row[c] && row[c].raw) || '';
-  const clean = s => s.replace(/[\\/:*?"<>|\t\r\n]/g, '-').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const { columns, val, clean, recordName } = EamaShape;
   const area2 = r => { let s = 0; for (let i = 0, j = r.length - 1; i < r.length; j = i++) s += (r[j][0] + r[i][0]) * (r[j][1] - r[i][1]); return s / 2; };
 
   function buildItems() {
-    items = [];
+    items = []; empty = [];
     for (const l of st.layers || []) {
       if (!l.prj.ok) continue;
       const c = columns(l.fields);
+      // Records without geometry are not imported; the summary names them (record number as in
+      // the file, and the name the record would have had).
+      for (const i of EamaShape.withoutGeometry(l)) empty.push({ layer: l.name, rec: i + 1, name: recordName(l.rows[i] || {}, c, kind, l.name, i) });
       l.shapes.forEach((sh, i) => {
         if (!sh) return;
         const row = l.rows[i];
         sh.parts.forEach((part, j) => {
-          const bits = kind === 'sl'
-            ? [val(row, c.fs) && 'FS ' + val(row, c.fs), val(row, c.sl) && 'S ' + val(row, c.sl)].filter(Boolean).join(' · ') // "/" can't be in a folder name
-            : (val(row, c.fs) && 'FS ' + val(row, c.fs));
-          let name = clean([bits, val(row, c.use)].filter(Boolean).join(' ')) || clean(l.name + ' ' + (i + 1));
+          let name = recordName(row, c, kind, l.name, i);
           if (sh.parts.length > 1) name += ' ' + T(tr('part')) + ' ' + (j + 1);
           // Shapefile rings: outer clockwise, holes counter-clockwise. The field takes them the
           // KML way round (outer counter-clockwise), so only the order of the points is reversed.
@@ -12330,6 +12342,12 @@ const TabletEama = (() => {
         + ' · ' + tr('{n} areas', { n: l.shapes.length }) + ' · ' + T(tr('Columns')) + ': ' + l.fields.map(f => f.name).join(', ') + ' · ' + l.encoding;
       box.appendChild(lb);
       if (l.prj.datum === 'MGI' && st.grid === false) box.appendChild(el('div', 'tp-note warn', T(tr('The BEV grid could not be loaded.')) + ' ' + T(APPROX)));
+    }
+    if (empty.length) {
+      const d = el('div', 'tp-note warn');
+      d.textContent = tr('{n} records without geometry are not imported: {list}', { n: empty.length,
+        list: empty.map(e => tr('no. {r}', { r: e.rec }) + (e.name ? ' (' + e.name + ')' : '')).join(', ') });
+      box.appendChild(d);
     }
     shB.appendChild(box);
 
