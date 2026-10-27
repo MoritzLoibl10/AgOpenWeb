@@ -11,7 +11,7 @@
     <ApplicationVersion>1</ApplicationVersion>
     <ApplicationDisplayVersion>26.7.0</ApplicationDisplayVersion>
     <!-- fork: same name as Brand.ProductName -->
-    <ApplicationTitle>[PRODUKTNAME]</ApplicationTitle>
+    <ApplicationTitle>LM Steering Solutions</ApplicationTitle>
     <OutputType>Exe</OutputType>
     <AndroidPackageFormat>apk</AndroidPackageFormat>
     <AndroidCreatePackagePerAbi>false</AndroidCreatePackagePerAbi>
@@ -38,6 +38,15 @@
          the shared web-command wiring, same as the iOS all-in-one head. -->
     <ProjectReference Include="..\..\Shared\AgOpenWeb.RemoteServer\AgOpenWeb.RemoteServer.csproj" />
     <ProjectReference Include="..\..\Shared\AgOpenWeb.RemoteWiring\AgOpenWeb.RemoteWiring.csproj" />
+  </ItemGroup>
+
+  <!-- The ISOBUS virtual terminal (VT card), only with -p:SharpIsoTermDir=<absolute path to an
+       SharpIsoTerm checkout>; see Shared/AgOpenWeb.VirtualTerminal. -->
+  <PropertyGroup Condition="'$(SharpIsoTermDir)' != ''">
+    <DefineConstants>$(DefineConstants);AGISOSTACK</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(SharpIsoTermDir)' != ''">
+    <ProjectReference Include="..\..\Shared\AgOpenWeb.VirtualTerminal\AgOpenWeb.VirtualTerminal.csproj" />
   </ItemGroup>
 
 </Project>

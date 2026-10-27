@@ -141,8 +141,10 @@ Lenk-, Regel- und Sicherheitslogik unberührt.
 | `Platforms/AgOpenWeb.Android/Brand.cs` | **neu**: `Brand.ProductName` | keine Konflikte möglich |
 | `Platforms/AgOpenWeb.Android/MainActivity.cs` | `Label`, Starttext, Fehlertext, „Beenden?“-Titel aus `Brand.ProductName` | 4 Zeilen |
 | `Platforms/AgOpenWeb.Android/BackendService.cs` | Titel der Benachrichtigung und des Kanals aus `Brand.ProductName` (Kanal-ID unverändert) | 2 Zeilen |
-| `Platforms/AgOpenWeb.Android/AgOpenWeb.Android.csproj` | `ApplicationId` `at.loibl.lenksystem` (vorher `com.agopenweb.android`), `ApplicationTitle` `[PRODUKTNAME]` | bei Konflikt Fork-Werte behalten |
+| `Platforms/AgOpenWeb.Android/AgOpenWeb.Android.csproj` | `ApplicationId` `at.loibl.lenksystem` (vorher `com.agopenweb.android`), `ApplicationTitle` `LM Steering Solutions` | bei Konflikt Fork-Werte behalten |
 | `Platforms/AgOpenWeb.Android/Resources/drawable/icon.xml` | eigenes Symbol (Vektor) | Fork-Datei behalten |
+| `Platforms/AgOpenWeb.Desktop/Brand.cs` | **neu** (Produktname, Oktober 2026, Ausnahme im Auftrag): `Brand.ProductName` = „LM Steering Solutions“ | keine Konflikte möglich |
+| `Platforms/AgOpenWeb.Desktop/Launcher/LauncherEntry.cs`, `WebViewLauncher.cs`, `ConsolePage.cs`, `Program.cs` | Fenstertitel, Start- und Fehlertext, „Beenden?“-Frage, Titel der Konsolenseite, „läuft schon“-Meldung aus `Brand.ProductName`; Assembly, Namespaces, Ordner, Datenordner `Dokumente\AgOpenWeb`, Autostart-Eintrag, Port 5174 unverändert | je 1–2 Zeilen; bei Konflikt upstream nehmen und den Text wieder durch `Brand.ProductName` ersetzen |
 
 Folgen der neuen Paket-ID: Android installiert die App neben der alten; die Daten liegen unter
 `Android/data/at.loibl.lenksystem/…` statt `…/com.agopenweb.android/…` und werden nicht
@@ -162,7 +164,7 @@ Keine neue Host-Ausnahme außer den NTRIP-Nachträgen in §1. Für Rebases auße
 
 | Datei / Stelle | Was | Rebase-Hinweis |
 |---|---|---|
-| `.github/workflows/fork-prerelease.yml` | **neu** (Phase 4a): Testversionen als Pre-Release; Fußtext mit Lizenz und Quellcode-Commit; Warnung, solange der Produktname `[PRODUKTNAME]` ist | Fork-Datei, keine Konflikte möglich; Signaturprüfung und Secrets unverändert |
+| `.github/workflows/fork-prerelease.yml` | **neu** (Phase 4a): Testversionen als Pre-Release; Fußtext mit Lizenz und Quellcode-Commit; die Warnung zum Platzhalter-Produktnamen ist mit dem Namen „LM Steering Solutions“ entfallen | Fork-Datei, keine Konflikte möglich; Signaturprüfung und Secrets unverändert |
 | `app.js` NTRIP-Editor (upstream-Teil) | `#nte-ver` lesen und schreiben, Version an `ntrip.save`/`ntrip.test` anhängen (siehe §1) | nicht mit `fork:` kommentiert: bei Konflikten in `openNtripEditor`/Speichern/Test nach `nte-ver` suchen |
 | `index.html` NTRIP-Editor | `<select id="nte-ver">` | eine Zeile |
 | `index.html` upstream-`<style>` | Regel `.fb-twmiss` (letzte Zeilen, nutzt `var(--tui-warn)` aus dem Block) | eine Regel |
@@ -289,3 +291,30 @@ und Steuerlogik ist nicht berührt.
 ### Beim Rebase auf upstream
 `AppInfoDto` und `transport.js` haben ein angehängtes Feld. Hängt upstream dort selbst etwas an,
 muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
+
+## 11. Bedienung-1: Fenster-Vollbild im Desktop-Launcher (feature/bedienung-1, Oktober 2026)
+- **Datei:** `Platforms/AgOpenWeb.Desktop/Launcher/WebViewLauncher.cs`, `OnWebMessage`: die Nachricht
+  `fullscreen|1` / `fullscreen|0` ruft `_window.SetFullScreen(true/false)`. Sonst keine Änderung.
+- **Client:** Der Knopf ⛶ in der Statuszeile schickt im Launcher (Photino, `window.external.sendMessage`)
+  diese Nachricht statt der Fullscreen-API, die dort nur die Web-Ansicht füllt. Im Browser unverändert.
+- **Beim Rebase auf upstream:** eine Abfrage am Anfang von `OnWebMessage`.
+
+## 12. CI: iOS-Build nur noch in der Testversion (Oktober 2026)
+- **Dateien:** `.github/workflows/build-and-release.yml` (Job `build-ios` entfernt, Kommentar am Ende),
+  `.github/workflows/fork-prerelease.yml` (derselbe Job als `ios`, `timeout-minutes: 45`).
+- **Grund:** In der PR-CI wartete `build-ios` jedes Mal 15 Minuten auf einen `macos-26`-Runner und
+  wurde ohne einen einzigen Schritt abgebrochen (#19, #20). Damit war jeder PR rot.
+- **Verhalten:** PRs prüfen iOS nicht mehr. Die Testversion kompiliert iOS weiter (nur Prüfung, kein
+  Artefakt); die Vorabversion wartet nicht auf diesen Job, ein Abbruch dort hält Windows und APK
+  nicht auf.
+- **Beim Merge von upstream:** Ändert upstream `build-ios` in `build-and-release.yml`, gibt es dort einen
+  Konflikt; die Änderung dann in den Job `ios` von `fork-prerelease.yml` übernehmen.
+
+## 13. CI: Web-Tests mit Browser (feature/bedienung-2, Oktober 2026)
+- **Datei:** `.github/workflows/build-and-release.yml`, Job `test`: Schritt „Run web client tests“.
+  Er installiert Playwright 1.63.0 außerhalb des Repos (`$RUNNER_TEMP/pw`), dazu nur Chromiums
+  Headless-Shell ohne Systempakete, zwischengespeichert in `~/.cache/ms-playwright`, und führt
+  `node --test Tests/web/*.test.mjs` mit `AOW_REQUIRE_BROWSER=1` aus: fehlt der Browser, schlägt
+  `long-press.test.mjs` fehl statt übersprungen zu werden.
+- **Hinweis:** Auf diesem Branch gab es den Schritt noch nicht (er liegt sonst nur in
+  `feature/eama-import`, dort ohne Browser). Beim Zusammenführen bleibt diese Fassung.

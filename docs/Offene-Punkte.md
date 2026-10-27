@@ -53,6 +53,7 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 | 32 | IMU-Kurs aus PGN 253: eine 0 der AiO-Firmware gilt als gültiger Kurs (upstream #357) | hoch | ja | Firmware geprüft: v4 (auch v4.5) sendet 9999, v26 sendet 0; Anzeige im Einrichtungsmodus; Issue-Text an upstream |
 | 33 | Eine Antenne: rückwärts zuerst gefahren → Richtung verkehrt gelernt; Lenkung rechnet falsch herum, Simulator pendelt | hoch | ja | Fork: Hinweis im Simulator, Richtungskarte vor dem ersten Lenken, Hinweis „Echtes GPS aktiv“, Hilfe; Issue-Text an upstream (dringend) (fix/simulator-richtung) |
 | 34 | Gezogene Geräte: Drehpunkt-Abstand wirkt umgekehrt zur Beschriftung; TBT: „Arbeitsmitte“ wirkt nicht | mittel | ja | Fork: Anzeige an das Host-Verhalten angepasst (`docs/Host-Aenderungen.md` Punkt 7); Host offen |
+| 35 | Vorführmodus: Host hat keine eindeutigen Aus-Befehle für Lenkung und Teilbreiten | hoch | ja | Fork: Vorführung sendet beim Beenden keine Umschaltbefehle mehr, nur Warnung (feature/bedienung-1); Host offen |
 
 ---
 
@@ -312,6 +313,8 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
   Photino (Apache 2.0) und SkiaSharp (MIT) fehlen; das ist auch upstream so.
 - **Vorschlag:** `COPYING` und `SOURCE.txt` ins Windows-ZIP; eine Seite „Drittkomponenten“ in
   der Info-Seite.
+- **Stand (Auslieferung):** Seite „Drittkomponenten“ unter Einrichtung → Info; offene Punkte in
+  `docs/Drittkomponenten.md`.
 - **Host-Änderung nötig:** nein
 
 ### 21. „Gespeichert“ beweist nicht, dass der Host auf die Platte geschrieben hat
@@ -408,12 +411,12 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 - **Vorschlag:** Upstream-Schlüssel wiederverwenden; „Current: “ als upstream-PR.
 - **Host-Änderung nötig:** nein
 
-### 29. Name auf Desktop/iOS und in den Artefakten weiter „AgOpenWeb“
+### 29. Name auf iOS und in den Artefakten weiter „AgOpenWeb“
 - **Priorität:** niedrig
 - **Dateien:** `Platforms/AgOpenWeb.Desktop/Launcher/LauncherEntry.cs` 38, `Platforms/AgOpenWeb.iOS/Info.plist`, Workflow-Artefakte `agopenweb-*.zip/.apk`.
-- **Beschreibung:** Nur Android ist umbenannt (genehmigte Ausnahme). Die Weboberfläche zeigt
-  überall den Markennamen. Der Produktname ist noch der Platzhalter `[PRODUKTNAME]`; der
-  Workflow warnt jetzt.
+- **Beschreibung:** Produktname „LM Steering Solutions“ (Oktober 2026): Weboberfläche, Android, Desktop-Fenster
+  und Windows-Installer zeigen ihn. iOS und die Dateinamen der Artefakte heißen weiter AgOpenWeb.
+- **Stand:** Desktop erledigt (Ausnahme im Auftrag).
 - **Vorschlag:** Nach der Namenswahl entscheiden, ob Desktop und Artefakte mitziehen (neue
   Ausnahme).
 - **Host-Änderung nötig:** ja (Desktop-Kopf)
@@ -489,3 +492,9 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 - **Befund:** `ToolPositionService.cs:223` legt die Arbeitslinie bei positivem Drehpunkt-Abstand **vor** die Geräteachse; der Dialog nannte + „hinter“. Der AgOpenGPS-Import dreht nur die Anhängelänge (`ProfileJsonServiceV1.cs:256`). Bei TBT nimmt der Host die Zugpunkt-Länge des Fahrzeugs (`ToolPositionService.cs:113–115`), „Arbeitsmitte“ wirkt nicht.
 - **Im Fork (nur Anzeige):** Knöpfe, Skizze und Satz im Drehpunkt-Tab folgen dem Host; „Arbeitsmitte“ bei TBT ausgeblendet. Nach einem Fix upstream zurücknehmen.
 - **Host-Änderung nötig:** ja (upstream)
+### 35. Vorführmodus: keine eindeutigen Aus-Befehle für Lenkung und Teilbreiten
+- **Priorität:** hoch (Sicherheit; nur vorgemerkt, Host nicht geändert)
+- **Befund:** Der Host kennt für Lenkung und Teilbreiten nur Umschaltbefehle (`autosteer.toggle`, `section.master`, `section.manual`, `RemoteServerWiring.cs`). Die Vorführung schaltete beim Beenden damit nach dem letzten Tick ab; mit veraltetem Stand hätte ein Umschaltbefehl einschalten können.
+- **Im Fork (nur `wwwroot`):** Beim Beenden geht kein Umschaltbefehl mehr raus. Wird ein Modul erkannt, endet die Vorführung mit der Meldung „Vorführung beendet – Kit erkannt. Lenkung und Teilbreiten prüfen.“ Test: `Tests/web/demo.test.mjs`.
+- **Vorschlag Host:** eindeutige Befehle `autosteer.off` (Lenkung aus, wenn an; sonst nichts) und `section.allOff` (Automatik und Handbetrieb aus); die Vorführung würde dann nur diese senden.
+- **Host-Änderung nötig:** ja

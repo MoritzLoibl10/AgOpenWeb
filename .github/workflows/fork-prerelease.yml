@@ -57,12 +57,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Product name check
-        run: |
-          if grep -q '\[PRODUKTNAME\]' Platforms/AgOpenWeb.Android/Brand.cs; then
-            echo "::warning::The product name is still the placeholder [PRODUKTNAME]."
-          fi
-
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -170,6 +164,37 @@ jobs:
           name: agopenweb-android
           path: dist/agopenweb-android.apk
           retention-days: 14
+
+  # Fork: the iOS compile check moved here from build-and-release.yml (no artifact; the
+  # pre-release does not wait for it). Kept as upstream's build-ios job.
+  ios:
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 26.4.1
+        # The .NET for iOS workload is pinned to 26.4.x via dotnet-ios-rollback.json to match
+        # Xcode_26.4.1.app on macos-26 (the runner's 26.5 beta has no downloaded iOS platform).
+        run: sudo xcode-select -s /Applications/Xcode_26.4.1.app
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Install iOS workload (pinned to 26.4.x)
+        run: |
+          for i in 1 2 3; do
+            dotnet workload install ios \
+              --from-rollback-file .github/workflows/dotnet-ios-rollback.json \
+              && break
+            echo "Attempt $i failed, retrying in 10s..."
+            sleep 10
+          done
+
+      - name: Compile iOS
+        run: dotnet build Platforms/AgOpenWeb.iOS/AgOpenWeb.iOS.csproj -c Debug -f net10.0-ios -r iossimulator-arm64
 
   prerelease:
     needs: [windows, android]

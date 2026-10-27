@@ -144,7 +144,7 @@ Uhrzeit 24 h (13:15), Fläche in ha. IP-Adressen und Versionen behalten ihre Pun
 | Terminal layout / Classic layout | Terminal-Ansicht / Klassische Ansicht | |
 | On / Off | Ein / Aus | auf Knöpfen in Großbuchstaben |
 | Language | Sprache | Kachel zeigt „Sprache · Language“ |
-| Look (branding) | Darstellung | Einrichtung → Info: [PRODUKTNAME] / AgOpenWeb |
+| Look (branding) | Darstellung | Einrichtung → Info: LM Steering Solutions / AgOpenWeb |
 | Short guide | Kurzanleitung | Menü → Hilfe |
 | Diagnosis for support | Diagnose für Support | Datei für den Support (Fehlerbericht mit Zusammenfassung) |
 | Licence text | Lizenztext | |

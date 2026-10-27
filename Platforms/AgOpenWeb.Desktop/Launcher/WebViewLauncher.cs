@@ -34,7 +34,7 @@ internal sealed class WebViewLauncher
             .RegisterWebMessageReceivedHandler(OnWebMessage)
             .RegisterWindowClosingHandler((_, _) => LauncherEntry.StopThenClose(_window, _backend, ref _closing))
             .RegisterWindowCreatedHandler((_, _) => _ = StartAsync())
-            .LoadRawString(LauncherEntry.SplashHtml("Starting AgOpenWeb…"));
+            .LoadRawString(LauncherEntry.SplashHtml($"Starting {Brand.ProductName}…"));
     }
 
     private async Task StartAsync()
@@ -50,7 +50,7 @@ internal sealed class WebViewLauncher
         {
             try { await backend.StopAsync(); } catch { /* best effort */ }
             var msg = LauncherEntry.LogStartFailure(ex);
-            _window.Invoke(() => _window.LoadRawString(LauncherEntry.SplashHtml($"AgOpenWeb failed to start.\n\n{msg}")));
+            _window.Invoke(() => _window.LoadRawString(LauncherEntry.SplashHtml($"{Brand.ProductName} failed to start.\n\n{msg}")));
             return;
         }
 
@@ -69,8 +69,14 @@ internal sealed class WebViewLauncher
 
     // The page talks to its host through window.external.sendMessage (Photino's channel):
     //   open|<url>   open a link in the system browser (window.open can't leave the web view)
+    //   fullscreen|1 / fullscreen|0   window fullscreen on / off (fork: the client's ⛶ button)
     private void OnWebMessage(object? sender, string message)
     {
+        if (message == "fullscreen|1" || message == "fullscreen|0")
+        {
+            _window.SetFullScreen(message == "fullscreen|1");
+            return;
+        }
         if (message.StartsWith("open|", StringComparison.Ordinal))
         {
             var url = message[5..];
