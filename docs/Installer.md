@@ -15,6 +15,22 @@
   Abnahmeprotokolle und Einstellungen liegen in `Dokumente\AgOpenWeb` (`AppDataRoot`), der Speicher
   der Web-Ansicht in `%LOCALAPPDATA%\Photino`; der Installer fasst beides nicht an.
 - **Port:** bleibt 5174; er ist in der App fest, der Installer fragt und setzt keinen.
+- **Windows-Firewall** (Häkchen „Windows-Firewall nur für dieses Programm freigeben“, vorgewählt):
+  zwei eingehende Regeln, nur für `AgOpenWeb.Desktop.exe` im Programmordner, nur aus dem lokalen
+  Subnetz, alle Profile:
+  - `<Name> Module (UDP)`: UDP 9999 (Module, `UdpCommunicationService.ModulePort`), 2211 und 2222
+    (GPS-Empfänger, `Gps1Port`/`Gps2Port`);
+  - `<Name> Tablets (TCP)`: TCP 5174 (Web-Oberfläche für Tablets, `RemoteServerHost.Port`).
+  Ausgehend braucht es nichts (RTCM an UDP 2233 geht hinaus). Dafür fragt Windows einmal nach
+  Administratorrechten (UAC), auch bei der Installation nur für den Benutzer; der Text am Häkchen
+  sagt das. Ohne Häkchen oder bei „Nein“ fragt Windows beim ersten Start selbst. Ein Update löscht
+  und legt die Regeln neu an; die Deinstallation entfernt beide (wieder mit UAC-Abfrage).
+  Prüfen: `netsh advfirewall firewall show rule name="AgOpenWeb Module (UDP)"` (bzw. `… Tablets (TCP)`).
+- **WebView2-Laufzeit:** Der Installer prüft sie in der Registry (`pv` unter
+  `EdgeUpdate\Clients\{F3017226-…}`, Maschine oder Benutzer). Fehlt sie, startet er Microsofts
+  Bootstrapper (`MicrosoftEdgeWebview2Setup.exe`, lädt die Laufzeit aus dem Netz; braucht also
+  Internet). Der Workflow lädt den Bootstrapper beim Bauen und prüft seine Microsoft-Signatur;
+  ohne ihn gebaut, meldet das Setup nur, dass die Laufzeit fehlt.
 - **Name:** `AgOpenWeb`, solange kein Produktname feststeht; beim Bauen mit `/DAppName=…` änderbar.
   Die `AppId` nie ändern, sonst erkennt Windows Updates nicht mehr.
 
@@ -34,11 +50,16 @@
 - **Code-Signierung:** Installer und Programm sind nicht signiert; Windows SmartScreen warnt
   („Der Computer wurde durch Windows geschützt“ → „Weitere Informationen“ → „Trotzdem ausführen“).
   Dafür braucht es ein Code-Signing-Zertifikat und ein Secret im Workflow (Secrets nicht angefasst).
-- **Nicht gebaut, nur genannt (Host/Launcher):**
-  - Windows-Firewall: Für Tablets im Netz fragt Windows beim ersten Start nach einer Freigabe. Eine
-    Regel für Port 5174 könnte der Installer nur mit Administratorrechten anlegen.
-  - WebView2-Laufzeit: Der Installer prüft sie nicht und installiert sie nicht (unter Windows 10/11
-    meist vorhanden); fehlt sie, bleibt das Fenster leer. Ein Bootstrapper ließe sich ergänzen.
-  - Ein Hinweis auf eine neue Version im Launcher-Fenster selbst (ohne die Web-Oberfläche).
-- **Erst in der CI geprüft:** Der Installer lässt sich nur unter Windows bauen; die erste Testversion
-  aus diesem Branch ist sein erster Lauf.
+- **Nicht gebaut, nur genannt (Host/Launcher):** ein Hinweis auf eine neue Version im
+  Launcher-Fenster selbst (ohne die Web-Oberfläche).
+- **WebView2 ohne Internet:** Der Bootstrapper braucht Internet. Für Rechner ohne Netz bräuchte
+  das Setup Microsofts Offline-Paket (gut 150 MB); nicht eingebaut.
+- **Erst in der CI geprüft:** Der Installer lässt sich nur unter Windows bauen; Firewall-Regeln,
+  UAC-Abfrage und WebView2-Installation sind nur gebaut, nicht auf einem Windows-Rechner
+  ausprobiert (Testtag, `docs/Testtag.md`).
+
+## Bediengröße bei neuen Installationen
+Ein Gerät, auf dem die App noch nie lief (keine eigenen Einträge im Browser-Speicher), startet mit
+„Handschuh“ und merkt sich das. Geräte, die die App schon benutzt haben, behalten ihre Größe
+(bisher immer „Normal“, wenn nichts gewählt war); eine gewählte Größe gilt immer. Automatisierte
+Browser (CI-Layoutprüfung) bleiben bei „Normal“. Test: `Tests/web/scale.test.mjs`.

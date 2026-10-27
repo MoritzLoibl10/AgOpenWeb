@@ -402,4 +402,9 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
   `.github/workflows/fork-stable-release.yml` (neu: macht eine getestete Vorabversion zur
   vollständigen Release), `deploy/windows/installer.iss` (neu). Genehmigt im Auftrag; Host und
   Launcher unverändert. Einzelheiten: `docs/Installer.md`.
+- **Firewall und WebView2** (Nachtrag): `installer.iss` legt bei der Installation zwei
+  Firewall-Regeln nur für das Programm an (UDP 9999, 2211, 2222; TCP 5174; per `netsh`, mit
+  UAC-Abfrage) und entfernt sie bei der Deinstallation; fehlt die WebView2-Laufzeit, startet es
+  Microsofts Bootstrapper, den der Job `installer` herunterlädt und auf die Microsoft-Signatur
+  prüft. Host und Launcher unverändert.
 - **Secrets:** keine neuen, keine geänderten; nur `GITHUB_TOKEN`.

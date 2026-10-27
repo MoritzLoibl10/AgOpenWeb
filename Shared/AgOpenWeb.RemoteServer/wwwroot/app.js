@@ -7456,12 +7456,27 @@ skFrame();
 // functions wrapped below keep their behaviour; the wrappers only recolour/restyle the map
 // in the sun theme and shift the canvas light bar under a taller status bar.
 let tuiBarDy = null; // canvas light bar offset, set by the Phase 2 layout (null = Phase 1 offset)
+// scale-default:begin
+// First start on a device: the glove size, for gloved hands in the cab. A device that used the
+// app before (it has its own keys in the browser storage) keeps the size it had, normal; a stored
+// choice always wins. Automated browsers (the CI layout checks) keep normal and store nothing.
+function tuiInitialScale(stored, keys, automated) {
+  if (stored !== null && stored !== undefined) return { scale: stored, store: false };
+  if (automated) return { scale: 'normal', store: false };
+  const used = keys.some(k => typeof k === 'string' && (k.startsWith('aow.') || k.startsWith('agopenweb.')));
+  return { scale: used ? 'normal' : 'glove', store: true };
+}
+// scale-default:end
 const TabletUi = (() => {
   const SCALES = ['normal', 'large', 'glove'];
   const DY = { normal: 0, large: 10, glove: 18 }; // = --tui-dy in index.html
   const lsGet = (k, d) => { try { const v = window.localStorage.getItem(k); return v === null ? d : v; } catch (_) { return d; } };
   const lsSet = (k, v) => { try { window.localStorage.setItem(k, v); } catch (_) { /* private / blocked */ } };
-  let scale = SCALES.includes(lsGet('aow.ui.scale', 'normal')) ? lsGet('aow.ui.scale', 'normal') : 'normal';
+  const first = tuiInitialScale(lsGet('aow.ui.scale', null),
+    (() => { try { return Array.from({ length: window.localStorage.length }, (_, i) => window.localStorage.key(i)); } catch (_) { return []; } })(),
+    !!navigator.webdriver);
+  if (first.store) lsSet('aow.ui.scale', first.scale);
+  let scale = SCALES.includes(first.scale) ? first.scale : 'normal';
   let sun = lsGet('aow.ui.sun', '0') === '1';
   const root = document.documentElement;
 
