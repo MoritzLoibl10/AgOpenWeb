@@ -23,7 +23,7 @@ internal static class LauncherEntry
     {
         bool console = Array.IndexOf(args, "--console") >= 0;
         var window = new PhotinoWindow()
-            .SetTitle("AgOpenWeb")
+            .SetTitle(Brand.ProductName)
             .SetUseOsDefaultLocation(false)
             .SetUseOsDefaultSize(false)
             .SetLogVerbosity(0);
@@ -71,7 +71,7 @@ internal static class LauncherEntry
     {
         if (backend is not { IsRunning: true } || closing) return false; // let it close
         // Same wording as the Android head's Back prompt
-        if (window.ShowMessage("Exit AgOpenWeb?", "Guidance stops, and other devices lose the web view.",
+        if (window.ShowMessage($"Exit {Brand.ProductName}?", "Guidance stops, and other devices lose the web view.",
                 PhotinoDialogButtons.YesNo, PhotinoDialogIcon.Question) != PhotinoDialogResult.Yes)
             return true; // stay open
         closing = true;

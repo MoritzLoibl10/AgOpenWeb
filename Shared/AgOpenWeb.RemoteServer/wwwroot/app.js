@@ -10196,7 +10196,7 @@ const TabletHostText = (() => {
 // Look only: switched per device under Setup → Info (aow.ui.brand = on | off, default on);
 // off = the AgOpenWeb look. Warning, stop and steer-direction colours never change.
 const BRAND = {
-  name: '[PRODUKTNAME]',
+  name: 'LM Steering Solutions',
   claim: tr('GPS steering aid for tractor and tool'),
   // Colour world B "Pflaume": accent per theme, [colour, text on it, r,g,b]
   night: ['#c995e0', '#1d0b26', '201,149,224'],
@@ -11880,6 +11880,7 @@ const TabletLegal = (() => {
   for (const n of [scrim, box]) n.addEventListener('pointerdown', e => e.stopPropagation());
   function show() {
     box.innerHTML = '';
+    box.appendChild(el('div', 'lg-n', BRAND.name)); // product name, never translated (box is translate=no)
     box.appendChild(el('div', 'lg-t', T(tr('Please read before use'))));
     const ol = el('ol', 'lg-l'); for (const t of TEXT) ol.appendChild(el('li', '', T(t))); box.appendChild(ol);
     const ok = el('button', 'tp-btn pri big', T(tr('Read and understood')));

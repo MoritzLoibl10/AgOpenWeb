@@ -34,7 +34,7 @@ internal sealed class WebViewLauncher
             .RegisterWebMessageReceivedHandler(OnWebMessage)
             .RegisterWindowClosingHandler((_, _) => LauncherEntry.StopThenClose(_window, _backend, ref _closing))
             .RegisterWindowCreatedHandler((_, _) => _ = StartAsync())
-            .LoadRawString(LauncherEntry.SplashHtml("Starting AgOpenWeb…"));
+            .LoadRawString(LauncherEntry.SplashHtml($"Starting {Brand.ProductName}…"));
     }
 
     private async Task StartAsync()
@@ -50,7 +50,7 @@ internal sealed class WebViewLauncher
         {
             try { await backend.StopAsync(); } catch { /* best effort */ }
             var msg = LauncherEntry.LogStartFailure(ex);
-            _window.Invoke(() => _window.LoadRawString(LauncherEntry.SplashHtml($"AgOpenWeb failed to start.\n\n{msg}")));
+            _window.Invoke(() => _window.LoadRawString(LauncherEntry.SplashHtml($"{Brand.ProductName} failed to start.\n\n{msg}")));
             return;
         }
 
