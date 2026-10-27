@@ -10396,7 +10396,7 @@ const TabletBrand = (() => {
     { id: 'demo', t: tr('Demo mode'), steps: [
       tr('Demo only without the kit connected.'),
       tr('Menu → "Demo mode" starts the simulator; a striped "DEMO" band shows it runs.'),
-      tr('If a module is detected, steering and sections are switched off and the demo ends.'),
+      tr('If a module is detected, the demo ends: then check steering and sections yourself.'),
       tr('"End demo" on the band or in the menu stops it.')] },
     { id: 'usb', t: tr('Back up profiles by USB copy'), warn: tr('Not checked on a real tablet yet.'), steps: [
       tr('Easier: Setup → Menu → "Back up and restore" makes one file and restores it from the Import folder.'),
@@ -11306,8 +11306,12 @@ const TabletReady = (() => {
 // For showing the app: the existing simulator as the GPS source, with a striped "DEMO" band that
 // can't be missed. It only starts while no module is heard (GPS, steer, machine): with a module
 // on the network a simulated drive could switch real outputs (the host sends steer and section
-// PGNs in the simulator too). If a module turns up while it runs, steering and sections are
-// switched off and the demo ends. Stops with "End demo"; the flag lives in this tab only.
+// PGNs in the simulator too). If a module turns up while it runs, the demo ends with a warning
+// to check steering and sections. Stops with "End demo"; the flag lives in this tab only.
+// Ending never sends a command that switches steering or sections: the host only has toggles
+// for them (autosteer.toggle, section.master, section.manual), and a toggle sent from a stale
+// tick could switch them on. Explicit off commands would need a host change (docs/).
+// demo:begin
 const TabletDemo = (() => {
   const T = k => I18n.text(k);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
@@ -11324,12 +11328,6 @@ const TabletDemo = (() => {
   const save = () => { try { if (active) sessionStorage.setItem(KEY, simBefore ? 'sim' : '1'); else sessionStorage.removeItem(KEY); } catch (_) { /* ignore */ } };
   // Real GPS = data that isn't the simulator's (as TabletSimGuard); steer and machine modules by the host's flags.
   const modules = () => { const s = statusBar || {}; return !!((s.gpsOk && s.gpsSentence && s.gpsSentence !== 'SIM') || s.autoSteerOk || s.machineOk); };
-  function allOff() {
-    const op = tick && tick.op;
-    if (op && op.autoSteer) transport.send('autosteer.toggle');
-    if (op && op.sectionAuto) transport.send('section.master');
-    if (op && op.sectionManual) transport.send('section.manual');
-  }
   function start() {
     if (connState !== 'connected' || !statusBar) { showToast(T(tr('No connection to the guidance computer.'))); return; }
     if (!iHoldControl) { showToast(T(tr('Only the device that has control can start the demo.'))); return; }
@@ -11341,15 +11339,14 @@ const TabletDemo = (() => {
   }
   function end(why) {
     if (!active) return;
-    allOff();
     if (statusBar && statusBar.simEnabled && !simBefore) transport.send('sim.toggleEnable');
     active = false; save();
-    if (why) showToast(T(why));
+    if (why) showToast(T(why), 15000);
     render();
   }
   function render() {
-    // A module heard while the demo runs: switch off and end at once.
-    if (active && connState === 'connected' && modules()) end(tr('Demo ended: a module was detected. Steering and sections were switched off.'));
+    // A module heard while the demo runs: end at once and tell the operator to check.
+    if (active && connState === 'connected' && modules()) end(tr('Demo ended – kit detected. Check steering and sections.'));
     if (band.hidden === active) band.hidden = !active;
     document.documentElement.toggleAttribute('data-tui-demo', active);
     if (!active) return;
@@ -11374,6 +11371,7 @@ const TabletDemo = (() => {
   }, 300);
   return { start, end, get active() { return active; } };
 })();
+// demo:end
 
 // ===== Long press = explanation (feature/bedienung-2) =========================================
 // Holding one of the main buttons or tiles for LONG_MS shows a short explanation instead of
@@ -11381,7 +11379,7 @@ const TabletDemo = (() => {
 // and given to the button when the finger lifts, so a long press never switches anything.
 // Texts describe what the button does today (from the help and the buttons' own titles).
 // Not here, on purpose: buttons that switch steering, sections, U-turn, the headland (hydraulic
-// lift), the track or the demo (it switches outputs off). They act at once on touch, as before;
+// lift), the track or the demo (it switches the simulator). They act at once on touch, as before;
 // their explanation is in the help ("Buttons that act at once").
 // explain:begin
 const TabletExplain = (() => {
