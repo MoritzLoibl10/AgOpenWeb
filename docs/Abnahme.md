@@ -23,7 +23,8 @@ nur mit eingetragenen Grenzwerten und zeigt „Innerhalb/Außerhalb deiner Grenz
 setzt der Monteur selbst.
 
 ## Export und Ablage
-- **Drucken / PDF:** eine Seite mit Kit-Daten, Schritten, Unterschriftsfeldern (Browser-Druck, dort
+- **Drucken / PDF:** eine Seite mit Produktname „LM Steering Solutions“ und Version, Kit-Daten,
+  Schritten, Unterschriftsfeldern und am Fuß Herkunft (AgOpenWeb, AgOpenGPS) und Lizenz (Apache 2.0) (Browser-Druck, dort
   als PDF speichern; die Android-App-Ansicht druckt nicht, siehe `docs/Arbeitsdoku.md`).
 - **CSV:** `;`, Dezimalkomma, UTF-8 mit BOM.
 - **Ablage:** wie das Arbeitsprotokoll, im selben Speicher (`localStorage` und `WorkLog/worklog.json`

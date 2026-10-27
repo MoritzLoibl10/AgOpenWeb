@@ -12641,13 +12641,18 @@ const TabletAcceptance = (() => {
     const k = rec.kit || {}, H = HEAD();
     const kv = H.kit.map((h, i) => [h, [k.customer, k.tractor, k.vehicleProfile, A.dDate(rec.start), k.antennaHeight, k.antennaPivot, k.antennaOffset, k.wheelbase,
       k.dual ? T(tr('dual')) : T(tr('single')), k.dualHeadingOffset][i]]);
+    // Product name and version under the heading; origin and licence (Apache 2.0) at the foot.
+    const ver = (typeof appInfo !== 'undefined' && appInfo && appInfo.version) || '';
     box.innerHTML = '<section class="wl-page"><h1>' + esc(T(tr('Acceptance record'))) + '</h1>'
+      + '<p class="wl-n">' + esc(BRAND.name + (ver ? ' ' + ver : '')) + '</p>'
       + '<table>' + kv.map(([h, v]) => '<tr><th>' + esc(h) + '</th><td>' + esc(v == null ? '—' : v) + '</td></tr>').join('') + '</table><p></p>'
       + '<table><tr>' + H.steps.map(h => '<th>' + esc(h) + '</th>').join('') + '</tr>'
       + A.STEPS.filter(s => s.kind !== 'kit').map(s => { const d = (rec.steps || {})[s.k] || {};
         return '<tr>' + [T(s.t), d.res ? T(A.RES[d.res]) : '—', A.values(s, d), A.limits(d), d.note].map(v => '<td>' + esc(v) + '</td>').join('') + '</tr>'; }).join('')
       + '</table><p class="wl-n">' + esc(T(tr('Cross-track error and roll as the guidance computer reports them. Limits entered by the fitter. Signatures:'))) + '</p>'
-      + '<p>' + esc(T(tr('Fitter'))) + ': ______________________ &nbsp; ' + esc(T(tr('Customer'))) + ': ______________________</p></section>';
+      + '<p>' + esc(T(tr('Fitter'))) + ': ______________________ &nbsp; ' + esc(T(tr('Customer'))) + ': ______________________</p>'
+      + '<p class="wl-n">' + esc(T(tr('Changed version (fork) of AgOpenWeb, based on AgOpenWeb; changed since October 2026. AgOpenWeb builds on AgOpenGPS (Brian Tee and contributors).')))
+      + ' ' + esc(T(tr('Licensed under the Apache License 2.0. You may use, change and pass it on; the source code is open.'))) + '</p></section>';
     document.documentElement.setAttribute('data-print', 'worklog');
     const done = () => { document.documentElement.removeAttribute('data-print'); window.removeEventListener('afterprint', done); };
     window.addEventListener('afterprint', done);

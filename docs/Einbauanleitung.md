@@ -1,4 +1,4 @@
-# [PRODUKTNAME] – Einbauanleitung für den Monteur
+# LM Steering Solutions – Einbauanleitung für den Monteur
 
 Für ein Lenkkit mit AiO v4.5 (Teensy 4.1, BNO085), Keya-Motor über CAN, Firmware AiO-v4, und
 diese App. Beschrieben ist nur, was die App einstellt und anzeigt. **Board und Motor sind nicht
@@ -66,4 +66,5 @@ Kit-Daten, Zeit bis RTK Fix, gerade Strecke, Hangfahrt, Wende, Lenkung aus per K
 gibt keine vor. Drucken (PDF) und CSV; das Protokoll liegt auf dem Tablet und am Lenkrechner.
 
 ---
-Lizenz: Apache 2.0 wie die App. Ohne Gewähr; Prüfung am Fahrzeug durch den Monteur.
+LM Steering Solutions basiert auf AgOpenWeb und AgOpenGPS. Lizenz: Apache 2.0 wie die App. Ohne Gewähr;
+Prüfung am Fahrzeug durch den Monteur.
