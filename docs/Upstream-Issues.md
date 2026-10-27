@@ -7,95 +7,65 @@ Issues gibt, ließ sich aus der Fork-Sitzung nicht prüfen; vor dem Anlegen kurz
 
 | Nr. | Thema | Stand |
 |---|---|---|
-| 1 | IMU-Kurs aus PGN 253 (#357) | anlegen |
-| 2 | Mehrgeräte-Sicherheit (Beobachter-Rechte, gleichzeitiges Speichern, Klartext-Passwörter) | anlegen |
-| 3 | Arbeitsbreite: Ersatzwert 6 m im Web-Client | anlegen (Teil „Profilvorschau“ gestrichen, #350 hat ihn behoben) |
-| 4 | **Dringend:** Eine Antenne, zuerst rückwärts (Ausfahren aus der Halle) → Richtung verkehrt gelernt, Motor lenkt falsch herum | anlegen, zuerst (geprüft gegen d075aa2) |
+| 1 | IMU-Kurs aus PGN 253 (#357) | Entwurf fertig (27.10.2026), einreichen |
+| 2 | Mehrgeräte-Sicherheit (Beobachter-Rechte, gleichzeitiges Speichern, Klartext-Passwörter) | upstream erledigt (#397: #404, #402) |
+| 3 | Arbeitsbreite: Ersatzwert 6 m im Web-Client | upstream erledigt (#398: #401) |
+| 4 | **Dringend:** Eine Antenne, zuerst rückwärts (Ausfahren aus der Halle) → Richtung verkehrt gelernt, Motor lenkt falsch herum | Entwurf fertig (27.10.2026), einreichen, zuerst |
 
 ## 1. IMU heading from PGN 253 (#357): AiO v26 sends 0 for "no IMU", which now goes into the heading fusion as a real heading
 
-Stand: anlegen. Bezug: upstream #357; Fork: `docs/Offene-Punkte.md` Punkt 32.
+Stand: **Entwurf zum Einreichen** (Struktur Beschreibung / Schritte / Erwartung / Ist). Code-Stellen
+geprüft gegen upstream `develop` e20c6a29 (27.10.2026). Fork: `docs/Offene-Punkte.md` Punkt 32.
 
 **Titel:**
 
 ~~~~text
-IMU heading from PGN 253 (#357): AiO v26 sends 0 for "no IMU", which now goes into the heading fusion as a real heading
+IMU heading from PGN 253 (#357): AiO v26 sends 0 for "no IMU", which is used as a real heading
 ~~~~
 
 **Text:**
 
 ~~~~markdown
-Since #357 the host takes the IMU heading from PGN 253, bytes 7–8. It does this whenever the GPS sentence carries none, and blends it into the heading fusion. "No IMU" is recognised only as 9999 (`PgnBuilder.TryParseSteerData`, `bool hasImuHeading = headingRaw != 9999;`, PgnBuilder.cs:657). The #357 commit message already mentions that AiO v26 sends 0 there (Firmware_Teensy_AiO_26#60). Here is what the firmware sends, and what that does in the host.
+### Description
+Since #357 the host takes the IMU heading from PGN 253, bytes 7–8, whenever the GPS sentence carries none, and blends it into the heading fusion. "No IMU" is recognised only as 9999:
+`PgnBuilder.TryParseSteerData`: `bool hasImuHeading = headingRaw != 9999;` (PgnBuilder.cs:782).
 
-### What the firmware sends in PGN 253
+The AiO v26 firmware (`Firmware_Teensy_AiO_26`, commit 2551bff) always sends 0 there:
+`lib/aio_autosteer/AutosteerProcessor.cpp`, lines 1148–1149, packed at 1171–1174:
+```cpp
+int16_t heading = 0;            // Deprecated - sent by GNSS
+int16_t roll = 0;               // Deprecated - sent by GNSS
+```
+Two v26 setups therefore have no IMU heading in the sentence, and the host uses PGN 253 = 0° as an IMU heading:
+- v26 without an IMU: `$PANDA` carries 65535 (`lib/aio_navigation/NAVProcessor.cpp`, line 150; set from the IMU only when `imuProcessor.hasValidData()`, lines 155–157);
+- v26 with GPS pass-through: no `$PANDA` at all (line 298), plain GGA/VTG even with an IMU fitted.
 
-**AiO v4 firmware** (`AgOpenGPS-Official/Boards`, commit 60e8d89), used for AiO v4.x boards. This includes the Keya/CAN build `TeensyModules/AIO v4 Firmware/AIO_v4_Firmware_Keya_CANBUS_HPR_Dual_27.04.2025`.
+The AiO v4 firmware (`AgOpenGPS-Official/Boards`, commit 60e8d89) sends 9999 / 8888 (`Autosteer.ino`, Keya build lines 655–660, standard build 603–608), so it is not affected. #357's commit message already mentions the v26 zero (Firmware_Teensy_AiO_26#60).
 
-Heading and roll are always the "none" values, whether or not a BNO08x is found:
-- Keya build, `Autosteer.ino`, lines 655–660:
-  ```c
-  // heading
-  PGN_253[7] = (uint8_t)9999;
-  PGN_253[8] = 9999 >> 8;
-  // roll
-  PGN_253[9] = (uint8_t)8888;
-  PGN_253[10] = 8888 >> 8;
-  ```
-- Standard build, `AIO_v4_Firmware/Autosteer.ino`, lines 603–608: the same.
-- The IMU goes into `$PANDA` instead (`zHandlers.ino`):
-  - RVC mode: `itoa(bnoData.yawX10, imuHeading, 10)`, line 148 (standard build: line 112).
-  - No IMU and no dual: `itoa(65535, imuHeading, 10); //65535 is max value to stop AgOpen using IMU in Panda`, line 101 (standard build: line 96).
+### Steps to reproduce
+1. Desktop head `--headless`, simulator off.
+2. Play over UDP to port 9999: `$GPGGA` + `$GPVTG` at 10 Hz, 2.5 m/s, 15 s east, a 90° left turn over 5 s, then north; and PGN 253 at 10 Hz with heading raw = 0 (as v26 sends it).
+3. Read `statusBar.systemData.imuHeading`, `tick.chartImuHeading`, `tick.chartGpsHeading` and the vehicle heading in the web client.
+4. Repeat with heading raw = 9999 (as v4 sends it).
 
-So with v4 firmware #357 changes nothing, which is fine.
+Bench script: `Tools/ui-audit/heading-bench.js` in MoritzLoibl10/AgOpenWeb (`node heading-bench.js 0 out.json`).
 
-**AiO v26 firmware** (`AgOpenGPS-Official/Firmware_Teensy_AiO_26`, commit 2551bff):
-- `lib/aio_autosteer/AutosteerProcessor.cpp`, lines 1148–1149, then packed at 1171–1174:
-  ```cpp
-  int16_t heading = 0;            // Deprecated - sent by GNSS
-  int16_t roll = 0;               // Deprecated - sent by GNSS
-  ```
-  PGN 253 always carries heading 0 and roll 0.
-- `lib/aio_navigation/NAVProcessor.cpp`:
-  - The `$PANDA` IMU heading defaults to `"65535"` (line 150). It is set from the IMU only when `imuProcessor.hasValidData()` (lines 155–157).
-  - With GPS pass-through on, no `$PANDA` is sent at all (line 298).
+### Expected
+A module that sends 0 for "no IMU" is not taken as a heading source; the vehicle heading follows the GPS through the turn as with 9999.
 
-Two v26 setups therefore have no IMU heading in the sentence, and the host falls back to PGN 253 = **0°**:
-- v26 without an IMU (`$PANDA` with 65535);
-- v26 with GPS pass-through (plain GGA/VTG, even with an IMU fitted).
-
-(Roll: v26 also sends roll 0, and 0 ≠ 8888. Since #356 that becomes a "valid" roll 0 for fixes without sentence roll. That is the same value as before #356, so it should be harmless.)
-
-### What 0° does in the fusion (reproduced on the host)
-
-`develop` at 7a8f3f8 (the code involved is unchanged at 9705344, only the licence headers moved the line numbers), Desktop head `--headless`, simulator off. A small script played a GPS and a steer module over UDP to port 9999:
-- `$GPGGA` + `$GPVTG` at 10 Hz, 2.5 m/s;
-- 15 s east, then a 90° left turn over 5 s, then north;
-- PGN 253 at 10 Hz with heading raw = 0 (v26), or 9999 (v4).
-
-Read back from the web client: `statusBar.systemData.imuHeading`, `tick.chartImuHeading` (IMU + offset), `tick.chartGpsHeading`, and the vehicle heading.
-
+### Actual
 | | 9999 (v4) | 0 (v26) |
 |---|---|---|
 | IMU heading (as received) | none (NaN) | 0.0°, accepted as valid |
 | IMU + offset vs GPS in the turn | — | up to ~28° apart |
 | Vehicle heading error, 1–7 s after the turn | ≤ 1.8° | up to 9°, decaying over several seconds |
 
-The fusion takes a constant 0 as a gyro that never turns. In `GpsHeadingFusionService.FuseHeading` the result is IMU + `_imuGpsOffset`, and the offset is pulled toward the GPS heading by `FusionWeight` each step (GpsHeadingFusionService.cs:257; default share 0.3 → weight 0.06). So the heading lags behind every turn and settles slowly. That error is in the heading guidance uses right when the tractor comes back onto the line after a headland turn.
-
-Not reproduced, but follows from the same code: reverse detection (lines 243–244) flips the heading when IMU + offset is more than 90° from the fix-to-fix heading. A sharper turn than the one above could get there and flip the heading by 180°.
-
-Settings don't avoid it. The heading fusion slider (`gps.headingFusionWeight`, 0–1, weight = share × 0.2) only speeds up the correction; at 1.0 it is still 0.2 per step. Turning it down makes it worse. Turning off reverse detection avoids only the flip. No setting stops a module heading from being used.
+Why: in `GpsHeadingFusionService` the result is IMU + `_imuGpsOffset`, and the offset is pulled toward the GPS heading by `FusionWeight` per step (GpsHeadingFusionService.cs:256–257; weight = share × 0.2, line 305). A constant 0 is a gyro that never turns, so the heading lags every turn. Not reproduced, but the same code: the reverse check (lines 242–243) flips the heading when IMU + offset is more than 90° from the fix-to-fix heading; a sharp enough turn could get there. No setting stops a module heading from being used.
 
 ### Proposal
-
-1. **Firmware:** send 9999 / 8888 in PGN 253 when the IMU data goes out in the sentence or there is no IMU (Firmware_Teensy_AiO_26#60).
-2. **Host, until every firmware does:** don't take a PGN 253 / 211 heading as an IMU until it is plausibly one. Some options:
-   - accept it only after it has changed (a module heading that is still exactly the value it started with, e.g. 0, while the fix-to-fix heading changed by more than a few degrees, is not a heading source);
-   - or a setting "Use IMU heading from the steer module", off by default, so single-antenna users with an IMU on the steer module opt in;
-   - or both.
-3. **UI:** show the received IMU heading next to the GPS heading in the GPS / System Data card, with a warning when it is stuck at 0 while driving. We do this in our fork's setup mode for bench testing; happy to send a PR for the upstream card.
-
-The bench script is in our fork: `Tools/ui-audit/heading-bench.js` in MoritzLoibl10/AgOpenWeb (Node, UDP to :9999, about 70 lines). Run `node heading-bench.js 0 out.json` against a test host; it switches the simulator off itself.
+1. Firmware: send 9999 / 8888 when there is no IMU or the IMU goes out in the sentence (Firmware_Teensy_AiO_26#60).
+2. Host, until every firmware does: accept a PGN 253 / 211 heading only once it has changed while the fix-to-fix heading changed, and/or a setting "Use IMU heading from the steer module".
+3. UI: show the received IMU heading next to the GPS heading, with a warning when it stays exactly 0 while driving (our fork does this in setup mode; happy to send a PR).
 ~~~~
 
 ## 2. Multi-client safety: observers can change vehicle geometry, concurrent saves interleave, credentials go to every LAN client
@@ -193,56 +163,46 @@ Checked against `develop` at 9705344.
 
 ## 4. Urgent: single antenna, backing out first (e.g. out of the shed) → the heading is learned backwards and the motor steers the wrong way
 
-Stand: anlegen, **dringend** (als erstes der vier). Fork: `docs/Bericht-Simulator-Richtung.md`. Geprüft gegen upstream `develop` d075aa2 (25.10.2026).
+Stand: **Entwurf zum Einreichen**, dringend. Code-Stellen geprüft gegen upstream `develop` e20c6a29
+(27.10.2026). Fork: `docs/Bericht-Simulator-Richtung.md`.
 
 **Titel:**
 
 ~~~~text
-Urgent: single antenna, backing out first (e.g. out of the shed) → the heading is learned backwards and the motor steers the wrong way
+Single antenna: backing out first learns the heading backwards; steering and sections then work for the wrong direction
 ~~~~
 
 **Text:**
 
 ~~~~markdown
-**Why this is urgent:** with a single antenna, the most ordinary start of the day (switch on in the shed, back out, drive to the field) leaves the host believing the tractor faces the other way. From then on, until someone taps the vehicle:
-- **backing up with AutoSteer engaged, the motor steers with the forward computation: the wrong way round, and it diverges;**
-- **with "Steer in reverse" on, driving forward, the motor steers with the reverse computation: also the wrong way round;**
-- auto sections stay on while backing and stay off driving forward.
+### Description
+With one antenna (with or without an IMU) the first heading is taken from the first travel above the fix-to-fix distance and is assumed to be forward (`GpsHeadingFusionService.TryStartHeading`, GpsHeadingFusionService.cs:338). If that travel is backwards — backing out of the shed, the most ordinary start of the day — the heading is learned facing backwards. With an IMU the offset snaps onto it (`_imuGpsOffset = Wrap(AngleDelta(imuRad, _gpsHeading))`, line 360). It stays that way until the operator taps the vehicle ("Reset direction"); it does not wear off with distance. The behaviour is known — the test `StartedWhileBacking_ForwardTravelReadsAsReverse_UntilTheDirectionIsReset` (GpsHeadingFusionServiceTests.cs:433) calls it "the trap" — but what it does to steering and sections is not visible.
 
-Nothing on screen says so except a 180° vehicle icon and a REVERSE badge while driving forward. It does not wear off with distance.
+The simulator falls into it every time it starts backwards: it reports a signed speed (`Speed = simulatedData.SpeedKmh / 3.6`, MainViewModel.Simulator.cs:101), but the fusion uses `Math.Abs(speedMs)` (GpsHeadingFusionService.cs:146).
 
-With one antenna (with or without an IMU), the first heading is taken from the first travel above 1.5 km/h, and that travel is assumed to be forward. If it is backwards (backing out of the shed), the heading is learned facing backwards and stays that way until the operator taps the vehicle. This is known (the test `StartedWhileBacking_ForwardTravelReadsAsReverse_UntilTheDirectionIsReset` calls it "the trap", and AgOpenGPS behaves the same), but what it does to steering and sections isn't visible anywhere, and the simulator falls into it every time it is started backwards.
+### Steps to reproduce (simulator)
+1. Open a field with an AB line about 8° off the vehicle's heading.
+2. Start the simulator and set −3 km/h first (backwards).
+3. Then set +3 km/h (forward) and switch AutoSteer on.
+4. Compare with a start at +3 km/h.
 
-### Where
+### Expected
+Forward travel reads as forward; the vehicle captures the line; sections and steering follow the real direction.
 
-`GpsHeadingFusionService` (develop d075aa2):
-- `TryStartHeading` (line 338): first heading = start fix → first fix ≥ `FixToFixDistance` away. With an IMU the offset snaps onto it (`_imuGpsOffset = Wrap(AngleDelta(imuRad, _gpsHeading))`, line 360), so it is 180° out after a backwards start.
-- With an IMU, reverse = travel more than 90° off IMU + offset (line 243). After the trap, backing reads as forward and forward reads as reverse, for as long as it lasts (the 0.02 offset nudge pulls toward the flipped heading).
-- Without an IMU, reverse = filtered change > 90° against the last heading (line 273). After a backwards start the first heading is already flipped, so every forward run reads as reverse, also for as long as it lasts (checked with a scratch test like the one above, `imuValid: false`).
-- Dual antenna: not affected.
-
-### What it does while the heading is flipped
+### Actual
+After the backwards start: heading 180° out, the REVERSE badge shows while driving forward. Started forward the sim captures the line (XTE < 0.1 m); started backwards it runs off and swings (XTE up to 25 m, steer angle −35° … +23°). In the host:
 
 | Really | Host thinks | Effect |
 |---|---|---|
-| forward | reverse | Heading 180° out, REVERSE badge. Auto sections stay off (`IsReversing`). Steering paused (PGN 254 status 0), **unless Steer in reverse is on: then the motor steers with the reverse computation while driving forward.** |
-| backing | forward | No reverse pause. **With AutoSteer engaged the motor steers with the forward computation while backing: wrong way round, it diverges.** Auto sections are not switched off in reverse. |
+| forward | reverse | Auto sections stay off; steering paused (`steerPaused`, GpsPipelineService.cs:1018), **unless "Steer in reverse" is on: then the motor steers with the reverse computation while driving forward** |
+| backing | forward | No reverse pause: **with AutoSteer engaged the motor steers with the forward computation while backing**; auto sections are not switched off |
 
-Reproduced in the simulator (our fork at 1b9ba20, before #415; #415 doesn't change this, as a paused steer still counts as engaged): start the sim, set −3 km/h first: heading 180°, no reverse flag; then +3 km/h: heading stays 180°, reverse flag on. A line 8° off, AutoSteer on: started forward, the sim captures the line (XTE < 0.1 m); started backwards, it runs off and swings (XTE up to 25 m, steer angle −35° … +23°). Not tested on real hardware.
-
-### The simulator part
-
-- The sim reports a signed speed (`Speed = simulatedData.SpeedKmh / 3.6`, MainViewModel.Simulator.cs:101) and its true heading as the IMU heading (line 119), but `FuseHeading` uses `Math.Abs(speedMs)`, so the sim always falls into the trap when started backwards.
-- While steering is paused for reverse (`steerPaused`, GpsPipelineService.cs:1017), the sim still follows the guidance angle: `simFollowsGuidance = g.HasGuidance && IsAutoSteerEngaged` (MainViewModel.ApplyResults.cs:231, #415). A real motor would stand still (status 0); the sim steers with the reverse computation, which is the swinging above.
+Reverse detection with an IMU: travel more than 90° off IMU + offset (lines 242–243); without an IMU: the filtered change against the last heading (line 273). Both keep the flipped reference. Dual antenna is not affected. In the simulator the paused steer still follows guidance (`simFollowsGuidance = g.HasGuidance && IsAutoSteerEngaged`, MainViewModel.ApplyResults.cs:231), which is the swinging above; a real motor would stand still while paused. Not tested on real hardware.
 
 ### Proposal
+1. Simulator: follow guidance only while it really steers (engaged and not paused); and/or use the sign of the simulator's speed for the first heading (NMEA speed is unsigned, real GPS unchanged).
+2. Single antenna: make the trap visible — say when the first heading was learned ("if the vehicle faces the wrong way, tap it"), and don't allow engaging AutoSteer until the direction is confirmed by the operator or by travel with a steer angle (with IMU and WAS: a left steer angle turns the heading left driving forward, right when backing).
+3. Optionally keep the IMU offset across restarts while IMU and antenna haven't moved.
 
-1. **Sim:** follow guidance only while it actually steers (engaged and not `IsSteerPaused`), like the motor. And/or let the first heading use the sign of the speed when the source is the simulator (NMEA speed is unsigned, so this changes nothing for real GPS).
-2. **Real GPS, single antenna:** make the trap visible and harmless:
-   - after the first heading is learned, say so ("Direction learned from the first travel – if the vehicle faces the wrong way, tap it");
-   - don't allow engaging AutoSteer within the first few metres after a first heading, or until it has been confirmed by travel with a steer angle;
-   - with an IMU and a WAS, the direction can be told once the wheels are turned: forward, a left steer angle turns the heading left; backing, it turns it right. A few degrees of consistent yaw against the WAS sign could reset the direction automatically, or at least warn.
-3. Optionally keep the IMU offset across restarts (as long as the IMU and the antenna haven't moved), so a restart in the shed doesn't need a first travel.
-
-In our fork (web client only) we show a warning in the simulator when the sim's speed sign and the reverse flag disagree, with a "Reset direction" button (the existing `heading.resetDirection`). After every (re)connection, before steering is first switched on, a card asks "Does the vehicle face the way it drives?" with a live sketch (vehicle arrow + driven track) and "Yes" / "Learn the direction again"; it does not block the steer button. Plus a help page. For real GPS the client can't tell the trap itself, which is why this needs the host.
+Our fork shows, in the web client only, a card "Does the vehicle face the way it drives?" after every (re)connection, a warning in the simulator when the speed sign and the reverse flag disagree, and a ready light that stays yellow until the direction is confirmed. For real GPS the client cannot tell the trap itself, so this needs the host.
 ~~~~

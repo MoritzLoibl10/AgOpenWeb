@@ -34,6 +34,9 @@ public static class PgnBuilder
     public const byte PGN_STEER_DATA = 0xFD;     // 253 - Steer Data FROM Module
     public const byte PGN_SENSOR_DATA = 0xFA;    // 250 - Sensor Data FROM Module
     public const byte PGN_CORRECTED_POSITION = 0x64; // 100 - Corrected position (seed monitors, rate control)
+    public const byte PGN_GPS_DATA = 0xD6;       // 214 - AgIO's GPS data (GPS_Out)
+    public const byte SOURCE_GPS = 0x7C;         // AgIO sends PGN 214 as the GPS module
+    public const byte PGN_VEHICLE_GEOMETRY = 0xF7; // 247 - Vehicle geometry (AgOpenWeb, #387)
 
     // Buffer sizes: header(2) + source(1) + pgn(1) + length(1) + data(N) + crc(1)
     public const int AUTOSTEER_PGN_SIZE = 14;       // 5 header + 8 data + 1 crc
@@ -44,6 +47,9 @@ public static class PgnBuilder
     public const int MACHINE_CONFIG_PGN_SIZE = 14;  // 5 header + 8 data + 1 crc
     public const int MACHINE_PINS_PGN_SIZE = 30;    // 5 header + 24 data + 1 crc
     public const int CORRECTED_POSITION_PGN_SIZE = 30; // 5 header + 24 data + 1 crc
+    public const int GPS_DATA_PGN_SIZE = 57;        // 5 header + 51 data + 1 crc
+    public const int VEHICLE_GEOMETRY_PGN_SIZE = 25; // 5 header + 19 data + 1 crc
+    public const byte VEHICLE_GEOMETRY_VERSION = 1;
 
     // Thread-local buffers to avoid allocation
     [ThreadStatic]
@@ -63,6 +69,9 @@ public static class PgnBuilder
 
     [ThreadStatic]
     private static byte[]? _correctedPositionBuffer;
+
+    [ThreadStatic]
+    private static byte[]? _gpsDataBuffer;
 
     /// <summary>
     /// Build PGN 254 (Steer Data) from VehicleState.
@@ -281,6 +290,68 @@ public static class PgnBuilder
     }
 
     /// <summary>
+    /// Build PGN 214 (0xD6) — the receiver's data as AgIO sends it to AgOpenGPS and
+    /// GPS_Out after parsing the NMEA (AgIO NMEA.Designer.cs). GPS_Out builds its GGA, VTG,
+    /// RMC and ZDA sentences from it (#364). A field the sentence doesn't carry holds its
+    /// type's MaxValue, as in AgIO.
+    ///
+    /// Bytes 5–12:  longitude, double
+    /// Bytes 13–20: latitude, double
+    /// Bytes 21–24: dual-antenna heading, float ($PAOGI, $KSXT, INS, the simulator)
+    /// Bytes 25–28: single-antenna heading, float (course over ground; not $PANDA)
+    /// Bytes 29–32: speed, km/h, float
+    /// Bytes 33–36: roll, degrees, float (not $PANDA: its roll is the IMU roll below)
+    /// Bytes 37–40: altitude, m, float
+    /// Bytes 41–42: satellites, ushort
+    /// Byte 43:     fix quality
+    /// Bytes 44–45: HDOP × 100, ushort
+    /// Bytes 46–47: differential age × 100, ushort
+    /// Bytes 48–55: $PANDA's IMU heading × 10 (ushort), roll × 10, pitch, yaw rate (short),
+    ///              as the sentence carries them
+    /// Byte 56:     CRC
+    /// </summary>
+    public static byte[] BuildGpsDataPgn(GpsData data)
+    {
+        _gpsDataBuffer ??= new byte[GPS_DATA_PGN_SIZE];
+        var buf = _gpsDataBuffer;
+        var pos = data.CurrentPosition;
+        bool panda = data.SentenceType == GpsSentenceType.Panda;
+        bool imu = panda && data.ImuValid;
+
+        buf[0] = HEADER1;
+        buf[1] = HEADER2;
+        buf[2] = SOURCE_GPS;
+        buf[3] = PGN_GPS_DATA;
+        buf[4] = GPS_DATA_PGN_SIZE - 6;
+
+        var s = buf.AsSpan();
+        System.Buffers.Binary.BinaryPrimitives.WriteDoubleLittleEndian(s.Slice(5, 8), pos.Longitude);
+        System.Buffers.Binary.BinaryPrimitives.WriteDoubleLittleEndian(s.Slice(13, 8), pos.Latitude);
+        System.Buffers.Binary.BinaryPrimitives.WriteSingleLittleEndian(s.Slice(21, 4),
+            data.HasDualHeading ? (float)pos.Heading : float.MaxValue);
+        System.Buffers.Binary.BinaryPrimitives.WriteSingleLittleEndian(s.Slice(25, 4),
+            !data.HasDualHeading && !panda ? (float)pos.Heading : float.MaxValue);
+        System.Buffers.Binary.BinaryPrimitives.WriteSingleLittleEndian(s.Slice(29, 4), (float)(pos.Speed * 3.6));
+        System.Buffers.Binary.BinaryPrimitives.WriteSingleLittleEndian(s.Slice(33, 4),
+            panda ? float.MaxValue : (float)data.ImuRoll);
+        System.Buffers.Binary.BinaryPrimitives.WriteSingleLittleEndian(s.Slice(37, 4), (float)pos.Altitude);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(s.Slice(41, 2), UShort(data.SatellitesInUse));
+        buf[43] = (byte)Math.Clamp(data.FixQuality, 0, 255);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(s.Slice(44, 2), UShort(data.Hdop * 100));
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(s.Slice(46, 2), UShort(data.DifferentialAge * 100));
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(s.Slice(48, 2),
+            imu ? UShort(data.ImuHeading * 10) : ushort.MaxValue);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(s.Slice(50, 2), imu ? Short(data.ImuRoll * 10) : short.MaxValue);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(s.Slice(52, 2), panda ? Short(data.ImuPitch) : short.MaxValue);
+        System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(s.Slice(54, 2), panda ? Short(data.ImuYawRate) : short.MaxValue);
+
+        return WithCrc(buf);
+
+        static ushort UShort(double v) => (ushort)Math.Clamp(Math.Round(v), 0, ushort.MaxValue - 1);
+        static short Short(double v) => (short)Math.Clamp(Math.Round(v), short.MinValue, short.MaxValue - 1);
+    }
+
+    /// <summary>
     /// Build PGN 238 (0xEE) Machine Config - hydraulic settings and user values.
     /// Sent to machine module when config changes (not periodic).
     ///
@@ -319,6 +390,60 @@ public static class PgnBuilder
         buf[12] = (byte)Math.Clamp(config.User4Value, 0, 255);
 
         return WithCrc(buf);
+    }
+
+    /// <summary>
+    /// Build PGN 247 (0xF7) Vehicle geometry, an AgOpenWeb PGN (#387): what a module needs
+    /// to know about the vehicle — a steer module estimating the wheel angle from the heading
+    /// rate needs the wheelbase, a receiver's INS (UM981) the IMU-to-antenna lever arm. Sent
+    /// with PGN 251/252 and again when the steer module comes back after a silence.
+    ///
+    /// Lengths in cm, little-endian; positions from the pivot (rear axle centre): pivot =
+    /// ahead (+), offset = right (+), height = above the ground.
+    /// Byte 5:      layout version (1); a module reads the fields it knows and skips the rest
+    /// Byte 6:      flags, bit 0: IMU position entered (else bytes 17-22 are 0, not a position)
+    /// Bytes 7-8:   wheelbase, uint16
+    /// Bytes 9-10:  track width, uint16
+    /// Bytes 11-12: antenna height, uint16
+    /// Bytes 13-14: antenna pivot, int16
+    /// Bytes 15-16: antenna offset, int16
+    /// Bytes 17-18: IMU pivot, int16
+    /// Bytes 19-20: IMU height, uint16
+    /// Bytes 21-22: IMU offset, int16
+    /// Byte 23:     max steer angle, degrees
+    /// Byte 24:     CRC
+    /// </summary>
+    public static byte[] BuildVehicleGeometryPgn(VehicleConfig v)
+    {
+        var buf = new byte[VEHICLE_GEOMETRY_PGN_SIZE];
+        buf[0] = HEADER1;
+        buf[1] = HEADER2;
+        buf[2] = SOURCE;
+        buf[3] = PGN_VEHICLE_GEOMETRY;
+        buf[4] = VEHICLE_GEOMETRY_PGN_SIZE - 6;
+
+        buf[5] = VEHICLE_GEOMETRY_VERSION;
+        bool imu = v.ImuPivot != 0 || v.ImuHeight != 0 || v.ImuOffset != 0;
+        buf[6] = imu ? (byte)1 : (byte)0;
+        PutCm(buf, 7, v.Wheelbase, unsigned: true);
+        PutCm(buf, 9, v.TrackWidth, unsigned: true);
+        PutCm(buf, 11, v.AntennaHeight, unsigned: true);
+        PutCm(buf, 13, v.AntennaPivot, unsigned: false);
+        PutCm(buf, 15, v.AntennaOffset, unsigned: false);
+        PutCm(buf, 17, v.ImuPivot, unsigned: false);
+        PutCm(buf, 19, v.ImuHeight, unsigned: true);
+        PutCm(buf, 21, v.ImuOffset, unsigned: false);
+        buf[23] = (byte)Math.Clamp((int)Math.Round(v.MaxSteerAngle), 0, 255);
+
+        return WithCrc(buf);
+    }
+
+    private static void PutCm(byte[] buf, int at, double metres, bool unsigned)
+    {
+        int cm = (int)Math.Round(metres * 100);
+        int value = unsigned ? Math.Clamp(cm, 0, ushort.MaxValue) : Math.Clamp(cm, short.MinValue, short.MaxValue);
+        buf[at] = (byte)(value & 0xFF);
+        buf[at + 1] = (byte)((value >> 8) & 0xFF);
     }
 
     /// <summary>

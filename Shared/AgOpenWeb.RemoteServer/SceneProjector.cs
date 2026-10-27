@@ -461,7 +461,7 @@ public sealed class SceneProjector
         var profiles = _ntripProfiles.Profiles
             .Select(p => new NtripProfileDto(
                 p.Id, p.Name, p.CasterHost, p.CasterPort, p.MountPoint,
-                p.Username, p.Password, p.AutoConnectOnFieldLoad, p.IsDefault,
+                p.Username, Secrets.Masked(p.Password), p.AutoConnectOnFieldLoad, p.IsDefault,
                 p.AssociatedFields.ToList(), p.NtripVersion))
             .ToList();
         return new NtripProfilesDto(profiles, _ntripProfiles.GetAvailableFields().ToList());
@@ -638,7 +638,7 @@ public sealed class SceneProjector
         catch { /* fields dir optional */ }
         local.Sort((a, b) => string.Compare(a.Name, b.Name, System.StringComparison.OrdinalIgnoreCase));
         var cloud = ag.CloudFields.Select(f => new AgShareCloudFieldDto(f.Id, f.Name, f.AreaHa)).ToList();
-        return new AgShareDto(c.AgShareServer ?? "", c.AgShareApiKey ?? "", c.AgShareEnabled,
+        return new AgShareDto(c.AgShareServer ?? "", Secrets.Masked(c.AgShareApiKey), c.AgShareEnabled,
             ag.Status ?? "", ag.Busy, local, cloud);
     }
 
@@ -701,7 +701,7 @@ public sealed class SceneProjector
                 (int)e.Level, e.Message))
             .ToList();
 
-        return new AppInfoDto(version, git, current, langs, dirs, hotkeys, logs, _state.BugReportStatus ?? "", _state.BackupStatus ?? "");
+        return new AppInfoDto(version, git, current, langs, dirs, hotkeys, logs, _state.BugReportStatus ?? "", _state.BugReportSendStatus ?? "", _state.BackupStatus ?? "");
     }
 
     private static AppDirDto DirInfo(string name, string path) =>
@@ -729,6 +729,7 @@ public sealed class SceneProjector
         h = h * 31 + snap.Count;
         if (snap.Count > 0) h = h * 31 + snap[snap.Count - 1].Timestamp.Ticks.GetHashCode();
         h = h * 31 + (_state.BugReportStatus?.GetHashCode() ?? 0);
+        h = h * 31 + (_state.BugReportSendStatus?.GetHashCode() ?? 0);
         h = h * 31 + (_state.BackupStatus?.GetHashCode() ?? 0);
         return h;
     }
@@ -773,7 +774,8 @@ public sealed class SceneProjector
         var pins = new int[24]; for (int i = 0; i < 24; i++) pins[i] = (int)m.GetPinAssignment(i);
         return new ConfigDto(
             new VehicleConfigDto(v.Name, (int)v.Type, v.HitchType, v.HitchLength, v.Wheelbase,
-                v.TrackWidth, v.AntennaPivot, v.AntennaHeight, v.AntennaOffset),
+                v.TrackWidth, v.AntennaPivot, v.AntennaHeight, v.AntennaOffset,
+                v.ImuPivot, v.ImuHeight, v.ImuOffset),
             new GpsConfigDto(c.IsDualGps, c.DualHeadingOffset, c.DualReverseDistance, c.AutoDualFix,
                 c.DualSwitchSpeed, c.MinGpsStep, c.FixToFixDistance, c.HeadingFusionWeight,
                 c.ReverseDetection, c.RtkLostAlarm, c.RtkLostAction),
@@ -830,7 +832,7 @@ public sealed class SceneProjector
             d.UTurnButtonVisible, d.LateralButtonVisible,
             d.AutoSteerSound, d.UTurnSound, d.HydraulicSound, d.SectionsSound,
             d.KeyboardEnabled, d.StartFullscreen, d.ElevationLogEnabled, rm,
-            _persist.State.IsDayMode);
+            _persist.State.IsDayMode, d.UiScale);
     }
 
     // Profiles read-frame (Phase 9) — the Vehicle & Tool picker hub: available
@@ -909,6 +911,7 @@ public sealed class SceneProjector
             | (dp.KeyboardEnabled ? 32768 : 0) | (dp.StartFullscreen ? 65536 : 0) | (dp.ElevationLogEnabled ? 131072 : 0);
         h = h * 31 + db;
         h = h * 31 + dp.ExtraGuidelinesCount * 7 + dp.DisplayResolutionMultiplier.GetHashCode();
+        h = h * 31 + dp.UiScale;
         // Day/Night theme lives in PersistentAppState (not ConfigStore.Display), so fold it
         // in here too — otherwise toggling the theme wouldn't re-send the config frame.
         h = h * 31 + (_persist.State.IsDayMode ? 1 : 0);
