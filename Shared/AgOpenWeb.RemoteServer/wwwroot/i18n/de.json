@@ -1777,5 +1777,12 @@
   "Wheelbase (m)": "Radstand (m)",
   "Within your limits.": "Innerhalb deiner Grenzwerte.",
   "Your limits in cm (empty = not checked):": "Deine Grenzwerte in cm (leer = nicht geprüft):",
-  "{what} ≤ {v} cm": "{what} ≤ {v} cm"
+  "{what} ≤ {v} cm": "{what} ≤ {v} cm",
+  "No stable release published yet.": "Noch keine stabile Version veröffentlicht.",
+  "This test version is newer than the newest stable release ({n}).": "Diese Testversion ist neuer als die neueste stabile Version ({n}).",
+  "Channel": "Kanal",
+  "Stable": "Stabil",
+  "Test (pre-releases)": "Test (Vorabversionen)",
+  "Test: also test versions, which may have faults. Only on this device.": "Test: auch Testversionen, die Fehler haben können. Gilt nur für dieses Gerät.",
+  "Stable: only versions released as stable. Only on this device.": "Stabil: nur als stabil freigegebene Versionen. Gilt nur für dieses Gerät."
 }

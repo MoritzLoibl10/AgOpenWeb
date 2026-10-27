@@ -14,6 +14,8 @@ sind nicht getestet; Lenkung nur mit Abstand zu Personen, auf eigenem Gelände.
 ☐ Eine Fehlermeldung auslösen (z. B. „Arbeit starten“ ohne Schlag, Spur ohne Schlag) → deutscher Text sagt, was zu tun ist · #22
 ☐ Einrichtung → Info → Drittkomponenten (Liste, BEV-Namensnennung), Aktualisierungen → „Nach Aktualisierungen suchen“ zeigt die neueste Version mit Link (nur mit Internet) · #23
 ☐ Windows-PC: Knopf ⛶ → Fenster echtes Vollbild, noch einmal → zurück · #21
+☐ Windows-PC: Setup aus der Testversion ausführen → Startmenü, Desktop-Verknüpfung, App startet; Setup einer neueren Version → installiert darüber, Schläge und Arbeitsprotokoll noch da; Deinstallieren → `Dokumente\AgOpenWeb` bleibt · Installer-PR
+☐ Einrichtung → Info → Aktualisierungen: Kanal „Stabil“ (Vorgabe) und „Test“ umschalten → Anzeige wechselt, gilt nur auf diesem Gerät · Installer-PR
 ☐ Ersteinrichtung schließen, App-Daten des Browsers löschen, neu öffnen → Ersteinrichtung kommt **nicht** wieder (Stand am Lenkrechner) · #25
 ☐ Einrichtung → Abnahmeprotokoll → „Neues Abnahmeprotokoll“: Kit-Daten zeigen Antennenmaße und Fahrzeugprofil wie eingestellt; Kunde/Traktor eintragen · #26
 ☐ NTRIP-Profil bearbeiten: Passwort steht als Maske, „Verbindung testen“ mit NTRIP 1 und 2 klappt, Passwort bleibt erhalten · #20

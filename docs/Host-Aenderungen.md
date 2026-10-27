@@ -395,3 +395,11 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
   Tests: `KeyedFailureTests.cs`, `ToastKeyTests`; Einrichtungsstatus im Vollständigkeitstest von
   `PersistentStateServiceTests`.
 - **Lenk-, Regel- und Sicherheitslogik:** nicht berührt (nur Texte der Meldungen).
+
+## 18. CI: Windows-Installer und Freigabe „Stabil“ (feature/installer, Oktober 2026)
+- **Dateien:** `.github/workflows/fork-prerelease.yml` (neuer Job `installer` auf `windows-latest`,
+  Inno Setup aus dem ZIP-Paket; die Vorabversion enthält zusätzlich `*-Setup-*.exe`),
+  `.github/workflows/fork-stable-release.yml` (neu: macht eine getestete Vorabversion zur
+  vollständigen Release), `deploy/windows/installer.iss` (neu). Genehmigt im Auftrag; Host und
+  Launcher unverändert. Einzelheiten: `docs/Installer.md`.
+- **Secrets:** keine neuen, keine geänderten; nur `GITHUB_TOKEN`.

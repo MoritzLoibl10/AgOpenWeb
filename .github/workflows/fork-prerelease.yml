@@ -202,8 +202,44 @@ jobs:
       - name: Compile iOS
         run: dotnet build Platforms/AgOpenWeb.iOS/AgOpenWeb.iOS.csproj -c Debug -f net10.0-ios -r iossimulator-arm64
 
+  # Customer installer (feature/installer): Inno Setup on a Windows runner, from the bundle above.
+  installer:
+    needs: windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: agopenweb-win-x64
+          path: bundle
+
+      - name: Build installer
+        shell: pwsh
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          Expand-Archive bundle/agopenweb-win-x64.zip -DestinationPath bundle
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup not found" }
+          # File version: the numbers of the tag (26.7.0-moritz.25 -> 26.7.0.25), four at most.
+          $nums = [regex]::Matches($env:TAG, '\d+') | ForEach-Object { $_.Value }
+          $fv = (@($nums | Select-Object -First 3) + @(if ($nums.Count -gt 3) { $nums[-1] } else { '0' })) -join '.'
+          & $iscc "/DAppVersion=$env:TAG" "/DFileVersion=$fv" "/DSourceDir=$PWD\bundle\agopenweb-win-x64" "/DOutDir=$PWD\dist" deploy\windows\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Get-ChildItem dist
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agopenweb-setup
+          path: dist/*-Setup-*.exe
+          if-no-files-found: error
+
   prerelease:
-    needs: [windows, android]
+    needs: [windows, android, installer]
     runs-on: ubuntu-latest
     permissions:
       contents: write   # create the tag + pre-release
@@ -243,5 +279,6 @@ jobs:
           files: |
             dist/**/agopenweb-win-x64.zip
             dist/**/agopenweb-android.apk
+            dist/**/*-Setup-*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
