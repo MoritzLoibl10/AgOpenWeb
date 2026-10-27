@@ -10236,7 +10236,7 @@ const TabletBrand = (() => {
 
   // --- Setup → Info: name, version, origin, licence, source --------------------------------
   const LIC = { apache: ['tui-lic-apache', 'Apache License 2.0'], // LICENSE.md, embedded in index.html
-    third: ['tui-lic-third', tr('Third-party components')] }; // fork: index.html, block third-party:begin/end
+    third: ['tui-lic-third', tr('Third-party components')] }; // fork: index.html, block third-party:begin/end (English, -de German)
   const sheet = el('div', 'tui-sheet tb-sheet', '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>');
   sheet.id = 'tb-sheet';
   const scrim = el('div', 'tp-scrim');
@@ -10253,7 +10253,7 @@ const TabletBrand = (() => {
     sheet.classList.add('open'); scrim.classList.add('open');
   }
   function showLicense(k) {
-    const [id, name] = LIC[k], src = $(id);
+    const [id, name] = LIC[k], src = (k === 'third' && tuiIsDe() && $(id + '-de')) || $(id); // third-party page: German headings and notes, licence texts as is
     openSheet(T(name), b => {
       const back = el('button', 'tp-btn'); back.textContent = '← Info'; onTap(back, () => openInfo());
       b.appendChild(back);
