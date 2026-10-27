@@ -45,7 +45,7 @@ internal sealed class ConsolePage
             .RegisterWebMessageReceivedHandler(OnWebMessage)
             .RegisterWindowClosingHandler((_, _) => LauncherEntry.StopThenClose(_window, _backend, ref _closing))
             .RegisterWindowCreatedHandler((_, _) => _timer = new Timer(_ => PushState(), null, 500, 1000))
-            .LoadRawString(Html);
+            .LoadRawString(Html.Replace("@NAME@", Brand.ProductName));
     }
 
     // ---- page → host ----
@@ -189,7 +189,7 @@ internal sealed class ConsolePage
 
     // The supervisor page. Dark, one column, same look as the web UI's dialogs.
     private const string Html = """
-<!doctype html><html><head><meta charset="utf-8"><title>AgOpenWeb</title><style>
+<!doctype html><html><head><meta charset="utf-8"><title>@NAME@</title><style>
 html,body{margin:0;background:#0f1115;color:#e8edf3;font:14px system-ui,sans-serif;user-select:none}
 body{padding:20px}h1{margin:0;font-size:22px}.sub{color:#9fb3cc;font-size:12px}
 .row{display:flex;align-items:center;gap:8px;margin-top:14px}.dot{width:12px;height:12px;border-radius:50%;background:#ff5a5a}
@@ -200,7 +200,7 @@ button.accent{background:#2d7ff9}.url button{height:auto;padding:4px 10px}.btns{
 #clients{color:#9fb3cc;font-size:12px;margin-top:6px;min-height:14px}#error{color:#ff8a8a;margin-top:8px;white-space:pre-line}
 label{display:flex;gap:8px;align-items:center;margin-top:8px}.opts{margin-top:14px}
 </style></head><body>
-<h1>AgOpenWeb</h1><div class="sub">Guidance host</div>
+<h1>@NAME@</h1><div class="sub">Guidance host</div>
 <div class="row"><div class="dot" id="dot"></div><div id="status">Stopped</div></div>
 <div class="url"><code id="url">…</code><button id="copy" disabled>Copy</button></div>
 <div id="clients"></div><div id="error"></div>

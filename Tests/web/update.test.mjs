@@ -28,3 +28,21 @@ test('unknown build: no claim, newest shown', () => {
 });
 test('short or missing hash is not matched', () => assert.equal(U.compare(R, 'aaa').kind, 'unknown'));
 test('no releases', () => assert.equal(U.compare([], 'aaaaaaa').kind, 'none'));
+
+// Host-paket follow-up (feature/abnahme): the comparison's edge cases.
+test('order by publication, not by list order or tag text (moritz.10 after moritz.9)', () => {
+  const L = [rel('26.7.0-moritz.10', 'ddddddd444', '2026-10-27T10:00:00Z'), rel('26.7.0-moritz.9', 'eeeeeee555', '2026-10-26T09:00:00Z')].reverse();
+  const r = U.compare(L, 'eeeeeee5');
+  assert.equal(r.kind, 'newer'); assert.equal(r.latest.tag_name, '26.7.0-moritz.10');
+});
+test('the hash is matched without regard to case; "-dirty" is ignored', () => {
+  assert.equal(U.compare(R, 'BBBBBBB2').kind, 'current');
+  assert.equal(U.compare(R, 'AAAAAAA1-dirty').kind, 'newer');
+});
+test('unpublished entries and junk are skipped', () => {
+  const L = [null, {}, rel('x', 'fffffff666', null), ...R];
+  assert.equal(U.compare(L, 'fffffff6').kind, 'unknown');
+  assert.equal(U.compare(L, 'fffffff6').latest.tag_name, '26.7.0-moritz.16');
+  assert.equal(U.compare(null, 'aaaaaaa').kind, 'none');
+});
+test('a draft that is this build is not claimed as installed', () => assert.equal(U.compare(R, 'ccccccc3').kind, 'unknown'));

@@ -11,7 +11,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { node } from './ready.test.mjs';
+import { node } from './stubs.mjs';
 
 const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/app.js', import.meta.url), 'utf8');
 const cut = (a, b) => app.slice(app.indexOf(a), app.indexOf(b));
@@ -20,11 +20,11 @@ const block = cut('// worklog:begin', '// worklog:end') + cut('// worklog-ui:beg
 const T0 = new Date(2026, 9, 27, 8, 0).getTime(), MIN = 60000;
 const flush = () => new Promise(r => setImmediate(r));
 
-function load({ stored, host = [], now = T0 } = {}) {
+function load({ stored, host = [], hostDeleted = [], now = T0 } = {}) {
   let clock = now;
   const timers = [], posts = [], store = new Map();
   if (stored) store.set('aow.worklog.v1', JSON.stringify(stored));
-  let hostDoc = { format: 'aow-worklog', version: 1, entries: host, deleted: [] };
+  let hostDoc = { format: 'aow-worklog', version: 1, entries: host, deleted: hostDeleted };
   class FakeDate extends Date { constructor(...a) { super(...(a.length ? a : [clock])); } static now() { return clock; } }
   const ctx = {
     Date: FakeDate, Math, JSON, Set, Map, Number, String, Array, Object, Promise, Error,
@@ -41,7 +41,8 @@ function load({ stored, host = [], now = T0 } = {}) {
       if (opt && opt.method === 'POST') {
         const doc = JSON.parse(opt.body); posts.push(doc);
         const ids = new Set(hostDoc.entries.map(e => e.id));
-        hostDoc = { ...hostDoc, entries: hostDoc.entries.concat(doc.entries.filter(e => !ids.has(e.id) && !e.open)) };
+        const gone = new Set([...hostDoc.deleted, ...(doc.deleted || [])]); // like WorkLogStore.Merge
+        hostDoc = { ...hostDoc, deleted: [...gone], entries: hostDoc.entries.concat(doc.entries.filter(e => !ids.has(e.id) && !e.open)).filter(e => !gone.has(e.id)) };
       }
       return { ok: true, json: async () => JSON.parse(JSON.stringify(hostDoc)) };
     },
@@ -96,4 +97,27 @@ test('host away: entries stay on the tablet and are sent later', async () => {
   await t.tick();
   assert.equal(t.posts.length, 1);
   assert.deepEqual(t.host().entries.map(e => e.id), ['w1']);
+});
+
+test('deleted on another tablet: gone here too, and not sent back', async () => {
+  const done = { ...openSession, open: false };
+  const t = load({ stored: { entries: [done], open: null, deleted: [] }, host: [], hostDeleted: ['w1'] });
+  t.ctx.iHoldControl = true;
+  await t.tick();
+  assert.equal(t.ctx.W.entries.length, 0);
+  await t.tick();
+  assert.deepEqual(t.host().entries.map(e => e.id), [], 'the host does not get it back');
+  assert.match(t.store.get('aow.worklog.v1'), /"deleted":\["w1"\]/, 'kept as deleted here');
+  await t.tick(31000);
+  assert.equal(t.posts.at(-1).entries.length, 0, 'the next round sends it no more');
+});
+
+test('acceptance records share the store but are not work sessions', async () => {
+  const t = load();
+  t.ctx.W.put({ id: 'a1', kind: 'acceptance', start: T0, end: T0 });
+  assert.equal(t.ctx.W.entries.length, 0);
+  assert.equal(t.ctx.W.records('acceptance').length, 1);
+  t.ctx.iHoldControl = true;
+  await t.tick();
+  assert.deepEqual(t.host().entries.map(e => e.id), ['a1']);
 });

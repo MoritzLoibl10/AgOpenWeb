@@ -9,6 +9,12 @@ This file provides guidance to Claude Code when working with this repository.
 - **[Docs/TRANSLATIONS.md](Docs/TRANSLATIONS.md)** - UI strings and Weblate
 - **[Docs/GPS_RECEIVERS.md](Docs/GPS_RECEIVERS.md)** - Receivers, sentence families, the bridge contract, per-receiver setup
 
+## Fork: report format (owner's rule, every session)
+
+The final report of a task is exactly ONE fenced code block: one opening ``` line, all report
+lines, one closing ``` line. No line outside the block, no inline code per line, no progress
+messages while working.
+
 ## Project Overview
 
 AgOpenWeb3 is a cross-platform agricultural GPS guidance application: a .NET guidance host
