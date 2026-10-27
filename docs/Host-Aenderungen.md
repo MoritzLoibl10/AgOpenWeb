@@ -409,4 +409,7 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
   UAC-Abfrage) und entfernt sie bei der Deinstallation; fehlt die WebView2-Laufzeit, startet es
   Microsofts Bootstrapper, den der Job `installer` herunterlädt und auf die Microsoft-Signatur
   prüft. Host und Launcher unverändert.
+- **Produktname** (Nachtrag): `AppName` „LM Steering Solutions“ (Setup, Startmenü, Verknüpfung,
+  „Apps“, Firewall-Regeln; Setup-Datei ohne Leerzeichen); `AppId` endgültig, unverändert; Regeln und
+  Verknüpfungen der Testversionen „AgOpenWeb“ werden mit entfernt.
 - **Secrets:** keine neuen, keine geänderten; nur `GITHUB_TOKEN`.

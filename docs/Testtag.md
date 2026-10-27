@@ -1,4 +1,4 @@
-# Testtag: Checkliste zur Testversion 26.7.0-moritz.26 (#20–#27)
+# Testtag: Checkliste zur Testversion 26.7.0-moritz.27 (#20–#27)
 
 Reihenfolge wie beim Abarbeiten. Je Punkt: **tun** → **soll** · PR. Abhaken: ☐. Board und Motor
 sind nicht getestet; Lenkung nur mit Abstand zu Personen, auf eigenem Gelände.
@@ -14,11 +14,11 @@ sind nicht getestet; Lenkung nur mit Abstand zu Personen, auf eigenem Gelände.
 ☐ Eine Fehlermeldung auslösen (z. B. „Arbeit starten“ ohne Schlag, Spur ohne Schlag) → deutscher Text sagt, was zu tun ist · #22
 ☐ Einrichtung → Info → Drittkomponenten (Liste, BEV-Namensnennung), Aktualisierungen → „Nach Aktualisierungen suchen“ zeigt die neueste Version mit Link (nur mit Internet) · #23
 ☐ Windows-PC: Knopf ⛶ → Fenster echtes Vollbild, noch einmal → zurück · #21
-☐ Windows-PC, neu: Setup aus der Testversion ausführen → Text am Häkchen „Windows-Firewall … freigeben“ nennt die Ports und die Administratorrechte; installieren → eine UAC-Abfrage, Startmenü, Desktop-Verknüpfung, App startet mit Bediengröße „Handschuh“ · #27
+☐ Windows-PC, neu: Setup aus der Testversion ausführen → Text am Häkchen „Windows-Firewall … freigeben“ nennt die Ports und die Administratorrechte; installieren → eine UAC-Abfrage; Setup, Startmenü, Desktop-Verknüpfung, „Apps“ und Fenstertitel heißen „LM Steering Solutions“; App startet mit Bediengröße „Handschuh“; Hinweis beim ersten Start und Einrichtung → Info zeigen den Namen und „basiert auf AgOpenWeb/AgOpenGPS“ · #27
 ☐ Ohne WebView2 (falls ein Rechner ohne sie da ist): Setup installiert sie (Internet nötig), Fenster nicht leer · #27
-☐ Eingabeaufforderung: `netsh advfirewall firewall show rule name="AgOpenWeb Module (UDP)"` und `… name="AgOpenWeb Tablets (TCP)"` → je eine Regel, Programm `…\AgOpenWeb.Desktop.exe`, UDP 9999,2211,2222 bzw. TCP 5174, Remote-IP lokales Subnetz · #27
+☐ Eingabeaufforderung: `netsh advfirewall firewall show rule name="LM Steering Solutions Module (UDP)"` und `… Tablets (TCP)` → je eine Regel, Programm `…\AgOpenWeb.Desktop.exe`, UDP 9999,2211,2222 bzw. TCP 5174, Remote-IP lokales Subnetz, Profile Domäne,Privat,Öffentlich · #27
 ☐ Module anschließen (bzw. Tablet im Netz auf `http://<PC>:5174`) → verbinden, **kein** Windows-Dialog „Zugriff zulassen“ · #27
-☐ Setup einer neueren Testversion darüber → ohne Rückfrage zum Ordner installiert, Schläge und Arbeitsprotokoll noch da, Bediengröße wie vorher gewählt (nicht zurückgesetzt), weiterhin genau zwei Firewall-Regeln · #27
+☐ Setup einer neueren Testversion darüber → ohne Rückfrage zum Ordner installiert, Schläge und Arbeitsprotokoll noch da, Bediengröße wie vorher gewählt (nicht zurückgesetzt), weiterhin genau zwei Firewall-Regeln; über moritz.26 (noch „AgOpenWeb“): alte Verknüpfungen und Regeln „AgOpenWeb …“ weg, nur ein Eintrag unter „Apps“ · #27
 ☐ Deinstallieren (Apps) → UAC-Abfrage, beide Firewall-Regeln weg (`netsh … show rule` → „Keine Regeln“), `Dokumente\AgOpenWeb` bleibt; neu installieren → Schläge wieder da · #27
 ☐ Einrichtung → Info → Aktualisierungen: Kanal „Stabil“ (Vorgabe) → nur freigegebene Versionen; „Test“ → auch Testversionen, Anzeige wechselt; anderes Gerät/Browser bleibt auf seinem Kanal · #27
 ☐ Ersteinrichtung schließen, App-Daten des Browsers löschen, neu öffnen → Ersteinrichtung kommt **nicht** wieder (Stand am Lenkrechner) · #25

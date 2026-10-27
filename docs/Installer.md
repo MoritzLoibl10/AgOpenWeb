@@ -1,7 +1,7 @@
 # Windows-Installer und Update-Kanäle (feature/installer)
 
 ## Installer
-- **Datei:** `<Name>-Setup-<Version>.exe` in jeder Testversion (Workflow „Fork Test Pre-Release“,
+- **Datei:** `LM-Steering-Solutions-Setup-<Version>.exe` in jeder Testversion (Workflow „Fork Test Pre-Release“,
   Job `installer`, Inno Setup 6 auf einem Windows-Runner aus dem bisherigen ZIP-Paket). Skript:
   `deploy/windows/installer.iss`. Das ZIP bleibt zusätzlich in der Vorabversion.
 - **Wohin:** für den angemeldeten Benutzer nach `%LOCALAPPDATA%\Programs\<Name>`, ohne
@@ -17,7 +17,8 @@
 - **Port:** bleibt 5174; er ist in der App fest, der Installer fragt und setzt keinen.
 - **Windows-Firewall** (Häkchen „Windows-Firewall nur für dieses Programm freigeben“, vorgewählt):
   zwei eingehende Regeln, nur für `AgOpenWeb.Desktop.exe` im Programmordner, nur aus dem lokalen
-  Subnetz, alle Profile:
+  Subnetz, für alle Profile (`profile=any` = Domäne, Privat und Öffentlich; das Netz zum Modul ist
+  meist „nicht identifiziert“ und damit öffentlich):
   - `<Name> Module (UDP)`: UDP 9999 (Module, `UdpCommunicationService.ModulePort`), 2211 und 2222
     (GPS-Empfänger, `Gps1Port`/`Gps2Port`);
   - `<Name> Tablets (TCP)`: TCP 5174 (Web-Oberfläche für Tablets, `RemoteServerHost.Port`).
@@ -25,14 +26,21 @@
   Administratorrechten (UAC), auch bei der Installation nur für den Benutzer; der Text am Häkchen
   sagt das. Ohne Häkchen oder bei „Nein“ fragt Windows beim ersten Start selbst. Ein Update löscht
   und legt die Regeln neu an; die Deinstallation entfernt beide (wieder mit UAC-Abfrage).
-  Prüfen: `netsh advfirewall firewall show rule name="AgOpenWeb Module (UDP)"` (bzw. `… Tablets (TCP)`).
+  Prüfen: `netsh advfirewall firewall show rule name="LM Steering Solutions Module (UDP)"` (bzw.
+  `… Tablets (TCP)`) → „Profile: Domäne,Privat,Öffentlich“. Regeln der Testversionen bis moritz.26
+  (`AgOpenWeb Module (UDP)`, `AgOpenWeb Tablets (TCP)`) löschen Update und Deinstallation mit.
 - **WebView2-Laufzeit:** Der Installer prüft sie in der Registry (`pv` unter
   `EdgeUpdate\Clients\{F3017226-…}`, Maschine oder Benutzer). Fehlt sie, startet er Microsofts
   Bootstrapper (`MicrosoftEdgeWebview2Setup.exe`, lädt die Laufzeit aus dem Netz; braucht also
   Internet). Der Workflow lädt den Bootstrapper beim Bauen und prüft seine Microsoft-Signatur;
   ohne ihn gebaut, meldet das Setup nur, dass die Laufzeit fehlt.
-- **Name:** `AgOpenWeb`, solange kein Produktname feststeht; beim Bauen mit `/DAppName=…` änderbar.
-  Die `AppId` nie ändern, sonst erkennt Windows Updates nicht mehr.
+- **Name:** „LM Steering Solutions“ (Setup, Startmenü, Desktop-Verknüpfung, Eintrag unter „Apps“,
+  Firewall-Regeln). Das Programm darin heißt weiter `AgOpenWeb.Desktop.exe`; Datenordner
+  `Dokumente\AgOpenWeb` und Port 5174 bleiben. Ein Update einer Testversion „AgOpenWeb“ bleibt in
+  deren Programmordner, ersetzt Startmenü-Ordner und Verknüpfung durch die neuen.
+- **AppId endgültig:** `{6C0E8A52-5D7B-4C1E-9A2F-3B8D41E7C905}` (seit der ersten Testversion, mit dem
+  Produktnamen festgeschrieben). Nie ändern, auch nicht bei einem neuen Namen, sonst erkennt Windows
+  Updates nicht mehr und installiert daneben.
 
 ## Update-Kanäle
 - **Stabil** (Vorgabe): nur Versionen, die ausdrücklich freigegeben wurden.
