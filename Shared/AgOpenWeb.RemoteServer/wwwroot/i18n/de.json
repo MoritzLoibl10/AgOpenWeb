@@ -1667,5 +1667,8 @@
   "✎ Edit": "✎ Bearbeiten",
   "✕ Cancel": "✕ Abbrechen",
   "＋ Add": "＋ Hinzufügen",
-  "Also stored on the guidance computer (last at {t}). A running session is stored when it ends.": "Auch am Lenkrechner gespeichert (zuletzt {t}). Eine laufende Sitzung wird gespeichert, sobald sie endet."
+  "Also stored on the guidance computer (last at {t}). A running session is stored when it ends.": "Auch am Lenkrechner gespeichert (zuletzt {t}). Eine laufende Sitzung wird gespeichert, sobald sie endet.",
+  "start and end from the guidance computer": "Beginn und Ende vom Lenkrechner",
+  "start from the guidance computer": "Beginn vom Lenkrechner",
+  "end from the guidance computer": "Ende vom Lenkrechner"
 }

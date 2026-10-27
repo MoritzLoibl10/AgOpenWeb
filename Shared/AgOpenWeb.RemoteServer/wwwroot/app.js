@@ -11865,7 +11865,10 @@ const WorkLogCore = (() => {
     const active = !!(s && s.live && s.control && s.field && s.job);
     const o = st.open;
     if (o && (!active || o.field !== s.field || o.job !== s.job || now - o.seenAt > GAP_MS)) {
-      st.entries = st.entries.concat([{ ...o, open: false }]); st.open = null;
+      // Closed because the job or field was closed or changed (not a lost link or control):
+      // the host's job end can stand in for this tablet's clock (ended()).
+      const byJob = !!(s && s.live && s.control) && now - o.seenAt <= GAP_MS && (!s.field || !s.job || o.field !== s.field || o.job !== s.job);
+      st.entries = st.entries.concat([{ ...o, open: false, byJob }]); st.open = null;
     }
     if (!active) return st;
     const vals = { worked: num(s.worked), actual: num(s.actual), trip: num(s.trip) };
@@ -11874,6 +11877,8 @@ const WorkLogCore = (() => {
         workType: s.workType || '', start: now, end: now, seenAt: now,
         workedStart: vals.worked, workedEnd: vals.worked, actualStart: vals.actual, actualEnd: vals.actual,
         tripStart: vals.trip, tripEnd: vals.trip, tool: s.tool || '', vehicle: s.vehicle || '', widthM: num(s.widthM),
+        // A job newly started on the host while this tablet watched: its start is the host's.
+        hostStart: s.jobNew && num(s.jobStart) > 0 ? s.jobStart : null, hostEnd: null,
         activity: '', product: '', amount: '', note: '', open: true };
       return st;
     }
@@ -11893,13 +11898,22 @@ const WorkLogCore = (() => {
   const delta = (a, b) => a == null || b == null || b < a ? null : b - a;
   const sessionArea = e => delta(e.workedStart, e.workedEnd);
   const overlap = e => e.workedEnd != null && e.actualEnd != null && e.workedEnd >= e.actualEnd ? e.workedEnd - e.actualEnd : null;
-  const season = e => new Date(e.start).getFullYear();
+  // Host-paket C: the host's job start and end (Job.StartedAt / EndedAt) where they mark this
+  // session's start or end, else this tablet's clock; both from one clock if they disagree.
+  function ended(e, job) {
+    if (!e.byJob || e.hostEnd != null || !job || !(num(job.endedMs) > 0)) return e;
+    return { ...e, hostEnd: job.endedMs, byJob: false };
+  }
+  const hostOk = e => (e.hostEnd != null ? e.hostEnd : e.end) >= (e.hostStart != null ? e.hostStart : e.start);
+  const t0 = e => e.hostStart != null && hostOk(e) ? e.hostStart : e.start;
+  const t1 = e => e.hostEnd != null && hostOk(e) ? e.hostEnd : e.end;
+  const season = e => new Date(t0(e)).getFullYear();
   function sums(entries) {
     const out = new Map();
     for (const e of entries) {
       const k = e.field + '\u0000' + season(e);
       const r = out.get(k) || { field: e.field, season: season(e), count: 0, ms: 0, areaSqM: 0, areaMissing: 0 };
-      r.count++; r.ms += Math.max(0, e.end - e.start);
+      r.count++; r.ms += Math.max(0, t1(e) - t0(e));
       const a = sessionArea(e); if (a == null) r.areaMissing++; else r.areaSqM += a;
       out.set(k, r);
     }
@@ -11917,7 +11931,7 @@ const WorkLogCore = (() => {
   const cell = v => { const t = String(v == null ? '' : v); return /[;"\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
   function csv(entries, head) {
     const rows = [head];
-    for (const e of entries) rows.push([e.field, e.job, e.workType, dDate(e.start), dTime(e.start), dTime(e.end), dur(e.end - e.start),
+    for (const e of entries) rows.push([e.field, e.job, e.workType, dDate(t0(e)), dTime(t0(e)), dTime(t1(e)), dur(t1(e) - t0(e)),
       ha(sessionArea(e)), ha(e.workedEnd), ha(e.actualEnd), ha(overlap(e)), metres(delta(e.tripStart, e.tripEnd)),
       e.tool, widthTxt(e.widthM), e.vehicle, e.activity, e.product, e.amount, e.note]);
     return '﻿' + rows.map(r => r.map(cell).join(';')).join('\r\n') + '\r\n';
@@ -11935,7 +11949,7 @@ const WorkLogCore = (() => {
     const entries = [...byId.values()].sort((x, y) => x.start - y.start || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
     return { entries, deleted };
   }
-  return { step, merge, sums, csv, sessionArea, overlap, season, delta, dDate, dTime, dur, ha, GAP_MS };
+  return { step, merge, ended, t0, t1, sums, csv, sessionArea, overlap, season, delta, dDate, dTime, dur, ha, GAP_MS };
 })();
 // worklog:end
 
@@ -11985,17 +11999,38 @@ const TabletWorkLog = (() => {
     const s = statusBar || {}, fd = s.fieldData || {};
     const field = fieldOps && fieldOps.activeField || '', job = s.jobName || '';
     const j = fieldOps && (fieldOps.jobs || []).find(x => x.fieldName === field && x.taskName === job);
+    // A job started on the host while this tablet watched: the previous tick (live, with control)
+    // had no job or another one, and the job is new (opened in the minute it started; a resumed
+    // job was opened later). Then its start is the session's start.
+    const live = connState === 'connected' && !!lastTick && performance.now() - lastTick.t < 2000;
+    const key = field && job ? field + '\u0000' + job : '';
+    const jobNew = !!(j && key && prevKey !== null && prevKey !== key && j.status === 0 && j.startedMs > 0 && j.lastOpened === hostMinute(j.startedMs));
+    prevKey = live && iHoldControl ? key : null;
     return {
-      live: connState === 'connected' && !!lastTick && performance.now() - lastTick.t < 2000,
-      control: !!iHoldControl, field, job, workType: j ? j.workType : '',
+      live,
+      control: !!iHoldControl, field, job, workType: j ? j.workType : '', jobStart: j ? j.startedMs : null, jobNew,
       worked: s.workedAreaSqM, actual: fd.actualAreaSqM, trip: fd.tripDistanceM,
       tool: profiles ? profiles.activeTool : '', vehicle: profiles ? profiles.activeVehicle : '',
       widthM: typeof sectionsWidthM === 'function' && sectionsWidthM() > 0 ? sectionsWidthM() : null,
     };
   }
+  let prevKey = null; // field+job of the previous tick while live with control; null = not watched
+  const p2 = n => String(n).padStart(2, '0');
+  const hostMinute = ms => { const d = new Date(ms); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()); };
   setInterval(() => {
-    const before = state.entries.length, wasOpen = !!state.open;
+    let before = state.entries.length; const wasOpen = !!state.open;
     state = C.step(state, snapshot(), Date.now());
+    // The host's end for a session closed with its job, once the job list shows it (a few s later).
+    const jobs = fieldOps && fieldOps.jobs || [];
+    if (state.entries.some(e => e.byJob)) {
+      const now = Date.now();
+      state = { ...state, entries: state.entries.map(e => {
+        if (!e.byJob) return e;
+        const x = C.ended(e, jobs.find(j => j.fieldName === e.field && j.taskName === e.job));
+        return x.byJob && now - e.end > 60000 ? { ...x, byJob: false } : x; // not reported within a minute: tablet clock
+      }) };
+      before = -1;
+    }
     const moved = state.entries.length !== before || wasOpen !== !!state.open;
     save(moved); if (moved) syncSoon = true;
     if (isOpen()) render();
@@ -12021,7 +12056,7 @@ const TabletWorkLog = (() => {
     const q = fText.trim().toLowerCase();
     return all().filter(e => (!fField || e.field === fField) && (!fSeason || String(C.season(e)) === fSeason)
       && (!q || [e.field, e.job, e.workType, e.tool, e.vehicle, e.activity, e.product, e.amount, e.note].join(' ').toLowerCase().includes(q)))
-      .sort((a, b) => a.field.localeCompare(b.field) || b.start - a.start);
+      .sort((a, b) => a.field.localeCompare(b.field) || C.t0(b) - C.t0(a));
   }
   const HEAD = () => [tr('Field'), tr('Job'), tr('Work type'), tr('Date'), tr('Start'), tr('End'), tr('Duration (h:mm)'), tr('Area this session (ha)'),
     tr('Job area total (ha)'), tr('Covered once, job total (ha)'), tr('Overlap, job total (ha)'), tr('Distance (m)'), tr('Tool'), tr('Working width (m)'), tr('Vehicle'),
@@ -12037,7 +12072,7 @@ const TabletWorkLog = (() => {
   }
   function render() {
     if (!isOpen()) return;
-    const list = filtered(), key = JSON.stringify([list.map(e => [e.id, e.end, e.activity, e.product, e.amount, e.note]), fField, fSeason, fText, edit, msg, storeOk, hostAt, hostErr, I18n.language]);
+    const list = filtered(), key = JSON.stringify([list.map(e => [e.id, e.end, e.hostEnd, e.activity, e.product, e.amount, e.note]), fField, fSeason, fText, edit, msg, storeOk, hostAt, hostErr, I18n.language]);
     if (key === last) return;
     if (document.activeElement && sheet.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // don't rebuild under the cursor
     last = key;
@@ -12074,7 +12109,7 @@ const TabletWorkLog = (() => {
     for (const e of list) {
       const r = el('button', 'tbk-it wl-it' + (e.open ? ' on' : ''));
       const nm = el('span', 'tbk-nm');
-      nm.appendChild(el('small', '', C.dDate(e.start) + ' · ' + C.dTime(e.start) + '–' + (e.open ? T(tr('running')) : C.dTime(e.end)) + ' · ' + C.dur(e.end - e.start) + ' h'));
+      nm.appendChild(el('small', '', C.dDate(C.t0(e)) + ' · ' + C.dTime(C.t0(e)) + '–' + (e.open ? T(tr('running')) : C.dTime(C.t1(e))) + ' · ' + C.dur(C.t1(e) - C.t0(e)) + ' h'));
       nm.appendChild(el('b', '', e.field + ' · ' + e.job));
       const a = C.sessionArea(e);
       nm.appendChild(el('small', '', [a == null ? T(tr('area: —')) : fmtArea(a), e.tool, e.widthM != null ? fmtUnit(e.widthM, 'm') : '', e.activity, e.product, e.amount].filter(Boolean).join(' · ')));
@@ -12100,9 +12135,11 @@ const TabletWorkLog = (() => {
   function renderEdit() {
     const e = all().find(x => x.id === edit); if (!e) { edit = null; render(); return; }
     const box = el('div', 'tb-box');
-    box.appendChild(el('div', 'tb-lbl', e.field + ' · ' + e.job + ' · ' + C.dDate(e.start)));
+    box.appendChild(el('div', 'tb-lbl', e.field + ' · ' + e.job + ' · ' + C.dDate(C.t0(e))));
     const a = C.sessionArea(e), ov = C.overlap(e), tr0 = C.delta(e.tripStart, e.tripEnd);
-    for (const [k, v] of [[tr('Time'), C.dTime(e.start) + '–' + (e.open ? T(tr('running')) : C.dTime(e.end)) + ' (' + C.dur(e.end - e.start) + ' h)'],
+    const src = (e.hostStart != null || e.hostEnd != null) && C.t0(e) === (e.hostStart != null ? e.hostStart : e.start) && C.t1(e) === (e.hostEnd != null ? e.hostEnd : e.end)
+      ? ' · ' + T(e.hostStart != null && e.hostEnd != null ? tr('start and end from the guidance computer') : e.hostStart != null ? tr('start from the guidance computer') : tr('end from the guidance computer')) : '';
+    for (const [k, v] of [[tr('Time'), C.dTime(C.t0(e)) + '–' + (e.open ? T(tr('running')) : C.dTime(C.t1(e))) + ' (' + C.dur(C.t1(e) - C.t0(e)) + ' h)' + src],
       [tr('Area this session'), a == null ? '—' : fmtArea(a)], [tr('Job area total'), e.workedEnd == null ? '—' : fmtArea(e.workedEnd)],
       [tr('Overlap, job total'), ov == null ? '—' : fmtArea(ov)], [tr('Distance'), tr0 == null ? '—' : fmtUnit(tr0, 'm', 0)],
       [tr('Tool'), e.tool || '—'], [tr('Working width'), e.widthM == null ? '—' : fmtUnit(e.widthM, 'm')], [tr('Vehicle'), e.vehicle || '—'], [tr('Work type'), e.workType || '—']])
@@ -12171,7 +12208,7 @@ const TabletWorkLog = (() => {
         + '<p>' + s.map(r => esc(r.season + ': ' + tr('Sessions: {n}', { n: r.count }) + ' · ' + C.dur(r.ms) + ' h · ' + fmtArea(r.areaSqM))).join('<br>') + '</p>'
         + '<table><tr>' + [tr('Date'), tr('Time'), tr('Job'), tr('Area this session'), tr('Tool'), tr('Working width'), tr('Activity'), tr('Product / variety'), tr('Amount'), tr('Note')]
           .map(k => '<th>' + esc(T(k)) + '</th>').join('') + '</tr>'
-        + es.slice().sort((a, b) => a.start - b.start).map(e => '<tr>' + [C.dDate(e.start), C.dTime(e.start) + '–' + C.dTime(e.end), e.job,
+        + es.slice().sort((a, b) => a.start - b.start).map(e => '<tr>' + [C.dDate(C.t0(e)), C.dTime(C.t0(e)) + '–' + C.dTime(C.t1(e)), e.job,
           C.sessionArea(e) == null ? '—' : fmtArea(C.sessionArea(e)), e.tool, e.widthM == null ? '' : fmtUnit(e.widthM, 'm'), e.activity, e.product, e.amount, e.note]
           .map(v => '<td>' + esc(v) + '</td>').join('') + '</tr>').join('') + '</table>'
         + '<p class="wl-n">' + esc(T(NOTE)) + '</p></section>';

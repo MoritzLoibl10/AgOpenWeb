@@ -521,7 +521,8 @@ public sealed class SceneProjector
 
         var jobs = _jobs.ListAllJobs()
             .Select(j => new JobEntryDto(j.FieldName, j.TaskName, j.WorkType, (int)j.Status,
-                j.LastOpenedAt.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture), j.Notes))
+                j.LastOpenedAt.ToString("yyyy-MM-dd HH:mm", System.Globalization.CultureInfo.InvariantCulture), j.Notes,
+                UnixMs(j.StartedAt), j.EndedAt is { } end ? UnixMs(end) : 0))
             .ToList();
         var suggestions = _jobs.SuggestWorkTypes().ToList();
 
@@ -559,6 +560,9 @@ public sealed class SceneProjector
 
     // Re-send FieldOps on a field/job add/delete/open/area change (NOT on import-folder
     // changes — those refresh on connect / any field-job change, cheap enough).
+    // Local or unspecified times (DateTime.Now, as the job service stamps them) are local.
+    private static double UnixMs(System.DateTime t) => new System.DateTimeOffset(t).ToUnixTimeMilliseconds();
+
     public long FieldOpsFingerprint()
     {
         long h = 17;
@@ -571,6 +575,8 @@ public sealed class SceneProjector
             h = h * 31 + (j.TaskName?.GetHashCode() ?? 0);
             h = h * 31 + (int)j.Status;
             h = h * 31 + j.LastOpenedAt.Ticks.GetHashCode();
+            h = h * 31 + j.StartedAt.Ticks.GetHashCode();
+            h = h * 31 + (j.EndedAt?.Ticks.GetHashCode() ?? 0);
         }
         h = h * 31 + (_fields.ActiveField?.Name?.GetHashCode() ?? 0);
         return h;

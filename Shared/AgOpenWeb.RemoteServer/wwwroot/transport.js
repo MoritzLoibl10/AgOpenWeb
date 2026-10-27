@@ -234,7 +234,7 @@ window.RemoteTransport = {
           const fc = i32(); const fields = new Array(fc);
           for (let k = 0; k < fc; k++) fields[k] = { name: str(), hasDistance: !!u8(), distanceKm: f64(), areaHa: f64() };
           const jc = i32(); const jobs = new Array(jc);
-          for (let k = 0; k < jc; k++) jobs[k] = { fieldName: str(), taskName: str(), workType: str(), status: i32(), lastOpened: str(), notes: str() };
+          for (let k = 0; k < jc; k++) jobs[k] = { fieldName: str(), taskName: str(), workType: str(), status: i32(), lastOpened: str(), notes: str(), startedMs: f64(), endedMs: f64() };
           const wc = i32(); const workTypes = new Array(wc); for (let k = 0; k < wc; k++) workTypes[k] = str();
           const ic = i32(); const isoFiles = new Array(ic); for (let k = 0; k < ic; k++) isoFiles[k] = str();
           const kc = i32(); const kmlFiles = new Array(kc); for (let k = 0; k < kc; k++) kmlFiles[k] = str();

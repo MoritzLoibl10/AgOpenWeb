@@ -554,9 +554,12 @@ public record FieldOpsDto(
 public record FieldEntryDto(string Name, bool HasDistance, double DistanceKm, double AreaHa);
 
 /// <summary>One job row (mirrors JobSummary). Status: 0 InProgress, 1 Done, 2 Abandoned.
-/// LastOpened is a preformatted "yyyy-MM-dd HH:mm" string.</summary>
+/// LastOpened is a preformatted "yyyy-MM-dd HH:mm" string. Fork (host-paket C, append-only):
+/// StartedMs / EndedMs are the job's StartedAt / EndedAt as Unix milliseconds, 0 = none (a
+/// running job has no end; resuming clears it).</summary>
 public record JobEntryDto(
-    string FieldName, string TaskName, string WorkType, int Status, string LastOpened, string Notes);
+    string FieldName, string TaskName, string WorkType, int Status, string LastOpened, string Notes,
+    double StartedMs = 0, double EndedMs = 0);
 
 /// <summary>AgShare read-frame (Phase 9 Field Ops) — cloud sync settings + transient action
 /// state. Settings come from ConfigStore.Connections; Status/Busy/CloudFields are the live

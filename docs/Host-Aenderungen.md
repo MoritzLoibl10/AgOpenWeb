@@ -349,3 +349,20 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
 - **Lenk-, Regel- und Sicherheitslogik:** nicht berührt.
 - **Beim Merge von upstream:** neue Datei; im Backup-Dienst vier kleine Stellen (`Roots`, `Collect`,
   `IsAllowed`, `Group`/`Apply`/`Compare`); in `RemoteServerHost` ein Block vor `StartAsync`.
+
+## 16. Host-Paket C: Auftragsbeginn und -ende an den Client (feature/host-paket, Oktober 2026)
+- **Dateien:** `Contracts.cs` (`JobEntryDto` + `StartedMs`, `EndedMs`, angehängt mit Vorgabe 0),
+  `SceneProjector.cs` (füllt beide aus `Job.StartedAt`/`EndedAt`; Fingerabdruck nimmt beide mit, damit
+  das Schließen eines Auftrags die Liste neu schickt), `WireCodec.cs` und `transport.js` (je Auftrag
+  zwei `f64` nach den Notizen). Test: `Tests/AgOpenWeb.RemoteServer.Tests/FieldOpsJobTimesTests.cs`.
+- **Werte:** nur, was der Host hat: `StartedAt` (beim Anlegen), `EndedAt` (beim Schließen, beim
+  Fortsetzen gelöscht), als Unix-Millisekunden; 0 = keiner.
+- **Strecke nicht gesendet:** `Job.DistanceTraveledMeters` wird im Host nirgends berechnet (nur
+  gelesen und geschrieben, laut Kommentar „beim Schließen“, aber ohne Code dafür); es wäre immer 0.
+  Das Protokoll nimmt weiter die Tagesstrecke (`fieldData.tripDistanceM`) des Hosts.
+- **Client:** Das Arbeitsprotokoll nimmt den Auftragsbeginn des Hosts als Sitzungsbeginn, wenn der
+  Auftrag während der Sitzung neu angelegt wurde, und das Auftragsende, wenn die Sitzung mit dem
+  Schließen des Auftrags endete; sonst die Tablet-Uhr. Ergäbe die Mischung ein Ende vor dem Beginn,
+  gilt die Tablet-Uhr. Die Detailansicht nennt, was vom Lenkrechner kommt.
+- **Beim Merge von upstream:** Der Datensatz ist nur hinten verlängert; ändert upstream die
+  Auftragszeile im FieldOps-Rahmen, beide Seiten (`WireCodec`, `transport.js`) gleich nachziehen.

@@ -18,7 +18,8 @@
 die ZIPs des Profil-Backups, `/bugreports/` nur Diagnose-ZIPs.
 
 ### Fehlt, bräuchte eine Host-Änderung (nicht gebaut)
-1. **Auftragszeiten und -strecke vom Host:** `Job.StartedAt`, `EndedAt`, `DistanceTraveledMeters`,
+1. **Auftragszeiten und -strecke vom Host** (Zeiten gebaut in `feature/host-paket`,
+   `docs/Host-Aenderungen.md` 16; die Strecke rechnet der Host nicht aus, sie bleibt die Tagesstrecke): `Job.StartedAt`, `EndedAt`, `DistanceTraveledMeters`,
    `AreaWorkedHectares` in `FieldOpsDto.Jobs` mitsenden (`SceneProjector`, `WireCodec`, `transport.js`).
 2. **Protokoll am Lenkrechner speichern** (gebaut in `feature/host-paket`, als eine Datei
    `WorkLog/worklog.json`, siehe Teil E): ursprünglich vorgeschlagen z. B. `worklog.json` je Schlag neben `field.geojson`, mit

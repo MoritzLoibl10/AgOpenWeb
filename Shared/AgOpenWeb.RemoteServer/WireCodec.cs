@@ -240,6 +240,8 @@ public static class WireCodec
             w.Write(j.Status);       // i32
             WriteStr(w, j.LastOpened);
             WriteStr(w, j.Notes);
+            w.Write(j.StartedMs);    // f64, fork (host-paket C): Unix ms, 0 = none
+            w.Write(j.EndedMs);      // f64
         }
         w.Write(f.WorkTypeSuggestions.Count);
         foreach (var s in f.WorkTypeSuggestions) WriteStr(w, s);

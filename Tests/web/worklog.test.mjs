@@ -80,3 +80,26 @@ test('merge: no duplicates, the later change wins, deleted stays deleted, open s
   assert.deepEqual(C.merge(m, m).entries.map(e => e.id), ['a', 'b', 'c'], 'merging again changes nothing');
   assert.deepEqual(C.merge(host, tablet).entries.map(e => [e.id, e.note]), m.entries.map(e => [e.id, e.note]), 'same result either way round');
 });
+
+// Host-paket C: the host's job start and end stand in for this tablet's clock where they mark the session.
+test('host times: a new job gives the start, closing it the end; otherwise the tablet clock', () => {
+  const H0 = T0 - 7 * MIN, H1 = T0 + 25 * MIN; // the host's clock is 7 min behind this tablet's
+  let st = run([[snap({ jobNew: true, jobStart: H0 }), T0], [snap(), T0 + 30 * MIN], [snap({ job: '' }), T0 + 31 * MIN]]);
+  let e = st.entries[0];
+  assert.equal(e.hostStart, H0); assert.equal(e.byJob, true);
+  e = C.ended(e, { endedMs: H1, status: 1 });
+  assert.equal(C.t0(e), H0); assert.equal(C.t1(e), H1);
+  assert.equal(C.csv([e], ['h']).split('\r\n')[1].split(';')[6], '0:32'); // duration from the host: 32 min
+  assert.equal(C.ended(e, { endedMs: H1 + MIN }).hostEnd, H1, 'set once');
+
+  // A resumed job (not new) or a session that ended by a lost link: tablet clock.
+  st = run([[snap({ jobNew: false, jobStart: H0 }), T0], [snap({ live: false }), T0 + 30 * MIN]]);
+  e = st.entries[0];
+  assert.equal(e.hostStart, null); assert.equal(e.byJob, false);
+  assert.equal(C.ended(e, { endedMs: H1 }).hostEnd, null);
+  assert.equal(C.t0(e), T0);
+
+  // Host times that would make the session end before it starts are not used.
+  e = { start: T0, end: T0 + MIN, hostStart: null, hostEnd: T0 - 60 * MIN };
+  assert.equal(C.t1(e), T0 + MIN);
+});
