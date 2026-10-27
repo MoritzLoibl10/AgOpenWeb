@@ -64,6 +64,8 @@ gezählt und genannt). Antippen eines Eintrags zeigt alle Werte und die vier Fre
 - **Wo:** im Browser-Speicher dieses Tablets (`localStorage`, Schlüssel `aow.worklog.v1`). Die
   Einträge liegen damit **nur auf diesem Tablet**; ein anderes Gerät oder ein anderer Browser sieht
   sie nicht. Löschen der Browser- bzw. App-Daten löscht sie mit. Das sagt auch die Übersicht.
+- **Port:** Der Port 5174 darf sich nicht ändern, sonst ist der Browser-Speicher nicht mehr
+  erreichbar (er hängt an der Adresse `http://localhost:5174`).
 - **Sichern:** „Als Datei sichern“ (JSON) und „Aus Datei laden“ (fügt hinzu, vorhandene Einträge
   bleiben, gleiche Einträge werden nicht doppelt geladen).
 - **Profil-Backup:** nicht möglich ohne Host-Änderung, weil der Host die Backup-Datei baut und den
