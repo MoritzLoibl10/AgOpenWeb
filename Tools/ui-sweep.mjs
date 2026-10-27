@@ -8,13 +8,14 @@
 // touch targets under 44 px and text with low contrast (WCAG ratio < 4.5, < 3 for large text).
 // Needs a running host (default http://localhost:5174) and Playwright.
 //
-//   node Tools/ui-sweep.mjs [--url http://localhost:5174] [--size 1024x600] [--lang de] [--out sweep.json]
+//   node Tools/ui-sweep.mjs [--url http://localhost:5174] [--size 1024x600] [--lang de] [--scale glove] [--out sweep.json]
+// --scale: the tablet UI size (normal, large, glove), as chosen in the menu; default glove.
 import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const url = arg('url', 'http://localhost:5174/'), [W, H] = arg('size', '1024x600').split('x').map(Number);
-const lang = arg('lang', 'de'), out = arg('out', 'ui-sweep.json');
+const lang = arg('lang', 'de'), out = arg('out', 'ui-sweep.json'), scale = arg('scale', 'glove');
 const { chromium } = createRequire(import.meta.url)('playwright');
 const root = new URL('..', import.meta.url);
 const en = JSON.parse(readFileSync(new URL('Shared/AgOpenWeb.RemoteServer/wwwroot/i18n/en.json', root), 'utf8'));
@@ -24,20 +25,21 @@ const untranslated = Object.keys(en).filter(k => tl[k] && tl[k] !== k);
 
 // Every surface as [name, script that opens it, root selector].
 const SURFACES = () => {
-  const s = [['main screen', 'lnCloseAll(); closeDialog();', 'body']];
+  const s = [['main screen', 'lnCloseAll(); closeDialog(); wzClose(true);', 'body']];
   for (const p of LN_NAV_PANELS) {
-    const open = `closeDialog(); lnCloseAll(); document.getElementById('${p}').classList.add('open');`;
+    const open = `wzClose(true); closeDialog(); lnCloseAll(); document.getElementById('${p}').classList.add('open');`;
     s.push([p, open, '#' + p]);
     document.querySelectorAll(`#${p} .cfg-tab`).forEach((b, i) => s.push([`${p} / tab ${i + 1}`,
       open + `document.querySelectorAll('#${p} .cfg-tab')[${i}].dispatchEvent(new PointerEvent('pointerdown', {bubbles: true}));`, '#' + p]));
   }
-  for (const c of document.querySelectorAll('#dialoghost .dlg-card[id]')) s.push([c.id, `lnCloseAll(); openDialog('${c.id}');`, '#' + c.id]);
+  for (const c of document.querySelectorAll('#dialoghost .dlg-card[id]')) s.push([c.id, `wzClose(true); lnCloseAll(); openDialog('${c.id}');`, '#' + c.id]);
   s.push(['steer wizard', 'lnCloseAll(); closeDialog(); openSteerWizard();', '#wizard-overlay']);
   for (const f of document.querySelectorAll('.bn-flyout[id]'))
-    s.push([f.id, `lnCloseAll(); closeDialog(); document.getElementById('${f.id}').classList.add('open');`, '#' + f.id]);
+    s.push([f.id, `wzClose(true); lnCloseAll(); closeDialog(); document.getElementById('${f.id}').classList.add('open');`, '#' + f.id]);
   // Fork sheets and menus
   const fire = sel => `document.querySelector('${sel}').dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, cancelable: true}));`;
-  const reset = `lnCloseAll(); closeDialog(); document.querySelectorAll('.tui-sheet.open, .tp-scrim.open').forEach(e => e.classList.remove('open'));`;
+  // The fork's sheets are opened from the menu in setup mode; in drive mode they close again.
+  const reset = `TabletTerminal.setMode('setup'); wzClose(true); lnCloseAll(); closeDialog(); document.querySelectorAll('.tui-sheet.open, .tp-scrim.open').forEach(e => e.classList.remove('open'));`;
   s.push(['menu', reset + fire('#tui-menu-btn'), '#tui-menu']);
   s.push(['ready list', reset + `document.getElementById('tui-ready').hidden = false; TabletReady.level;`, '#tui-ready']);
   s.push(['first setup', reset + 'TabletFirstSetup.open(0);', '#tui-setup1']);
@@ -77,6 +79,10 @@ const CHECK = ([sel, untranslated]) => {
   const ctl = els.filter(e => e.matches('button, input, select, [role="button"], .tbk-it, .tui-tile'));
   for (let i = 0; i < ctl.length; i++) for (let j = i + 1; j < ctl.length; j++) {
     const a = ctl[i], b = ctl[j]; if (a.contains(b) || b.contains(a)) continue;
+    // A sheet or panel over the map covers the map's controls on purpose: only controls in the
+    // same layer count.
+    const layer = e => e.closest('.tui-sheet, .ln-panel, .dlg-card, #wizard-overlay, #statusbar, #tui-menu');
+    if (layer(a) !== layer(b)) continue;
     const p = a.getBoundingClientRect(), q = b.getBoundingClientRect();
     const ox = Math.min(p.right, q.right) - Math.max(p.left, q.left), oy = Math.min(p.bottom, q.bottom) - Math.max(p.top, q.top);
     if (ox > 2 && oy > 2) {
@@ -115,6 +121,7 @@ const CHECK = ([sel, untranslated]) => {
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: W, height: H } });
+await page.addInitScript(s => { try { localStorage.setItem('aow.ui.scale', s); } catch (_) { /* ignore */ } }, scale);
 await page.goto(url);
 await page.waitForFunction(() => typeof iHoldControl !== 'undefined' && iHoldControl === true && config && appInfo, null, { timeout: 60000 });
 await page.evaluate(l => transport.send('app.setLanguage|' + l), lang);
@@ -131,7 +138,7 @@ for (const day of [true, false]) {
     for (const r of await page.evaluate(CHECK, [sel, untranslated])) report.push({ mode: day ? 'day' : 'night', surface: name, ...r });
   }
 }
-await page.evaluate(() => { lnCloseAll(); closeDialog(); });
+await page.evaluate(() => { wzClose(true); lnCloseAll(); closeDialog(); });
 await browser.close();
 writeFileSync(out, JSON.stringify(report, null, 1));
 const by = {}; for (const r of report) by[r.k] = (by[r.k] || 0) + 1;
