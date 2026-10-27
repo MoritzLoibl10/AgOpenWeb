@@ -19,7 +19,7 @@ sind nicht getestet; Lenkung nur mit Abstand zu Personen, auf eigenem Gelände.
 ## 2. Am Prüfstand (Kit angeschlossen, Räder frei, niemand an den Rädern)
 Schritte der Prüfstand-Checkliste (`docs/Pruefstand-Checkliste.md`) wie bisher, dazu:
 ☐ Vorführmodus starten, während das Kit läuft → Meldung „Ein Modul ist angeschlossen …“, startet nicht · #21
-☐ Vorführmodus läuft, dann Kit einstecken → Vorführung endet, Lenkung und Teilbreiten aus · #21
+☐ Vorführmodus läuft, dann Kit einstecken → Vorführung endet mit „Vorführung beendet – Kit erkannt. Lenkung und Teilbreiten prüfen.“; es wird nichts umgeschaltet · #21
 ☐ Ampel → Lenkmodul „verbunden“; IMU „verbunden“ (BNO085 über PGN 253); RTK Fix grün · #21
 ☐ Zweites Tablet/Browser verbinden → „Nur ansehen“, kann nichts ändern (auch keine Profile) · #20
 ☐ Lenken ein/aus wie bisher; kein Unterschied zur Vorversion beim Lenkverhalten · #20
