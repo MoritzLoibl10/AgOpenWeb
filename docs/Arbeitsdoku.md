@@ -28,3 +28,20 @@ die ZIPs des Profil-Backups, `/bugreports/` nur Diagnose-ZIPs.
 4. **Downloads auf Android:** Die App-Ansicht (WebView) lädt im Browser erzeugte Dateien (CSV) nicht
    ohne Weiteres herunter und druckt nicht ohne Druck-Anbindung; beides wäre eine Änderung in
    `Platforms/AgOpenWeb.Android`.
+
+## Teil B – Arbeitsprotokoll (wie aufgezeichnet wird)
+- **Ein Eintrag je Arbeitssitzung:** solange dieses Tablet die Bedienung hat, aktuelle Daten
+  bekommt und auf einem Schlag ein Auftrag offen ist. Wechselt Auftrag oder Schlag, geht die
+  Bedienung weg oder fehlen die Daten länger als 5 Minuten, endet der Eintrag. Ein Neuladen der
+  Seite innerhalb von 5 Minuten setzt denselben Eintrag fort.
+- **Werte:** Beginn, Ende und Dauer nach der Uhr des Tablets (die Zeit, in der der Auftrag offen
+  war). Fläche dieser Sitzung = Fläche des Auftrags laut Host am Ende minus am Beginn; geht der
+  Zähler zurück (Fläche gelöscht), bleibt sie leer („—“). Dazu die Auftragswerte am Ende: Fläche
+  gesamt, einfach bedeckt, Überlappung (Differenz der beiden). Strecke = Differenz der Fahrtstrecke
+  laut Host. Gerät, Fahrzeug (aktive Profile) und Arbeitsbreite (aus den Teilbreiten).
+- **Von Hand (Freitext, keine Vorgaben):** Tätigkeit, Mittel/Sorte, Menge, Bemerkung.
+
+## Teil C – Übersicht
+Menü → „Arbeitsprotokoll“: Filter nach Schlag, Saison (Kalenderjahr des Beginns) und Suchtext;
+Summen je Schlag und Saison (Anzahl Sitzungen, Dauer, Fläche; Sitzungen ohne Fläche werden
+gezählt und genannt). Antippen eines Eintrags zeigt alle Werte und die vier Freitextfelder.

@@ -1668,6 +1668,22 @@
     #tui-legal .lg-t { font: 900 calc(var(--tui-fs-lbl) + 4px) system-ui, sans-serif; margin-bottom: 8px; }
     #tui-legal .lg-l { margin: 0 0 14px; padding-left: 22px; }
     #tui-legal .lg-l li { margin: 6px 0; }
+    /* Work log (feature/arbeitsdoku). */
+    #tui-worklog .wl-sums { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; font: 700 var(--tui-fs-lbl)/1.35 system-ui, sans-serif; }
+    #tui-worklog .wl-sum { padding: 4px 8px; border-radius: 8px; background: var(--tui-acc-soft); }
+    #tui-worklog .wl-f { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; font: 700 var(--tui-fs-lbl) system-ui, sans-serif; }
+    #tui-print { display: none; }
+    @media print {
+      :root[data-print="worklog"] body > *:not(#tui-print) { display: none !important; }
+      :root[data-print="worklog"], :root[data-print="worklog"] body { height: auto !important; overflow: visible !important; display: block !important; position: static !important; }
+      :root[data-print="worklog"] #tui-print { display: block; color: #000; background: #fff; font: 11pt/1.35 system-ui, sans-serif; }
+      #tui-print .wl-page { page-break-after: always; break-after: page; }
+      #tui-print .wl-page:last-child { page-break-after: auto; break-after: auto; }
+      #tui-print h1 { font-size: 15pt; margin: 0 0 6pt; }
+      #tui-print table { width: 100%; border-collapse: collapse; }
+      #tui-print th, #tui-print td { border: 0.5pt solid #888; padding: 2pt 4pt; text-align: left; vertical-align: top; }
+      #tui-print .wl-n { font-size: 9pt; color: #444; }
+    }
     #tui-sb-clock { font: 800 var(--tui-fs-val) ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums;
       white-space: nowrap; align-items: center; }
     /* GPS/RTK: the fix quality also as a border pattern (solid = RTK fix, dashed = float,
