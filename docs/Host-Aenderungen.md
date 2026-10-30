@@ -432,3 +432,13 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
 - **ReadyToRun:** im Fork-Workflow (`PublishReadyToRun=true` als Umgebungsvariable des Schritts);
   `deploy/windows/package.sh` unverändert.
 - **Lenk-, Regel- und Sicherheitslogik:** nicht berührt.
+
+## 20. Autostart und zweiter Start (feature/installer, Oktober 2026; genehmigt)
+- **`--autostart`:** `LauncherEntry` öffnet das Fenster sofort im Vollbild; `WebViewLauncher`
+  hängt `?winfs=1` an die Adresse, damit der ⛶-Knopf (app.js) den Zustand kennt.
+- **Zweiter Start:** `SingleInstance` (upstream #377) bleibt die Sperre; neu `AskRunningToShow`
+  (Named Pipe `AgOpenWeb.Desktop.Show`, unter Windows mit `AllowSetForegroundWindow`) und
+  `ListenForShow` im Launcher; `Launcher/WindowFront.cs` (neu) holt das Fenster nach vorne. Ein
+  headless laufender Host antwortet nicht: dann wie bisher die Meldung und Ende.
+- **Installer:** Aufgabe `autostart`, `[Registry]` HKCU Run (siehe `docs/Installer.md`).
+

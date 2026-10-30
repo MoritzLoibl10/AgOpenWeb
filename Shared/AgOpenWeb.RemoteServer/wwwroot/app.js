@@ -4764,7 +4764,8 @@ if (fsBtn) {
   let winFs = null; // the launcher's state as last asked; starts as App Settings › Start Fullscreen
   fsBtn.addEventListener('click', () => {
     if (photino()) {
-      if (winFs === null) winFs = !!(config && config.display && config.display.startFullscreen);
+      // fork (autostart): ?winfs=1 = the launcher opened the window fullscreen (autostart or setting)
+      if (winFs === null) winFs = /[?&]winfs=1(&|$)/.test(location.search) || !!(config && config.display && config.display.startFullscreen);
       winFs = !winFs;
       window.external.sendMessage('fullscreen|' + (winFs ? '1' : '0'));
       fsBtn.textContent = winFs ? '🗗' : '⛶';

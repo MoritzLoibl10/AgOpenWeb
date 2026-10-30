@@ -35,10 +35,29 @@ internal static class LauncherEntry
             .SetLogVerbosity(0);
         var icon = IconPath();
         if (icon != null) window.SetIconFile(icon);
+        // Fork (autostart): started with Windows → fullscreen straight away.
+        if (Array.IndexOf(args, "--autostart") >= 0) window.SetFullScreen(true);
+        // Fork: a second start brings this window to the front (SingleInstance).
+        SingleInstance.ListenForShow(() => BringToFront(window));
 
         if (console) new ConsolePage(window, args).Show();
         else new WebViewLauncher(window, args).Show();
         window.WaitForClose();
+    }
+
+    /// <summary>Restore and activate the window (a second start of the app asked for it).</summary>
+    private static void BringToFront(PhotinoWindow window)
+    {
+        try
+        {
+            window.Invoke(() =>
+            {
+                if (window.Minimized) window.SetMinimized(false);
+                if (OperatingSystem.IsWindows()) WindowFront.Activate(window.WindowHandle);
+                else { window.SetTopMost(true); window.SetTopMost(false); }
+            });
+        }
+        catch { /* the window is not there yet or already closing */ }
     }
 
     /// <summary>The window icon file, next to the executable (Windows and Linux; the macOS

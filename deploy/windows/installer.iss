@@ -27,6 +27,9 @@
 ; - WebView2 runtime: checked in the registry; if missing, Microsoft's bootstrapper (passed in as
 ;   /DWebView2Setup, downloaded by the workflow) installs it. Built without it, the setup only
 ;   says that the runtime is missing.
+; - Autostart (task "autostart", on by default): starts with Windows for the user who installs,
+;   fullscreen (--autostart); HKCU Run entry, removed on uninstall or when the task is unticked.
+;   A second start brings the running window to the front (Program.cs, SingleInstance).
 ; - Not signed (see docs/Installer.md): Windows SmartScreen warns until the setup is signed.
 
 ; Product name: everything the user sees (setup, Start menu, shortcut, "Apps", firewall rules).
@@ -92,6 +95,10 @@ Name: "de"; MessagesFile: "compiler:Languages\German.isl"
 Name: "en"; MessagesFile: "compiler:Default.isl"
 
 [CustomMessages]
+de.AutostartGroup=Start:
+de.AutostartTask=Beim Windows-Start automatisch starten (im Vollbild, nur für diesen Benutzer)
+en.AutostartGroup=Start:
+en.AutostartTask=Start automatically with Windows (fullscreen, this user only)
 de.FirewallGroup=Netzwerk:
 de.FirewallTask=Windows-Firewall nur für dieses Programm freigeben: Module (UDP 9999, 2211, 2222) und Tablets im Netz (TCP 5174). Windows fragt dafür einmal nach Administratorrechten. Ohne Freigabe fragt Windows beim ersten Start selbst.
 de.FirewallRun=Windows-Firewall-Freigabe für {#AppName} einrichten …
@@ -105,7 +112,14 @@ en.WebView2Missing=The Microsoft WebView2 runtime is missing and this setup does
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"
+Name: "autostart"; Description: "{cm:AutostartTask}"; GroupDescription: "{cm:AutostartGroup}"
 Name: "firewall"; Description: "{cm:FirewallTask}"; GroupDescription: "{cm:FirewallGroup}"
+
+[Registry]
+; Autostart for the current user only (HKCU), fullscreen. Removed on uninstall; an update with the
+; box unticked removes it too.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "{#AppName}"; ValueData: """{app}\{#AppExe}"" --autostart"; Flags: uninsdeletevalue; Tasks: autostart
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueName: "{#AppName}"; ValueType: none; Flags: deletevalue dontcreatekey; Tasks: not autostart
 
 [InstallDelete]
 ; An update starts from an empty program folder, so no file of the old version is left over.

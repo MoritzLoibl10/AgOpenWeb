@@ -28,6 +28,12 @@ sealed class Program
         var single = SingleInstance.TryAcquire();
         if (single == null)
         {
+            // Fork: a running launcher window comes to the front instead (SingleInstance).
+            if (SingleInstance.AskRunningToShow())
+            {
+                Environment.Exit(0);
+                return;
+            }
             Console.Error.WriteLine($"{Brand.ProductName} is already running on this computer. Open it at http://localhost:5174.");
             Environment.Exit(1);
             return;

@@ -75,11 +75,14 @@ internal sealed class WebViewLauncher
         var port = backend.Server?.Port ?? 5174;
         // App Settings › Start Fullscreen (AgOpenGPS isStartFullScreen): the settings are loaded
         // now, so go fullscreen instead of the default maximized window (#110).
-        bool fullscreen = AgOpenWeb.Models.Configuration.ConfigurationStore.Instance.Display.StartFullscreen;
+        // Fork (autostart): started with Windows (--autostart) is fullscreen too (LauncherEntry);
+        // ?winfs=1 tells the page's ⛶ button the window's state.
+        bool fullscreen = AgOpenWeb.Models.Configuration.ConfigurationStore.Instance.Display.StartFullscreen
+            || Array.IndexOf(_args, "--autostart") >= 0;
         _window.Invoke(() =>
         {
             if (fullscreen) _window.SetFullScreen(true);
-            _window.Load(new Uri($"http://localhost:{port}/"));
+            _window.Load(new Uri($"http://localhost:{port}/" + (fullscreen ? "?winfs=1" : "")));
             StartupTrace.Mark("launcher: web UI requested");
             ScreenAwake.Hold();
         });

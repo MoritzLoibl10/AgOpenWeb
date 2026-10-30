@@ -29,6 +29,13 @@
   Prüfen: `netsh advfirewall firewall show rule name="LM Steering Solutions Module (UDP)"` (bzw.
   `… Tablets (TCP)`) → „Profile: Domäne,Privat,Öffentlich“. Regeln der Testversionen bis moritz.26
   (`AgOpenWeb Module (UDP)`, `AgOpenWeb Tablets (TCP)`) löschen Update und Deinstallation mit.
+- **Autostart** (Häkchen „Beim Windows-Start automatisch starten“, vorgewählt): Eintrag unter
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` („LM Steering Solutions“), nur für den
+  Benutzer, der installiert; die App startet dann gleich im Vollbild (`--autostart`). Die
+  Deinstallation entfernt den Eintrag, ein Update ohne Häkchen auch. Startet die App ein zweites
+  Mal (Doppelklick, während sie läuft), kommt das laufende Fenster nach vorne; eine zweite Instanz
+  gibt es weiterhin nicht (upstream #377: Sperre pro Rechner, jetzt mit Nachricht an das laufende
+  Fenster über eine Named Pipe).
 - **WebView2-Laufzeit:** Der Installer prüft sie in der Registry (`pv` unter
   `EdgeUpdate\Clients\{F3017226-…}`, Maschine oder Benutzer). Fehlt sie, startet er Microsofts
   Bootstrapper (`MicrosoftEdgeWebview2Setup.exe`, lädt die Laufzeit aus dem Netz; braucht also
