@@ -168,7 +168,7 @@ let cycle = 0, ignitionDone = false;
 while (Date.now() < deadline) {
   cycle++;
   const left = () => Math.max(0, (deadline - Date.now()) / 1000);
-  await step(`cycle ${cycle}: drive with U-turns`, async () => { await engage(); await drive(Math.min(180, left())); return await st(); });
+  await step(`cycle ${cycle}: drive with U-turns`, async () => { if (!(await st()).ut) await send('youturn.toggle'); await engage(); await drive(Math.min(180, left())); return await st(); });
   if (Date.now() >= deadline) break;
   await step(`cycle ${cycle}: next pass and nudge`, async () => { await send('track.snapRight'); await sleep(500); await send('track.nudgeLeft'); await sleep(500); await send('track.resetNudge'); return true; });
   await step(`cycle ${cycle}: manual sections`, async () => {
@@ -176,8 +176,10 @@ while (Date.now() < deadline) {
     for (const i of [0, 1, 2]) { await send('section.toggle|' + i); await sleep(300); }
     await drive(20); await send('section.manual'); await sleep(300); await send('section.master'); return await st();
   });
-  await step(`cycle ${cycle}: headland on/off`, async () => { await send('headland.toggle'); await sleep(1500); await send('headland.toggle'); return true; });
-  await step(`cycle ${cycle}: curve for a while`, async () => { await send('track.cycle'); await sleep(800); await engage(); await drive(Math.min(60, left())); await send('track.cycle'); await sleep(800); return ev(() => tick && tick.activeTrackName); });
+  // Headland off turns the automatic U-turn off as well (upstream); switched on again here.
+  await step(`cycle ${cycle}: headland on/off`, async () => { await send('headland.toggle'); await sleep(1500); await send('headland.toggle'); await sleep(800); if (!(await st()).ut) await send('youturn.toggle'); await sleep(500); return (await st()).ut; });
+  // Changing the track while steering stops guidance ("track changed", upstream): counted as ours.
+  await step(`cycle ${cycle}: curve for a while`, async () => { await ourOff(); await send('track.cycle'); await sleep(800); await engage(); await drive(Math.min(60, left())); await ourOff(); await send('track.cycle'); await sleep(800); return ev(() => tick && tick.activeTrackName); });
   await step(`cycle ${cycle}: ready light`, () => ev(() => ({ level: TabletReady.level, checks: TabletReady.checks().map(c => c[0] + ' ' + c[1]) })));
   const side = cycle % 6;
   if (side === 1) await step('work log', async () => { await ev(() => TabletWorkLog.open()); await sleep(1200); const n = await ev(() => TabletWorkLog.entries.length); await ev(() => document.querySelector('#tui-worklog .x').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }))); return { entries: n }; });
