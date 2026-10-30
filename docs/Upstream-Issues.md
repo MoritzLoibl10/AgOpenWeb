@@ -12,6 +12,7 @@ Issues gibt, ließ sich aus der Fork-Sitzung nicht prüfen; vor dem Anlegen kurz
 | 3 | Arbeitsbreite: Ersatzwert 6 m im Web-Client | upstream erledigt (#398: #401) |
 | 4 | **Dringend:** Eine Antenne, zuerst rückwärts (Ausfahren aus der Halle) → Richtung verkehrt gelernt, Motor lenkt falsch herum | Entwurf fertig (27.10.2026), einreichen, zuerst |
 | 5 | MinFixQuality vergleicht die NMEA-Zahl: RTK Float (5) besteht die Vorgabe RTK Fix (4) | Entwurf fertig (27.10.2026), einreichen |
+| 6 | Simulator mit Teilbreiten: Bedienseite hängt bei jedem Abdeckungs-Update ~1 s, Totmann (1,5 s) nimmt die Bedienung weg, Lenkung geht aus | Entwurf fertig (30.10.2026), einreichen |
 
 ## 1. IMU heading from PGN 253 (#357): AiO v26 sends 0 for "no IMU", which now goes into the heading fusion as a real heading
 
@@ -246,3 +247,63 @@ Fix quality 5, 6, 7 and 8 pass (`5 < 4` is false); `IsValid` stays true and guid
 ### Proposal
 Compare by a quality rank instead of the number, e.g. 4 > 5 > 2 = 3 > 1, with 0 and 6–8 as no usable fix, in `GpsFixQualityValidator`; keep the setting's meaning ("at least this good"). Not tested on real hardware.
 ~~~~
+
+## 6. Coverage painting stalls the web client for ~1 s per update; the 1.5 s deadman then revokes control and AutoSteer disengages
+
+Stand: **Entwurf zum Einreichen**. Nachgestellt am 30.10.2026 mit upstream `develop` ca44833e
+(unverändert gebaut) und mit dem Fork, gleiches Ergebnis. Befund am Tablet: Simulator, ohne GPS
+und Kit, nach einigen Sekunden Fahrt geht die Lenkung aus und lässt sich nur kurz wieder
+einschalten. Messung: `Tools/sim-soak.mjs` (Fork) bzw. das Skript unten. Der Fork ändert an der
+Lenkung, am Totmann und am Zeichnen der Abdeckung nichts; er schickt `autosteer.off` nur beim
+Beenden des Vorführmodus (im Versuch nicht aktiv).
+
+**Titel:**
+
+~~~~text
+Web client: coverage painting blocks the main thread ~1 s per update; the 1.5 s control deadman then disengages AutoSteer
+~~~~
+
+**Text:**
+
+~~~~markdown
+### Description
+With sections on, every coverage update makes the web client's main thread busy for roughly 0.8–1.2 s
+(headless Chromium, SwiftShader WebGL). The control heartbeat (`control.presence`, `setInterval` 500 ms
+in app.js) runs on that thread; `ControlAuthority.DeadmanMs` is 1500 ms. When one stall plus the
+heartbeat phase passes 1.5 s, the host revokes control, `AuthorityChangedHandler` toggles AutoSteer
+off and the sections off, and the client reclaims the empty seat a moment later. To the operator:
+steering switches itself off a few seconds after the sections start, and again soon after each
+re-engage.
+
+Likely cause: `drawCoverageSk` draws the new cells into the coverage render target and then takes
+`makeImageSnapshot()` every frame with new cells. The next draw into a surface that has a live
+snapshot copies the whole texture (copy-on-write). A field without a boundary gets coverage bounds
+of 500 m × 500 m at 0.1 m (host log: `Display 5000x5001 @ 0.10m = 25,005,000 pixels / 47.7MB`), so
+each copy moves a ~100 MB RGBA texture. Chromium logs `GPU stall due to ReadPixels`. A CPU profile
+over 15 s (fork build, same rendering code) spends ~98 % in "(program)" (GPU/native); the app's own
+JS is a few hundred ms.
+
+### Steps to reproduce (develop ca44833e)
+1. `AGOPENWEB_DATA=<empty dir> AgOpenWeb.Desktop --headless`; open the UI (simulator is on by default).
+2. `field.new|Repro`, `field.startJob|Repro\tSpraying\t\tJob1`, `sim.speedUp` ×4 (2 km/h),
+   `track.aPlus`, `autosteer.toggle`, `section.master`.
+3. Watch the time between tick frames in the page (`lastTick.t`) and `iHoldControl`.
+
+### Expected
+Ticks every ~100 ms; AutoSteer stays engaged while driving straight in the simulator.
+
+### Actual
+Without sections: no gap above 600 ms in 60 s. With sections: a tick gap of 0.75–1.2 s about
+every second for the whole run. In one of two upstream runs (1920×1200, dpr 1.5), about 14 s after
+engaging:
+`as=false`, `iHoldControl=false`, 0.4 s later control back — AutoSteer off by the deadman. A
+WebSocket client in another process (no rendering) receives ticks without gaps at the same time,
+so the host sends on time; the browser cannot read them.
+
+### Notes
+- On a tablet with a weaker GPU the stalls are longer, so the deadman trips more often.
+- Ideas: no per-frame snapshot of the whole surface (draw the surface's texture directly, or
+  tile the coverage), smaller default bounds without a boundary, or a heartbeat that is not
+  starved by rendering (keeping the deadman's purpose: a frozen UI must still stop the machine).
+~~~~
+
