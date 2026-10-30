@@ -1,4 +1,4 @@
-# Testtag: Checkliste zur Testversion 26.7.0-moritz.27 (#20–#27)
+# Testtag: Checkliste zur Testversion 26.7.0-moritz.28 (#20–#27)
 
 Reihenfolge wie beim Abarbeiten. Je Punkt: **tun** → **soll** · PR. Abhaken: ☐. Board und Motor
 sind nicht getestet; Lenkung nur mit Abstand zu Personen, auf eigenem Gelände.
@@ -14,12 +14,17 @@ sind nicht getestet; Lenkung nur mit Abstand zu Personen, auf eigenem Gelände.
 ☐ Eine Fehlermeldung auslösen (z. B. „Arbeit starten“ ohne Schlag, Spur ohne Schlag) → deutscher Text sagt, was zu tun ist · #22
 ☐ Einrichtung → Info → Drittkomponenten (Liste, BEV-Namensnennung), Aktualisierungen → „Nach Aktualisierungen suchen“ zeigt die neueste Version mit Link (nur mit Internet) · #23
 ☐ Windows-PC: Knopf ⛶ → Fenster echtes Vollbild, noch einmal → zurück · #21
-☐ Windows-PC, neu: Setup aus der Testversion ausführen → Text am Häkchen „Windows-Firewall … freigeben“ nennt die Ports und die Administratorrechte; installieren → eine UAC-Abfrage; Setup, Startmenü, Desktop-Verknüpfung, „Apps“ und Fenstertitel heißen „LM Steering Solutions“; App startet mit Bediengröße „Handschuh“; Hinweis beim ersten Start und Einrichtung → Info zeigen den Namen und „basiert auf AgOpenWeb/AgOpenGPS“ · #27
+☐ Windows-PC, neu: Setup aus der Testversion ausführen → Text am Häkchen „Windows-Firewall … freigeben“ nennt die Ports und die Administratorrechte; Häkchen „Beim Windows-Start automatisch starten“ ist an; installieren → vor der UAC-Abfrage eigener Hinweis „Gleich fragt Windows nach Adminrechten …“, dann eine UAC-Abfrage; Setup, Startmenü, Desktop-Verknüpfung, „Apps“ und Fenstertitel heißen „LM Steering Solutions“; App startet mit Bediengröße „Handschuh“; Hinweis beim ersten Start und Einrichtung → Info zeigen den Namen und „basiert auf AgOpenWeb/AgOpenGPS“ · #27
 ☐ Ohne WebView2 (falls ein Rechner ohne sie da ist): Setup installiert sie (Internet nötig), Fenster nicht leer · #27
 ☐ Eingabeaufforderung: `netsh advfirewall firewall show rule name="LM Steering Solutions Module (UDP)"` und `… Tablets (TCP)` → je eine Regel, Programm `…\AgOpenWeb.Desktop.exe`, UDP 9999,2211,2222 bzw. TCP 5174, Remote-IP lokales Subnetz, Profile Domäne,Privat,Öffentlich · #27
 ☐ Module anschließen (bzw. Tablet im Netz auf `http://<PC>:5174`) → verbinden, **kein** Windows-Dialog „Zugriff zulassen“ · #27
 ☐ Setup einer neueren Testversion darüber → ohne Rückfrage zum Ordner installiert, Schläge und Arbeitsprotokoll noch da, Bediengröße wie vorher gewählt (nicht zurückgesetzt), weiterhin genau zwei Firewall-Regeln; über moritz.26 (noch „AgOpenWeb“): alte Verknüpfungen und Regeln „AgOpenWeb …“ weg, nur ein Eintrag unter „Apps“ · #27
 ☐ Deinstallieren (Apps) → UAC-Abfrage, beide Firewall-Regeln weg (`netsh … show rule` → „Keine Regeln“), `Dokumente\AgOpenWeb` bleibt; neu installieren → Schläge wieder da · #27
+☐ Firewall abgelehnt: Setup noch einmal, bei der UAC-Abfrage „Nein“ → Meldung „Die Windows-Firewall-Freigabe wurde nicht angelegt …“ sofort und auf der letzten Setup-Seite, mit dem Weg zum Nachholen; App starten → derselbe Hinweis oben in der App (✕ schließt ihn); Startmenü → LM Steering Solutions → „Firewall freigeben“ → UAC, „Firewall OK“; App neu starten → kein Hinweis mehr · #27
+☐ Autostart: Windows neu starten und anmelden → App startet von selbst im Vollbild (⛶-Knopf zeigt 🗗, ein Tipp → Fenster); Einstellungen → Apps → Autostart zeigt „LM Steering Solutions“ · #27
+☐ Zweiter Start: App läuft (auch minimiert), Desktop-Verknüpfung doppelklicken → das laufende Fenster kommt nach vorne, keine zweite Instanz, keine Meldung · #27
+☐ Startzeit: `%TEMP%\agopenweb-startup.log` nach dem Start öffnen → Zeiten pro Phase bis „page: loading screen off“; mit moritz.27 (vorher, ohne Protokoll: Stoppuhr vom Doppelklick bis zur Karte) vergleichen und beide Werte notieren; der Ladebildschirm „LM Steering Solutions“ erscheint sofort, kein weißes Fenster · #27
+☐ Release-Dateien: Testversion enthält Setup, `LM-Steering-Solutions-portable-….zip` und APK; nach „Fork Stable Release“ nur noch Setup und APK · #27
 ☐ Einrichtung → Info → Aktualisierungen: Kanal „Stabil“ (Vorgabe) → nur freigegebene Versionen; „Test“ → auch Testversionen, Anzeige wechselt; anderes Gerät/Browser bleibt auf seinem Kanal · #27
 ☐ Ersteinrichtung schließen, App-Daten des Browsers löschen, neu öffnen → Ersteinrichtung kommt **nicht** wieder (Stand am Lenkrechner) · #25
 ☐ Einrichtung → Abnahmeprotokoll → „Neues Abnahmeprotokoll“: Kit-Daten zeigen Antennenmaße und Fahrzeugprofil wie eingestellt; Kunde/Traktor eintragen · #26
