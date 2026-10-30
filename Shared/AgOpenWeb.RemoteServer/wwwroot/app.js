@@ -12707,3 +12707,51 @@ const TabletAcceptance = (() => {
   }, 300);
   return { open };
 })();
+
+// startup:begin
+// ===== Start time (feature/installer) ===========================================================
+// Time stamps of the page's start phases, from the navigation start: HTML received, DOM ready,
+// app.js run, CanvasKit ready, first data from the host, first map frame. Logged to the console;
+// in the desktop window also sent to the launcher (startup|{json}), which writes them into its
+// start log with the host's phases. Then the loading screen (#tui-boot, index.html) goes. Reads
+// state only; changes nothing in the app.
+const TabletStartup = (() => {
+  const marks = [];
+  const nav = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || null;
+  const mark = (name, ms) => marks.push([name, Math.round(ms == null ? performance.now() : ms)]);
+  // Automated browsers (CI layout checks, tests) measure the app at once: no loading screen.
+  if (navigator.webdriver) { const b = document.getElementById('tui-boot'); if (b) b.style.display = 'none'; }
+  if (nav) { mark('page: HTML received', nav.responseEnd); }
+  mark('page: app.js run');
+  let ckAt = 0, tickAt = 0, sent = false;
+  function finish(reason) {
+    if (sent) return; sent = true;
+    const n = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || nav;
+    if (n && n.domContentLoadedEventEnd) marks.push(['page: DOM ready', Math.round(n.domContentLoadedEventEnd)]);
+    const w = performance.getEntriesByType ? performance.getEntriesByType('resource').find(r => /canvaskit\.wasm/.test(r.name)) : null;
+    if (w) marks.push(['page: canvaskit.wasm fetched (' + Math.round(w.duration) + ' ms)', Math.round(w.responseEnd)]);
+    marks.push(['page: loading screen off (' + reason + ')', Math.round(performance.now())]);
+    marks.sort((a, b) => a[1] - b[1]);
+    const boot = document.getElementById('tui-boot');
+    if (boot) { boot.style.opacity = '0'; setTimeout(() => boot.remove(), 300); }
+    try { console.log('[startup] ' + marks.map(m => m[1] + ' ms ' + m[0]).join(' | ')); } catch (_) { /* no console */ }
+    try {
+      if (window.external && typeof window.external.sendMessage === 'function')
+        window.external.sendMessage('startup|' + JSON.stringify({ origin: performance.timeOrigin, marks }));
+    } catch (_) { /* not the desktop window */ }
+  }
+  function poll() {
+    if (sent) return;
+    const t = performance.now();
+    if (!ckAt && (CK && skSurface || /error|missing|no WebGL/.test(ckStatus || ''))) { ckAt = t; mark('page: CanvasKit ready', t); }
+    if (!tickAt && tick) { tickAt = t; mark('page: first data from host', t); }
+    // The frame after both: the map has drawn with data.
+    if (ckAt && tickAt) { requestAnimationFrame(() => { mark('page: first map frame'); finish('map drawn'); }); return; }
+    // Never hide the app's own messages (no host, no WebGL) behind the loading screen for long.
+    if (t > 15000) { finish('15 s'); return; }
+    requestAnimationFrame(poll);
+  }
+  requestAnimationFrame(poll);
+  return { get marks() { return marks.slice(); } };
+})();
+// startup:end

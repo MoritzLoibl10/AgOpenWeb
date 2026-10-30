@@ -43,6 +43,11 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Build Windows launcher bundle (x64)
+        # Fork (start time): ReadyToRun = the app's own assemblies are compiled ahead of time,
+        # so the start does not wait for the JIT (MSBuild reads the variable as a property;
+        # package.sh stays as upstream).
+        env:
+          PublishReadyToRun: 'true'
         run: ./deploy/windows/package.sh --arch x64 --out "$GITHUB_WORKSPACE/dist"
 
       - name: Upload bundle artifact

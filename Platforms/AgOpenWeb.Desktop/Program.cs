@@ -22,6 +22,7 @@ sealed class Program
             return;
         }
 
+        AgOpenWeb.RemoteWiring.StartupTrace.Mark("Main");
         // One copy per computer. A second would share the module ports (ReuseAddress), talk
         // to the steering board, then crash on :5174; stop it before it loads anything.
         var single = SingleInstance.TryAcquire();

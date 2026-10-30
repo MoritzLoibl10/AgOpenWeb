@@ -157,13 +157,26 @@ public sealed class SimpleWebServer
                     return; // socket is now owned by the WebSocket handler
                 }
 
-                var resp = await RouteAsync(req).ConfigureAwait(false);
+                var resp = NotModifiedIfCurrent(req, await RouteAsync(req).ConfigureAwait(false));
                 var keepAlive = !req.Headers.TryGetValue("connection", out var conn)
                     || !conn.Contains("close", StringComparison.OrdinalIgnoreCase);
                 if (!await WriteResponseAsync(stream, resp, keepAlive, ct).ConfigureAwait(false)) return;
                 if (!keepAlive) return;
             }
         }
+    }
+
+    // Fork (start time): a response carrying an ETag the client already holds (If-None-Match)
+    // goes out as 304 without its body, so the web view keeps its cached copy (and the compiled
+    // code it stored with it). Routes opt in by setting an ETag; all others are unchanged.
+    private static Response NotModifiedIfCurrent(Request req, Response resp)
+    {
+        if (resp.Status != 200 || resp.Headers is null
+            || !req.Headers.TryGetValue("if-none-match", out var inm)) return resp;
+        foreach (var (name, value) in resp.Headers)
+            if (string.Equals(name, "ETag", StringComparison.OrdinalIgnoreCase) && inm.Contains(value, StringComparison.Ordinal))
+                return new Response(304, resp.ContentType, Array.Empty<byte>(), resp.Headers);
+        return resp;
     }
 
     private async Task<Response> RouteAsync(Request req)
@@ -279,6 +292,7 @@ public sealed class SimpleWebServer
     private static string StatusText(int s) => s switch
     {
         200 => "OK",
+        304 => "Not Modified",
         400 => "Bad Request",
         403 => "Forbidden",
         404 => "Not Found",

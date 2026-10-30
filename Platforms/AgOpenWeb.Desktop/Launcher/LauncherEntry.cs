@@ -5,6 +5,7 @@
 using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
+using AgOpenWeb.RemoteWiring;
 using Photino.NET;
 
 namespace AgOpenWeb.Desktop.Launcher;
@@ -22,6 +23,11 @@ internal static class LauncherEntry
     public static void Run(string[] args)
     {
         bool console = Array.IndexOf(args, "--console") >= 0;
+        // Fork (start time): WebView2 paints its own background before the first page; dark
+        // like the loading screen instead of a white flash. Windows only (WebView2 reads it).
+        if (OperatingSystem.IsWindows() && Environment.GetEnvironmentVariable("WEBVIEW2_DEFAULT_BACKGROUND_COLOR") == null)
+            Environment.SetEnvironmentVariable("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "FF0B1020");
+        StartupTrace.Mark("launcher: creating window");
         var window = new PhotinoWindow()
             .SetTitle(Brand.ProductName)
             .SetUseOsDefaultLocation(false)
@@ -83,9 +89,20 @@ internal static class LauncherEntry
         return true; // cancel this close
     }
 
+    // Fork: the loading screen shows the product name and logo (as wwwroot index.html #tui-boot).
     private const string SplashCss = "html,body{margin:0;height:100%;background:#0b1020;color:#fff;font:16px system-ui,sans-serif}" +
-        "body{display:flex;align-items:center;justify-content:center;text-align:center}p{max-width:560px;white-space:pre-line;line-height:1.5}";
+        "body{display:flex;flex-direction:column;gap:18px;align-items:center;justify-content:center;text-align:center}" +
+        "h1{margin:0;font:800 30px system-ui,sans-serif;letter-spacing:.02em}p{margin:0;max-width:560px;white-space:pre-line;line-height:1.5;color:#b9c3d6}";
+
+    private const string SplashLogo = "<svg viewBox=\"0 0 96 96\" width=\"96\" height=\"96\" aria-hidden=\"true\"><rect x=\"4\" y=\"4\" width=\"88\" height=\"88\" rx=\"22\" fill=\"#c995e0\"/>" +
+        "<g fill=\"none\" stroke=\"#1d0b26\" stroke-width=\"5\" stroke-linecap=\"round\" opacity=\".55\"><path d=\"M20 76 C30 52 34 38 36 20\"/><path d=\"M36 78 C42 54 46 38 48 20\"/><path d=\"M64 78 C58 54 54 38 52 20\"/><path d=\"M80 76 C70 52 66 38 64 20\"/></g>" +
+        "<path d=\"M50 18 V62\" stroke=\"#1d0b26\" stroke-width=\"7\" stroke-linecap=\"round\"/><circle cx=\"50\" cy=\"70\" r=\"9\" fill=\"#1d0b26\"/></svg>";
 
     public static string SplashHtml(string text) =>
-        $"<!doctype html><html><head><meta charset=\"utf-8\"><style>{SplashCss}</style></head><body><p>{System.Net.WebUtility.HtmlEncode(text)}</p></body></html>";
+        $"<!doctype html><html><head><meta charset=\"utf-8\"><style>{SplashCss}</style></head><body>{SplashLogo}<h1>{System.Net.WebUtility.HtmlEncode(Brand.ProductName)}</h1><p>{System.Net.WebUtility.HtmlEncode(text)}</p></body></html>";
+
+    /// <summary>"Starting …" in the system's language (German or English); the app's own
+    /// language setting is not loaded yet.</summary>
+    public static string StartingText() =>
+        System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "de" ? "Wird gestartet …" : "Starting …";
 }

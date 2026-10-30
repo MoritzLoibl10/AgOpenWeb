@@ -413,3 +413,22 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
   „Apps“, Firewall-Regeln; Setup-Datei ohne Leerzeichen); `AppId` endgültig, unverändert; Regeln und
   Verknüpfungen der Testversionen „AgOpenWeb“ werden mit entfernt.
 - **Secrets:** keine neuen, keine geänderten; nur `GITHUB_TOKEN`.
+
+## 19. Startzeit (feature/installer, Oktober 2026; Launcher und Host nur für den Start genehmigt)
+- **Messung:** `Shared/AgOpenWeb.RemoteWiring/StartupTrace.cs` (neu): Zeitstempel ab Prozessstart
+  in `Program.Main`, `BackendHost`, `WebBackend.StartAsync` (nur `StartupTrace.Mark`-Zeilen) und im
+  Launcher; die Seite meldet ihre Phasen (`app.js`, Block `startup:begin`) über
+  `startup|{json}`. Ergebnis in `%TEMP%\agopenweb-startup.log`. Rebase: Mark-Zeilen sind
+  einzeln, bei Konflikt upstream nehmen und die Zeilen neu setzen.
+- **Paralleler Start:** `WebViewLauncher` startet das Backend sofort, parallel zu Fenster und
+  WebView2, statt erst nach `WindowCreated`; geladen wird die Oberfläche, wenn beides fertig ist.
+- **Ladebildschirm:** Produktname und Logo im Launcher-Splash (`LauncherEntry.SplashHtml`) und als
+  `#tui-boot` am Anfang von `index.html`; dunkler WebView2-Hintergrund
+  (`WEBVIEW2_DEFAULT_BACKGROUND_COLOR`, nur wenn nicht gesetzt).
+- **Zwischenspeicher:** `RemoteServerHost` liefert Seite, Skripte, CanvasKit, Symbole und Töne mit
+  ETag und `no-cache`; `SimpleWebServer` antwortet mit 304, wenn der Browser die Datei schon hat
+  (`NotModifiedIfCurrent`). Veraltet kann nichts sein (Prüfung bei jedem Laden), der Browser behält
+  aber den übersetzten Code. Test: `SimpleWebServerETagTests.cs`.
+- **ReadyToRun:** im Fork-Workflow (`PublishReadyToRun=true` als Umgebungsvariable des Schritts);
+  `deploy/windows/package.sh` unverändert.
+- **Lenk-, Regel- und Sicherheitslogik:** nicht berührt.

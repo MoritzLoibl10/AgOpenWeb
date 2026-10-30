@@ -3,7 +3,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System;
+using System.Text.Json;
 using System.Threading.Tasks;
+using AgOpenWeb.RemoteWiring;
 using Photino.NET;
 
 namespace AgOpenWeb.Desktop.Launcher;
@@ -20,6 +22,9 @@ internal sealed class WebViewLauncher
     private readonly string[] _args;
     private BackendHost? _backend;
     private bool _closing;
+    // Fork (start time): the backend starts at once, in parallel with the window and its web
+    // view, instead of after the window exists; the window waits for it before loading the UI.
+    private Task<Exception?>? _backendStart;
 
     public WebViewLauncher(PhotinoWindow window, string[] args)
     {
@@ -29,28 +34,41 @@ internal sealed class WebViewLauncher
 
     public void Show()
     {
+        _backendStart = Task.Run(StartBackendAsync);
         _window
             .SetMaximized(true)
             .RegisterWebMessageReceivedHandler(OnWebMessage)
             .RegisterWindowClosingHandler((_, _) => LauncherEntry.StopThenClose(_window, _backend, ref _closing))
-            .RegisterWindowCreatedHandler((_, _) => _ = StartAsync())
-            .LoadRawString(LauncherEntry.SplashHtml($"Starting {Brand.ProductName}…"));
+            .RegisterWindowCreatedHandler((_, _) => { StartupTrace.Mark("launcher: window created"); _ = StartAsync(); })
+            .LoadRawString(LauncherEntry.SplashHtml(LauncherEntry.StartingText()));
     }
 
-    private async Task StartAsync()
+    // Off the UI thread: StartAsync builds the DI graph + VM pipeline and binds the host.
+    private async Task<Exception?> StartBackendAsync()
     {
         var backend = new BackendHost();
         try
         {
-            // Off the UI thread: StartAsync builds the DI graph + VM pipeline and binds the host.
-            await Task.Run(() => backend.StartAsync(_args));
+            await backend.StartAsync(_args);
             _backend = backend;
+            return null;
         }
         catch (Exception ex)
         {
             try { await backend.StopAsync(); } catch { /* best effort */ }
-            var msg = LauncherEntry.LogStartFailure(ex);
+            return ex;
+        }
+    }
+
+    private async Task StartAsync()
+    {
+        var failure = await _backendStart!;
+        StartupTrace.Mark("launcher: backend ready for the window");
+        if (failure != null || _backend is not { } backend)
+        {
+            var msg = LauncherEntry.LogStartFailure(failure ?? new InvalidOperationException("backend not started"));
             _window.Invoke(() => _window.LoadRawString(LauncherEntry.SplashHtml($"{Brand.ProductName} failed to start.\n\n{msg}")));
+            StartupTrace.Write();
             return;
         }
 
@@ -62,16 +80,24 @@ internal sealed class WebViewLauncher
         {
             if (fullscreen) _window.SetFullScreen(true);
             _window.Load(new Uri($"http://localhost:{port}/"));
+            StartupTrace.Mark("launcher: web UI requested");
             ScreenAwake.Hold();
         });
         Console.WriteLine($"[launcher] Backend up; window -> http://localhost:{port}/");
+        StartupTrace.Write(); // again when the page reports its own phases
     }
 
     // The page talks to its host through window.external.sendMessage (Photino's channel):
     //   open|<url>   open a link in the system browser (window.open can't leave the web view)
     //   fullscreen|1 / fullscreen|0   window fullscreen on / off (fork: the client's ⛶ button)
+    //   startup|{json}   fork: the page's start phases (wwwroot app.js, block startup:begin)
     private void OnWebMessage(object? sender, string message)
     {
+        if (message.StartsWith("startup|", StringComparison.Ordinal))
+        {
+            LogPageMarks(message[8..]);
+            return;
+        }
         if (message == "fullscreen|1" || message == "fullscreen|0")
         {
             _window.SetFullScreen(message == "fullscreen|1");
@@ -83,5 +109,20 @@ internal sealed class WebViewLauncher
             if (Uri.TryCreate(url, UriKind.Absolute, out var u) && (u.Scheme == "http" || u.Scheme == "https"))
                 LauncherEntry.OpenUrl(url);
         }
+    }
+
+    // The page's marks are milliseconds from its own time origin (Unix ms): into the start log
+    // on the process clock, then the log is written.
+    private static void LogPageMarks(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            double origin = doc.RootElement.GetProperty("origin").GetDouble();
+            foreach (var m in doc.RootElement.GetProperty("marks").EnumerateArray())
+                StartupTrace.MarkUnixMs(m[0].GetString() ?? "page", origin + m[1].GetDouble());
+        }
+        catch { /* a malformed report only loses the page's marks */ }
+        StartupTrace.Write();
     }
 }
