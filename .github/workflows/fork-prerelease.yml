@@ -263,6 +263,16 @@ jobs:
         with:
           path: dist
 
+      # Release files carry the product name: the portable ZIP (test versions only; a stable
+      # release keeps only the setup, see fork-stable-release.yml).
+      - name: Name the portable ZIP
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          ZIP=$(find dist -name agopenweb-win-x64.zip | head -1)
+          [ -n "$ZIP" ] || { echo "::error::agopenweb-win-x64.zip not found"; exit 1; }
+          mv "$ZIP" "dist/LM-Steering-Solutions-portable-$TAG.zip"
+
       - name: Write release notes
         env:
           NOTES: ${{ inputs.notes }}
@@ -282,7 +292,7 @@ jobs:
           draft: false
           body_path: notes.md
           files: |
-            dist/**/agopenweb-win-x64.zip
+            dist/LM-Steering-Solutions-portable-*.zip
             dist/**/agopenweb-android.apk
             dist/**/*-Setup-*.exe
         env:

@@ -3,7 +3,9 @@
 ## Installer
 - **Datei:** `LM-Steering-Solutions-Setup-<Version>.exe` in jeder Testversion (Workflow „Fork Test Pre-Release“,
   Job `installer`, Inno Setup 6 auf einem Windows-Runner aus dem bisherigen ZIP-Paket). Skript:
-  `deploy/windows/installer.iss`. Das ZIP bleibt zusätzlich in der Vorabversion.
+  `deploy/windows/installer.iss`. Dazu in Testversionen `LM-Steering-Solutions-portable-<Version>.zip`
+  (ohne Installation: entpacken, `AgOpenWeb.Desktop.exe` starten). Eine stabile Freigabe enthält für
+  Windows nur das Setup: „Fork Stable Release“ entfernt die ZIP beim Freigeben (die APK bleibt).
 - **Wohin:** für den angemeldeten Benutzer nach `%LOCALAPPDATA%\Programs\<Name>`, ohne
   Administratorrechte; wer Administrator ist, kann im ersten Dialog „für alle Benutzer“ wählen. Der
   Ordner ist fest (keine Auswahl), weil ein Update ihn vorher leert.
@@ -24,8 +26,17 @@
   - `<Name> Tablets (TCP)`: TCP 5174 (Web-Oberfläche für Tablets, `RemoteServerHost.Port`).
   Ausgehend braucht es nichts (RTCM an UDP 2233 geht hinaus). Dafür fragt Windows einmal nach
   Administratorrechten (UAC), auch bei der Installation nur für den Benutzer; der Text am Häkchen
-  sagt das. Ohne Häkchen oder bei „Nein“ fragt Windows beim ersten Start selbst. Ein Update löscht
-  und legt die Regeln neu an; die Deinstallation entfernt beide (wieder mit UAC-Abfrage).
+  sagt das, und direkt vor der Abfrage sagt es ein eigener Hinweis noch einmal („Gleich fragt
+  Windows nach Adminrechten, um die Firewall für die Module freizugeben.“). Danach prüft das Setup,
+  ob beide Regeln da sind. Wenn nicht (abgelehnt oder Fehler): Meldung sofort und noch einmal auf der
+  letzten Seite des Setups, mit dem Weg zum Nachholen: **Startmenü → LM Steering Solutions →
+  „Firewall freigeben“** (`Firewall-freigeben.cmd` im Programmordner, fragt selbst nach
+  Adminrechten) oder das Setup noch einmal ausführen. Das Ergebnis steht in
+  `firewall-status.txt` im Programmordner (`ok`, `failed`, `skipped`); beim App-Start prüft der
+  Launcher die Regeln per `netsh` und zeigt, solange eine fehlt, denselben Hinweis in der App
+  (schließbar, beim nächsten Start wieder). Ohne Häkchen (`skipped`) und in der portablen ZIP gibt es
+  keinen Hinweis; Windows fragt dann beim ersten Start selbst. Ein Update löscht und legt die Regeln
+  neu an; die Deinstallation entfernt beide (wieder mit UAC-Abfrage).
   Prüfen: `netsh advfirewall firewall show rule name="LM Steering Solutions Module (UDP)"` (bzw.
   `… Tablets (TCP)`) → „Profile: Domäne,Privat,Öffentlich“. Regeln der Testversionen bis moritz.26
   (`AgOpenWeb Module (UDP)`, `AgOpenWeb Tablets (TCP)`) löschen Update und Deinstallation mit.

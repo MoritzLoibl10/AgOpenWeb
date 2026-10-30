@@ -102,11 +102,17 @@ en.AutostartTask=Start automatically with Windows (fullscreen, this user only)
 de.FirewallGroup=Netzwerk:
 de.FirewallTask=Windows-Firewall nur für dieses Programm freigeben: Module (UDP 9999, 2211, 2222) und Tablets im Netz (TCP 5174). Windows fragt dafür einmal nach Administratorrechten. Ohne Freigabe fragt Windows beim ersten Start selbst.
 de.FirewallRun=Windows-Firewall-Freigabe für {#AppName} einrichten …
+de.FirewallBeforeUac=Gleich fragt Windows nach Adminrechten, um die Firewall für die Module freizugeben.
+de.FirewallFailed=Die Windows-Firewall-Freigabe wurde nicht angelegt (abgelehnt oder Fehler). Module und Tablets im Netz können blockiert sein.%n%nNachholen: Startmenü → {#AppName} → „Firewall freigeben“ (fragt nach Adminrechten), oder dieses Setup noch einmal ausführen und die Abfrage erlauben.
+de.FirewallIcon=Firewall freigeben
 de.WebView2Run=Microsoft-WebView2-Laufzeit installieren …
 de.WebView2Missing=Die Microsoft-WebView2-Laufzeit fehlt, und dieses Setup enthält sie nicht. Ohne sie bleibt das Programmfenster leer. Bitte von https://go.microsoft.com/fwlink/p/?LinkId=2124703 installieren.
 en.FirewallGroup=Network:
 en.FirewallTask=Allow only this program through Windows Firewall: modules (UDP 9999, 2211, 2222) and tablets on the network (TCP 5174). Windows asks once for administrator rights. Without it, Windows asks itself on first start.
 en.FirewallRun=Setting up the Windows Firewall rule for {#AppName} …
+en.FirewallBeforeUac=Windows will now ask for administrator rights to allow the modules through the firewall.
+en.FirewallFailed=The Windows Firewall rule was not created (declined or failed). Modules and tablets on the network may be blocked.%n%nTo fix it: Start menu → {#AppName} → "Allow through firewall" (asks for administrator rights), or run this setup again and allow the prompt.
+en.FirewallIcon=Allow through firewall
 en.WebView2Run=Installing the Microsoft WebView2 runtime …
 en.WebView2Missing=The Microsoft WebView2 runtime is missing and this setup does not include it. Without it the program window stays empty. Please install it from https://go.microsoft.com/fwlink/p/?LinkId=2124703.
 
@@ -141,22 +147,24 @@ Source: "{#WebView2Setup}"; DestDir: "{tmp}"; DestName: "MicrosoftEdgeWebview2Se
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+; Creates the firewall rules later (the file is written by the setup's code, see [Code]).
+Name: "{group}\{cm:FirewallIcon}"; Filename: "{app}\Firewall-freigeben.cmd"; WorkingDir: "{app}"
 
 [Run]
 #ifdef WebView2Setup
 Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "{cm:WebView2Run}"; Flags: waituntilterminated; Check: not WebView2Installed
 #endif
-; Elevated through UAC (runas), also when installing for the current user only. Deletes first, so
-; an update leaves exactly the two rules. Only this program, only from the local subnet.
-Filename: "{sys}\cmd.exe"; Parameters: "/c netsh advfirewall firewall delete rule name=""{#FwUdp}"" & netsh advfirewall firewall delete rule name=""{#FwTcp}"" & netsh advfirewall firewall delete rule name=""{#FwOldUdp}"" & netsh advfirewall firewall delete rule name=""{#FwOldTcp}"" & netsh advfirewall firewall add rule name=""{#FwUdp}"" dir=in action=allow program=""{app}\{#AppExe}"" protocol=UDP localport=9999,2211,2222 remoteip=localsubnet profile=any enable=yes & netsh advfirewall firewall add rule name=""{#FwTcp}"" dir=in action=allow program=""{app}\{#AppExe}"" protocol=TCP localport=5174 remoteip=localsubnet profile=any enable=yes"; StatusMsg: "{cm:FirewallRun}"; Flags: shellexec runhidden waituntilterminated; Verb: "runas"; Tasks: firewall
 Filename: "{app}\{#AppExe}"; Description: "{cm:LaunchProgram,{#AppName}}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 ; Removes the two rules again (also elevated); harmless if they were never created.
 Filename: "{sys}\cmd.exe"; Parameters: "/c netsh advfirewall firewall delete rule name=""{#FwUdp}"" & netsh advfirewall firewall delete rule name=""{#FwTcp}"" & netsh advfirewall firewall delete rule name=""{#FwOldUdp}"" & netsh advfirewall firewall delete rule name=""{#FwOldTcp}"""; Flags: shellexec runhidden waituntilterminated; Verb: "runas"; RunOnceId: "RemoveFirewallRules"
 
-; No [UninstallDelete]: uninstalling removes only what was installed. Documents\AgOpenWeb and
-; the web view's storage stay, so a reinstall finds fields, profiles and the work log again.
+[UninstallDelete]
+; Only the two files the setup's code writes into the program folder. Documents\AgOpenWeb and the
+; web view's storage stay, so a reinstall finds fields, profiles and the work log again.
+Type: files; Name: "{app}\firewall-status.txt"
+Type: files; Name: "{app}\Firewall-freigeben.cmd"
 
 [Code]
 // WebView2 runtime present? Per machine (32-bit registry view) or per user, as Microsoft
@@ -176,10 +184,107 @@ begin
   Result := WebView2Found(HKLM32, 'SOFTWARE' + WebView2Key) or WebView2Found(HKCU, 'Software' + WebView2Key);
 end;
 
-#ifndef WebView2Setup
+// ----- Windows Firewall (task "firewall") ------------------------------------------------------
+// Run in code (not [Run]) so the setup can say beforehand that Windows will ask for administrator
+// rights, and can check afterwards whether the rules exist. The result goes to
+// {app}\firewall-status.txt (ok | failed | skipped, then the two rule names), which the app reads
+// at its start (WebViewLauncher) to warn while the rules are missing. Firewall-freigeben.cmd in
+// the program folder (Start menu: "Firewall freigeben") creates them later.
+const
+  FwStatusFile = 'firewall-status.txt';
+  FwCmdFile = 'Firewall-freigeben.cmd';
+
+var
+  FirewallFailed: Boolean;
+
+function FwDeleteAll: String;
+begin
+  Result := 'netsh advfirewall firewall delete rule name="{#FwUdp}" & netsh advfirewall firewall delete rule name="{#FwTcp}"'
+    + ' & netsh advfirewall firewall delete rule name="{#FwOldUdp}" & netsh advfirewall firewall delete rule name="{#FwOldTcp}"';
+end;
+
+function FwAddAll(const Exe: String): String;
+begin
+  Result := 'netsh advfirewall firewall add rule name="{#FwUdp}" dir=in action=allow program="' + Exe + '" protocol=UDP localport=9999,2211,2222 remoteip=localsubnet profile=any enable=yes'
+    + ' & netsh advfirewall firewall add rule name="{#FwTcp}" dir=in action=allow program="' + Exe + '" protocol=TCP localport=5174 remoteip=localsubnet profile=any enable=yes';
+end;
+
+function FirewallRuleExists(const Name: String): Boolean;
+var
+  Code: Integer;
+begin
+  Result := Exec(ExpandConstant('{sys}\netsh.exe'), 'advfirewall firewall show rule name="' + Name + '"', '',
+    SW_HIDE, ewWaitUntilTerminated, Code) and (Code = 0);
+end;
+
+procedure WriteFirewallStatus(const Status: String);
+begin
+  SaveStringToFile(ExpandConstant('{app}\' + FwStatusFile), Status + #13#10 + '{#FwUdp}' + #13#10 + '{#FwTcp}' + #13#10, False);
+end;
+
+// The same rules as the setup creates, for later: asks for administrator rights itself.
+procedure WriteFirewallCmd;
+var
+  S: String;
+begin
+  S := '@echo off' + #13#10
+    + 'rem {#AppName}: Windows-Firewall-Freigabe nachholen / allow through Windows Firewall' + #13#10
+    + 'net session >nul 2>&1' + #13#10
+    + 'if errorlevel 1 (' + #13#10
+    + '  powershell -NoProfile -Command "Start-Process -FilePath ''%~f0'' -Verb RunAs"' + #13#10
+    + '  exit /b' + #13#10
+    + ')' + #13#10
+    + FwDeleteAll + ' >nul 2>&1' + #13#10
+    + 'netsh advfirewall firewall add rule name="{#FwUdp}" dir=in action=allow program="%~dp0{#AppExe}" protocol=UDP localport=9999,2211,2222 remoteip=localsubnet profile=any enable=yes' + #13#10
+    + 'if errorlevel 1 goto failed' + #13#10
+    + 'netsh advfirewall firewall add rule name="{#FwTcp}" dir=in action=allow program="%~dp0{#AppExe}" protocol=TCP localport=5174 remoteip=localsubnet profile=any enable=yes' + #13#10
+    + 'if errorlevel 1 goto failed' + #13#10
+    + '> "%~dp0' + FwStatusFile + '" echo ok' + #13#10
+    + '>> "%~dp0' + FwStatusFile + '" echo {#FwUdp}' + #13#10
+    + '>> "%~dp0' + FwStatusFile + '" echo {#FwTcp}' + #13#10
+    + 'echo.' + #13#10
+    + 'echo Firewall OK: {#AppName} (UDP 9999, 2211, 2222; TCP 5174).' + #13#10
+    + 'pause' + #13#10
+    + 'exit /b 0' + #13#10
+    + ':failed' + #13#10
+    + 'echo.' + #13#10
+    + 'echo Firewall: FEHLER / ERROR.' + #13#10
+    + 'pause' + #13#10
+    + 'exit /b 1' + #13#10;
+  SaveStringToFile(ExpandConstant('{app}\' + FwCmdFile), S, False);
+end;
+
+procedure SetupFirewall;
+var
+  Code: Integer;
+begin
+  // Our own notice right before Windows' administrator prompt (UAC).
+  if not WizardSilent then
+    MsgBox(CustomMessage('FirewallBeforeUac'), mbInformation, MB_OK);
+  WizardForm.StatusLabel.Caption := CustomMessage('FirewallRun');
+  ShellExec('runas', ExpandConstant('{sys}\cmd.exe'), '/c ' + FwDeleteAll + ' & ' + FwAddAll(ExpandConstant('{app}\{#AppExe}')),
+    '', SW_HIDE, ewWaitUntilTerminated, Code);
+  // Declined (UAC "No"), failed or not run: the rules decide, not the exit code.
+  FirewallFailed := not (FirewallRuleExists('{#FwUdp}') and FirewallRuleExists('{#FwTcp}'));
+  if FirewallFailed then WriteFirewallStatus('failed') else WriteFirewallStatus('ok');
+  if FirewallFailed and not WizardSilent then
+    MsgBox(CustomMessage('FirewallFailed'), mbError, MB_OK);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if (CurStep = ssPostInstall) and not WebView2Installed and not WizardSilent then
+  if CurStep <> ssPostInstall then exit;
+  WriteFirewallCmd;
+  if WizardIsTaskSelected('firewall') then SetupFirewall else WriteFirewallStatus('skipped');
+#ifndef WebView2Setup
+  if not WebView2Installed and not WizardSilent then
     MsgBox(CustomMessage('WebView2Missing'), mbInformation, MB_OK);
-end;
 #endif
+end;
+
+// The finished page repeats the firewall warning.
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if (CurPageID = wpFinished) and FirewallFailed then
+    WizardForm.FinishedLabel.Caption := WizardForm.FinishedLabel.Caption + #13#10#13#10 + CustomMessage('FirewallFailed');
+end;

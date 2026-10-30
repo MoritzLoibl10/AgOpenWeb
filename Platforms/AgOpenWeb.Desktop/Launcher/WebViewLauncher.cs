@@ -99,6 +99,7 @@ internal sealed class WebViewLauncher
         if (message.StartsWith("startup|", StringComparison.Ordinal))
         {
             LogPageMarks(message[8..]);
+            _ = WarnIfFirewallMissingAsync(); // the page is ready for messages now
             return;
         }
         if (message == "fullscreen|1" || message == "fullscreen|0")
@@ -112,6 +113,16 @@ internal sealed class WebViewLauncher
             if (Uri.TryCreate(url, UriKind.Absolute, out var u) && (u.Scheme == "http" || u.Scheme == "https"))
                 LauncherEntry.OpenUrl(url);
         }
+    }
+
+    // Fork (installer): the setup's firewall rules are missing → the page shows how to fix it.
+    private bool _firewallChecked;
+    private async Task WarnIfFirewallMissingAsync()
+    {
+        if (_firewallChecked) return;
+        _firewallChecked = true;
+        if (!await FirewallCheck.RulesMissingAsync()) return;
+        try { _window.Invoke(() => _window.SendWebMessage("firewall|missing")); } catch { /* window closing */ }
     }
 
     // The page's marks are milliseconds from its own time origin (Unix ms): into the start log

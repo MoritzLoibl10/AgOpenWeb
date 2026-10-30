@@ -6,6 +6,8 @@ name: Fork Stable Release
 # the "Stable" channel (the default); "Test" also offers the pre-releases. Nothing is built here:
 # the files of the tested pre-release are the files of the stable release.
 # Run by hand only, for a version that passed its tests.
+# A stable release offers only the setup for Windows: the portable ZIP of the test version is
+# removed from it (it stays in the test versions). The Android APK stays.
 
 on:
   workflow_dispatch:
@@ -41,5 +43,9 @@ jobs:
           { printf '**Released as stable on %s.**' "$(date -u +%Y-%m-%d)"
             [ -n "$NOTE" ] && printf ' %s' "$NOTE"
             printf '\n\n'; jq -r .body <<<"$info"; } > notes.md
+          # Windows: only the setup in a stable release; the portable ZIP stays a test-version file.
+          gh release view "$TAG" --json assets -q '.assets[].name' | { grep -E '\.zip$' || true; } | while read -r a; do
+            echo "Removing $a from the stable release"; gh release delete-asset "$TAG" "$a" -y
+          done
           gh release edit "$TAG" --prerelease=false --latest --notes-file notes.md
           echo "$TAG is now a stable release."

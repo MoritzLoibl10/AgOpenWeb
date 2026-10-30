@@ -442,3 +442,13 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
   headless laufender Host antwortet nicht: dann wie bisher die Meldung und Ende.
 - **Installer:** Aufgabe `autostart`, `[Registry]` HKCU Run (siehe `docs/Installer.md`).
 
+## 21. Installer verständlicher (feature/installer, Oktober 2026; genehmigt)
+- **Installer:** Firewall-Regeln jetzt im `[Code]` des Setups (Hinweis vor der UAC-Abfrage,
+  Prüfung danach, Meldung bei Fehlschlag, `firewall-status.txt`, `Firewall-freigeben.cmd` mit
+  Startmenü-Eintrag).
+- **Launcher:** `Launcher/FirewallCheck.cs` (neu) prüft beim Start per `netsh` (ohne Adminrechte);
+  fehlt eine Regel, schickt `WebViewLauncher` `firewall|missing` an die Seite; `app.js`
+  (`TabletFirewall`) zeigt den Hinweis.
+- **Workflows:** ZIP heißt `LM-Steering-Solutions-portable-<Tag>.zip`; „Fork Stable Release“
+  entfernt die ZIP aus der stabilen Release.
+

@@ -12709,6 +12709,32 @@ const TabletAcceptance = (() => {
   return { open };
 })();
 
+// ===== Firewall warning (feature/installer) =======================================================
+// The desktop launcher sends "firewall|missing" when the setup was to create the Windows Firewall
+// rules and they are not there (declined, failed, deleted later). Shows how to fix it; closable,
+// back at the next start while the rules are missing. Desktop window only (Photino channel).
+const TabletFirewall = (() => {
+  const T = k => I18n.text(k);
+  let box = null;
+  function show() {
+    if (box) return;
+    box = document.createElement('div'); box.id = 'tui-fw'; box.setAttribute('role', 'alert');
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕';
+    x.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); box.remove(); });
+    const h = document.createElement('div'); h.className = 'fw-t'; h.textContent = T(tr('Windows Firewall: the release for the modules is missing'));
+    const p = document.createElement('div');
+    p.textContent = T(tr('Modules and tablets on the network may be blocked. To fix it: Start menu → {n} → “Allow through firewall” (Windows asks for administrator rights), or run the setup again and allow the prompt.', { n: BRAND.name }));
+    box.append(x, h, p);
+    box.addEventListener('pointerdown', e => e.stopPropagation());
+    document.body.appendChild(box);
+  }
+  try {
+    if (window.external && typeof window.external.receiveMessage === 'function')
+      window.external.receiveMessage(m => { if (m === 'firewall|missing') show(); });
+  } catch (_) { /* not the desktop window */ }
+  return { show };
+})();
+
 // startup:begin
 // ===== Start time (feature/installer) ===========================================================
 // Time stamps of the page's start phases, from the navigation start: HTML received, DOM ready,
