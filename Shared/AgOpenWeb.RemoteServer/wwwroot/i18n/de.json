@@ -1786,5 +1786,7 @@
   "Test: also test versions, which may have faults. Only on this device.": "Test: auch Testversionen, die Fehler haben können. Gilt nur für dieses Gerät.",
   "Stable: only versions released as stable. Only on this device.": "Stabil: nur als stabil freigegebene Versionen. Gilt nur für dieses Gerät.",
   "Windows Firewall: the release for the modules is missing": "Windows-Firewall: Die Freigabe für die Module fehlt",
-  "Modules and tablets on the network may be blocked. To fix it: Start menu → {n} → “Allow through firewall” (Windows asks for administrator rights), or run the setup again and allow the prompt.": "Module und Tablets im Netz können blockiert sein. Nachholen: Startmenü → {n} → „Firewall freigeben“ (Windows fragt nach Adminrechten), oder das Setup noch einmal ausführen und die Abfrage erlauben."
+  "Modules and tablets on the network may be blocked. To fix it: Start menu → {n} → “Allow through firewall” (Windows asks for administrator rights), or run the setup again and allow the prompt.": "Module und Tablets im Netz können blockiert sein. Nachholen: Startmenü → {n} → „Firewall freigeben“ (Windows fragt nach Adminrechten), oder das Setup noch einmal ausführen und die Abfrage erlauben.",
+  "Expert": "Experte",
+  "Simulator: for tests and demos. While it runs, the guidance computer uses no real position.": "Simulator: für Tests und Vorführungen. Solange er läuft, nutzt der Lenkrechner keine echte Position."
 }

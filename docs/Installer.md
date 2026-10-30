@@ -89,3 +89,14 @@ Ein Gerät, auf dem die App noch nie lief (keine eigenen Einträge im Browser-Sp
 „Handschuh“ und merkt sich das. Geräte, die die App schon benutzt haben, behalten ihre Größe
 (bisher immer „Normal“, wenn nichts gewählt war); eine gewählte Größe gilt immer. Automatisierte
 Browser (CI-Layoutprüfung) bleiben bei „Normal“. Test: `Tests/web/scale.test.mjs`.
+
+## Simulator in der Kundenversion
+- **Kundenversion** (stabile Release): kein Simulator im normalen Menü und kein „SIM“-Knopf auf
+  der Karte. Erreichbar über den **Vorführmodus** und über **App & Dateien → Experte → Simulator**.
+  Läuft der Simulator (z. B. bei einer Neuinstallation ohne GPS, wie upstream), bleibt seine Leiste
+  sichtbar, damit er sich ausschalten lässt.
+- **Testversion:** alles wie bisher sichtbar. Als Testversion gilt der Stand, den die letzte
+  Update-Prüfung (Einrichtung → Info → Aktualisierungen) als Vorabversion gefunden hat; vor der
+  ersten Prüfung entscheidet der Kanal des Geräts („Test“ = sichtbar). Grund: Test- und stabile
+  Version sind dieselbe Datei („Fork Stable Release“ baut nicht neu).
+- Test: `Tests/web/simaccess.test.mjs`.

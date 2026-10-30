@@ -304,6 +304,11 @@
       font: 700 13px system-ui, sans-serif; cursor: pointer; touch-action: manipulation;
       pointer-events: auto; }
     #sim-launch.show { display: block; }
+    :root[data-tui-nosim] #sim-launch.show { display: none; } /* fork: customer version, see TabletSimAccess */
+    #filemenu .tui-expert { margin-top: 10px; }
+    #filemenu .tui-expert, #filemenu .tui-expert summary { font-family: system-ui, sans-serif; }
+    #filemenu .tui-expert summary { cursor: pointer; color: var(--text-dim, #9fb3cc); font-weight: 700; padding: 6px 0; }
+    #filemenu .tui-exp-n { color: var(--text-dim, #9fb3cc); font-size: 12px; margin-top: 6px; }
     /* Section bar (Phase 7) — colour-coded per-section buttons, one or more rows. */
     #sectionbar { display: none; flex-direction: column; align-items: center; gap: 4px;
       padding: 8px; border-radius: 10px; background: var(--float-bg2);

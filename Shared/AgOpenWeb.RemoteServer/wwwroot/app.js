@@ -11431,6 +11431,52 @@ const TabletDemo = (() => {
 })();
 // demo:end
 
+// ===== Simulator only for test versions, demo and experts (feature/installer) =====================
+// In the customer version the simulator switch is not in the normal menu: App & Files shows it
+// under "Expert" (collapsed), and the demo mode switches it on as before. Test versions keep the
+// menu entry and the SIM button on the map. Test version = this build was found as a pre-release
+// at the last update check (Setup → Info), or, before any check, the device's update channel is
+// "Test". A running simulator keeps its bar, so it can always be switched off. Display only: the
+// host's simulator, its commands and the demo are unchanged.
+// simaccess:begin
+function tuiSimInMenu(buildKind, hash, channel) {
+  const h = String(hash || '').replace(/-dirty$/, '');
+  if (buildKind && h && buildKind.hash === h) return !!buildKind.pre; // known from the last check
+  return channel === 'test';
+}
+// simaccess:end
+const TabletSimAccess = (() => {
+  const T = k => I18n.text(k);
+  const $ = id => document.getElementById(id);
+  const lsGet = k => { try { return localStorage.getItem(k); } catch (_) { return null; } };
+  const kind = () => { try { return JSON.parse(lsGet('aow.build.kind') || 'null'); } catch (_) { return null; } };
+  const testVersion = () => tuiSimInMenu(kind(), appInfo && appInfo.gitHash, lsGet('aow.update.channel') === 'test' ? 'test' : 'stable');
+  // "Expert" in App & Files: the simulator switch (the same command as the upstream entry).
+  const fm = $('filemenu');
+  let exp = null;
+  if (fm) {
+    exp = document.createElement('details'); exp.className = 'tui-expert';
+    exp.innerHTML = '<summary></summary><div class="fo-grid"><button class="fo-btn" id="fm-sim-expert"></button></div><div class="tui-exp-n"></div>';
+    fm.appendChild(exp);
+    $('fm-sim-expert').addEventListener('pointerdown', e => { e.stopPropagation(); transport.send('sim.togglePanel'); if (typeof lnCloseAll === 'function') lnCloseAll(); });
+  }
+  const upEntry = $('fm-simulator'), upGrid = upEntry && upEntry.parentElement, upLabel = upGrid && upGrid.previousElementSibling;
+  function render() {
+    const inMenu = testVersion() || (typeof TabletDemo !== 'undefined' && TabletDemo.active);
+    for (const n of [upGrid, upLabel]) if (n) n.style.display = inMenu ? '' : 'none'; // .fo-grid's display beats [hidden]
+    // The map's SIM button (opens the bar): test versions, or while the simulator runs.
+    document.documentElement.toggleAttribute('data-tui-nosim', !inMenu && !(statusBar && statusBar.simEnabled));
+    if (exp) {
+      exp.querySelector('summary').textContent = T(tr('Expert'));
+      $('fm-sim-expert').textContent = T(tr('Simulator'));
+      exp.querySelector('.tui-exp-n').textContent = T(tr('Simulator: for tests and demos. While it runs, the guidance computer uses no real position.'));
+    }
+  }
+  setInterval(render, 1000);
+  render();
+  return { render, testVersion };
+})();
+
 // ===== Long press = explanation (feature/bedienung-2) =========================================
 // Holding one of the main buttons or tiles for LONG_MS shows a short explanation instead of
 // acting. A short press acts as before, only on release: the press is held back (capture phase)
@@ -11838,6 +11884,9 @@ const TabletUpdate = (() => {
       const r = await fetch(api(), { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       state = { busy: false, res: compare(await r.json(), appInfo && appInfo.gitHash, channel()) };
+      // Remember whether this build is a test version (pre-release) or a stable release
+      // (TabletSimAccess shows the simulator switch in test versions only).
+      try { if (state.res && state.res.mine) localStorage.setItem('aow.build.kind', JSON.stringify({ hash: String(appInfo.gitHash || '').replace(/-dirty$/, ''), pre: !!state.res.mine.prerelease })); } catch (_) { /* ignore */ }
     } catch (e) { state = { busy: false, res: { kind: 'error', why: String(e && e.message || e) } }; }
     refresh();
     return state.res;
