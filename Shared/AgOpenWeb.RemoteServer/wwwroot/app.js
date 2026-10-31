@@ -4764,7 +4764,8 @@ if (fsBtn) {
   let winFs = null; // the launcher's state as last asked; starts as App Settings › Start Fullscreen
   fsBtn.addEventListener('click', () => {
     if (photino()) {
-      if (winFs === null) winFs = !!(config && config.display && config.display.startFullscreen);
+      // fork (autostart): ?winfs=1 = the launcher opened the window fullscreen (autostart or setting)
+      if (winFs === null) winFs = /[?&]winfs=1(&|$)/.test(location.search) || !!(config && config.display && config.display.startFullscreen);
       winFs = !winFs;
       window.external.sendMessage('fullscreen|' + (winFs ? '1' : '0'));
       fsBtn.textContent = winFs ? '🗗' : '⛶';
@@ -7456,12 +7457,27 @@ skFrame();
 // functions wrapped below keep their behaviour; the wrappers only recolour/restyle the map
 // in the sun theme and shift the canvas light bar under a taller status bar.
 let tuiBarDy = null; // canvas light bar offset, set by the Phase 2 layout (null = Phase 1 offset)
+// scale-default:begin
+// First start on a device: the glove size, for gloved hands in the cab. A device that used the
+// app before (it has its own keys in the browser storage) keeps the size it had, normal; a stored
+// choice always wins. Automated browsers (the CI layout checks) keep normal and store nothing.
+function tuiInitialScale(stored, keys, automated) {
+  if (stored !== null && stored !== undefined) return { scale: stored, store: false };
+  if (automated) return { scale: 'normal', store: false };
+  const used = keys.some(k => typeof k === 'string' && (k.startsWith('aow.') || k.startsWith('agopenweb.')));
+  return { scale: used ? 'normal' : 'glove', store: true };
+}
+// scale-default:end
 const TabletUi = (() => {
   const SCALES = ['normal', 'large', 'glove'];
   const DY = { normal: 0, large: 10, glove: 18 }; // = --tui-dy in index.html
   const lsGet = (k, d) => { try { const v = window.localStorage.getItem(k); return v === null ? d : v; } catch (_) { return d; } };
   const lsSet = (k, v) => { try { window.localStorage.setItem(k, v); } catch (_) { /* private / blocked */ } };
-  let scale = SCALES.includes(lsGet('aow.ui.scale', 'normal')) ? lsGet('aow.ui.scale', 'normal') : 'normal';
+  const first = tuiInitialScale(lsGet('aow.ui.scale', null),
+    (() => { try { return Array.from({ length: window.localStorage.length }, (_, i) => window.localStorage.key(i)); } catch (_) { return []; } })(),
+    !!navigator.webdriver);
+  if (first.store) lsSet('aow.ui.scale', first.scale);
+  let scale = SCALES.includes(first.scale) ? first.scale : 'normal';
   let sun = lsGet('aow.ui.sun', '0') === '1';
   const root = document.documentElement;
 
@@ -11415,6 +11431,52 @@ const TabletDemo = (() => {
 })();
 // demo:end
 
+// ===== Simulator only for test versions, demo and experts (feature/installer) =====================
+// In the customer version the simulator switch is not in the normal menu: App & Files shows it
+// under "Expert" (collapsed), and the demo mode switches it on as before. Test versions keep the
+// menu entry and the SIM button on the map. Test version = this build was found as a pre-release
+// at the last update check (Setup → Info), or, before any check, the device's update channel is
+// "Test". A running simulator keeps its bar, so it can always be switched off. Display only: the
+// host's simulator, its commands and the demo are unchanged.
+// simaccess:begin
+function tuiSimInMenu(buildKind, hash, channel) {
+  const h = String(hash || '').replace(/-dirty$/, '');
+  if (buildKind && h && buildKind.hash === h) return !!buildKind.pre; // known from the last check
+  return channel === 'test';
+}
+// simaccess:end
+const TabletSimAccess = (() => {
+  const T = k => I18n.text(k);
+  const $ = id => document.getElementById(id);
+  const lsGet = k => { try { return localStorage.getItem(k); } catch (_) { return null; } };
+  const kind = () => { try { return JSON.parse(lsGet('aow.build.kind') || 'null'); } catch (_) { return null; } };
+  const testVersion = () => tuiSimInMenu(kind(), appInfo && appInfo.gitHash, lsGet('aow.update.channel') === 'test' ? 'test' : 'stable');
+  // "Expert" in App & Files: the simulator switch (the same command as the upstream entry).
+  const fm = $('filemenu');
+  let exp = null;
+  if (fm) {
+    exp = document.createElement('details'); exp.className = 'tui-expert';
+    exp.innerHTML = '<summary></summary><div class="fo-grid"><button class="fo-btn" id="fm-sim-expert"></button></div><div class="tui-exp-n"></div>';
+    fm.appendChild(exp);
+    $('fm-sim-expert').addEventListener('pointerdown', e => { e.stopPropagation(); transport.send('sim.togglePanel'); if (typeof lnCloseAll === 'function') lnCloseAll(); });
+  }
+  const upEntry = $('fm-simulator'), upGrid = upEntry && upEntry.parentElement, upLabel = upGrid && upGrid.previousElementSibling;
+  function render() {
+    const inMenu = testVersion() || (typeof TabletDemo !== 'undefined' && TabletDemo.active);
+    for (const n of [upGrid, upLabel]) if (n) n.style.display = inMenu ? '' : 'none'; // .fo-grid's display beats [hidden]
+    // The map's SIM button (opens the bar): test versions, or while the simulator runs.
+    document.documentElement.toggleAttribute('data-tui-nosim', !inMenu && !(statusBar && statusBar.simEnabled));
+    if (exp) {
+      exp.querySelector('summary').textContent = T(tr('Expert'));
+      $('fm-sim-expert').textContent = T(tr('Simulator'));
+      exp.querySelector('.tui-exp-n').textContent = T(tr('Simulator: for tests and demos. While it runs, the guidance computer uses no real position.'));
+    }
+  }
+  setInterval(render, 1000);
+  render();
+  return { render, testVersion };
+})();
+
 // ===== Long press = explanation (feature/bedienung-2) =========================================
 // Holding one of the main buttons or tiles for LONG_MS shows a short explanation instead of
 // acting. A short press acts as before, only on release: the press is held back (capture phase)
@@ -11792,28 +11854,39 @@ const TabletUpdate = (() => {
   const T = k => I18n.text(k);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
   const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
-  const KEY = 'aow.update.onStart';
+  const KEY = 'aow.update.onStart', CH = 'aow.update.channel';
+  // Channels: "stable" = releases published as full releases (approved with the "Fork Stable
+  // Release" workflow), the default; "test" = also the pre-releases (test versions). Per device.
+  const channel = () => { try { return localStorage.getItem(CH) === 'test' ? 'test' : 'stable'; } catch (_) { return 'stable'; } };
   const api = () => BRAND.source.replace('https://github.com/', 'https://api.github.com/repos/') + '/releases?per_page=30';
   let state = { busy: false, res: null };
   const onStart = () => { try { return localStorage.getItem(KEY) === '1'; } catch (_) { return false; } };
 
-  // releases (GitHub JSON) + this build's hash → { kind: 'newer'|'current'|'unknown', latest, mine }
-  function compare(releases, hash) {
-    const list = (releases || []).filter(r => r && !r.draft && r.published_at)
+  // releases (GitHub JSON) + this build's hash + channel →
+  // { kind: 'newer'|'current'|'ahead'|'unknown'|'none', latest, mine }. This build is looked up
+  // among all published releases (it may be a test version); the newest is taken from the channel
+  // only. 'ahead': this test version is newer than the newest stable release.
+  function compare(releases, hash, ch = 'stable') {
+    const all = (releases || []).filter(r => r && !r.draft && r.published_at)
       .sort((a, b) => String(b.published_at).localeCompare(String(a.published_at)));
+    const list = ch === 'test' ? all : all.filter(r => !r.prerelease);
     if (!list.length) return { kind: 'none' };
     const h = String(hash || '').replace(/-dirty$/, '').toLowerCase();
-    const mine = h.length >= 7 ? list.find(r => String(r.target_commitish || '').toLowerCase().startsWith(h)) : null;
+    const mine = h.length >= 7 ? all.find(r => String(r.target_commitish || '').toLowerCase().startsWith(h)) : null;
     const latest = list[0];
     if (!mine) return { kind: 'unknown', latest };
-    return { kind: mine === latest ? 'current' : 'newer', latest, mine };
+    if (mine === latest) return { kind: 'current', latest, mine };
+    return { kind: String(latest.published_at) > String(mine.published_at) ? 'newer' : 'ahead', latest, mine };
   }
   async function check() {
     state = { busy: true, res: null }; refresh();
     try {
       const r = await fetch(api(), { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' });
       if (!r.ok) throw new Error('HTTP ' + r.status);
-      state = { busy: false, res: compare(await r.json(), appInfo && appInfo.gitHash) };
+      state = { busy: false, res: compare(await r.json(), appInfo && appInfo.gitHash, channel()) };
+      // Remember whether this build is a test version (pre-release) or a stable release
+      // (TabletSimAccess shows the simulator switch in test versions only).
+      try { if (state.res && state.res.mine) localStorage.setItem('aow.build.kind', JSON.stringify({ hash: String(appInfo.gitHash || '').replace(/-dirty$/, ''), pre: !!state.res.mine.prerelease })); } catch (_) { /* ignore */ }
     } catch (e) { state = { busy: false, res: { kind: 'error', why: String(e && e.message || e) } }; }
     refresh();
     return state.res;
@@ -11827,18 +11900,30 @@ const TabletUpdate = (() => {
     const r = state.res;
     if (state.busy) b.appendChild(el('div', 'tp-note', T(tr('Checking GitHub…'))));
     else if (r && r.kind === 'error') b.appendChild(el('div', 'tp-note warn', tr('No answer from GitHub ({f}). Internet on this device?', { f: r.why })));
-    else if (r && r.kind === 'none') b.appendChild(el('div', 'tp-note', T(tr('No release published yet.'))));
+    else if (r && r.kind === 'none') b.appendChild(el('div', 'tp-note', T(channel() === 'test' ? tr('No release published yet.') : tr('No stable release published yet.'))));
     else if (r) {
       const L = r.latest, name = L.name || L.tag_name;
       const txt = r.kind === 'newer' ? tr('A newer version is available: {n} ({d}).', { n: name, d: day(L.published_at) })
         : r.kind === 'current' ? tr('This is the newest version ({n}).', { n: name })
+        : r.kind === 'ahead' ? tr('This test version is newer than the newest stable release ({n}).', { n: name })
           : tr('Newest published version: {n} ({d}). This build is not one of the published ones, so it is not compared.', { n: name, d: day(L.published_at) });
       b.appendChild(el('div', 'tp-note' + (r.kind === 'newer' ? ' warn' : ''), txt));
-      if (r.kind !== 'current') {
+      if (r.kind !== 'current' && r.kind !== 'ahead') {
         const a = el('button', 'tp-btn', T(tr('Open the release page')) + ' ↗'); onTap(a, () => openExternal(L.html_url)); b.appendChild(a);
       }
       b.appendChild(el('div', 'tp-note', T(tr('Installing stays with you: download and install the new version yourself.'))));
     }
+    const cr = el('div', 'tb-row');
+    cr.appendChild(el('span', 'tp-note', T(tr('Channel'))));
+    for (const [c, t] of [['stable', tr('Stable')], ['test', tr('Test (pre-releases)')]]) {
+      const cb = el('button', 'tp-btn' + (channel() === c ? ' pri' : ''), T(t));
+      onTap(cb, () => { try { localStorage.setItem(CH, c); } catch (_) { /* ignore */ } state = { busy: false, res: null }; refresh(); });
+      cr.appendChild(cb);
+    }
+    b.appendChild(cr);
+    b.appendChild(el('div', 'tp-note', T(channel() === 'test'
+      ? tr('Test: also test versions, which may have faults. Only on this device.')
+      : tr('Stable: only versions released as stable. Only on this device.'))));
     const row = el('div', 'tb-row');
     const go = el('button', 'tp-btn pri', T(tr('Check for updates'))); go.disabled = state.busy; onTap(go, check); row.appendChild(go);
     const tg = el('button', 'tp-btn' + (onStart() ? ' pri' : ''), (onStart() ? '✓ ' : '') + T(tr('Check at start')));
@@ -12672,3 +12757,77 @@ const TabletAcceptance = (() => {
   }, 300);
   return { open };
 })();
+
+// ===== Firewall warning (feature/installer) =======================================================
+// The desktop launcher sends "firewall|missing" when the setup was to create the Windows Firewall
+// rules and they are not there (declined, failed, deleted later). Shows how to fix it; closable,
+// back at the next start while the rules are missing. Desktop window only (Photino channel).
+const TabletFirewall = (() => {
+  const T = k => I18n.text(k);
+  let box = null;
+  function show() {
+    if (box) return;
+    box = document.createElement('div'); box.id = 'tui-fw'; box.setAttribute('role', 'alert');
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕';
+    x.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); box.remove(); });
+    const h = document.createElement('div'); h.className = 'fw-t'; h.textContent = T(tr('Windows Firewall: the release for the modules is missing'));
+    const p = document.createElement('div');
+    p.textContent = T(tr('Modules and tablets on the network may be blocked. To fix it: Start menu → {n} → “Allow through firewall” (Windows asks for administrator rights), or run the setup again and allow the prompt.', { n: BRAND.name }));
+    box.append(x, h, p);
+    box.addEventListener('pointerdown', e => e.stopPropagation());
+    document.body.appendChild(box);
+  }
+  try {
+    if (window.external && typeof window.external.receiveMessage === 'function')
+      window.external.receiveMessage(m => { if (m === 'firewall|missing') show(); });
+  } catch (_) { /* not the desktop window */ }
+  return { show };
+})();
+
+// startup:begin
+// ===== Start time (feature/installer) ===========================================================
+// Time stamps of the page's start phases, from the navigation start: HTML received, DOM ready,
+// app.js run, CanvasKit ready, first data from the host, first map frame. Logged to the console;
+// in the desktop window also sent to the launcher (startup|{json}), which writes them into its
+// start log with the host's phases. Then the loading screen (#tui-boot, index.html) goes. Reads
+// state only; changes nothing in the app.
+const TabletStartup = (() => {
+  const marks = [];
+  const nav = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || null;
+  const mark = (name, ms) => marks.push([name, Math.round(ms == null ? performance.now() : ms)]);
+  // Automated browsers (CI layout checks, tests) measure the app at once: no loading screen.
+  if (navigator.webdriver) { const b = document.getElementById('tui-boot'); if (b) b.style.display = 'none'; }
+  if (nav) { mark('page: HTML received', nav.responseEnd); }
+  mark('page: app.js run');
+  let ckAt = 0, tickAt = 0, sent = false;
+  function finish(reason) {
+    if (sent) return; sent = true;
+    const n = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || nav;
+    if (n && n.domContentLoadedEventEnd) marks.push(['page: DOM ready', Math.round(n.domContentLoadedEventEnd)]);
+    const w = performance.getEntriesByType ? performance.getEntriesByType('resource').find(r => /canvaskit\.wasm/.test(r.name)) : null;
+    if (w) marks.push(['page: canvaskit.wasm fetched (' + Math.round(w.duration) + ' ms)', Math.round(w.responseEnd)]);
+    marks.push(['page: loading screen off (' + reason + ')', Math.round(performance.now())]);
+    marks.sort((a, b) => a[1] - b[1]);
+    const boot = document.getElementById('tui-boot');
+    if (boot) { boot.style.opacity = '0'; setTimeout(() => boot.remove(), 300); }
+    try { console.log('[startup] ' + marks.map(m => m[1] + ' ms ' + m[0]).join(' | ')); } catch (_) { /* no console */ }
+    try {
+      if (window.external && typeof window.external.sendMessage === 'function')
+        window.external.sendMessage('startup|' + JSON.stringify({ origin: performance.timeOrigin, marks }));
+    } catch (_) { /* not the desktop window */ }
+  }
+  function poll() {
+    if (sent) return;
+    const t = performance.now();
+    if (!ckAt && (CK && skSurface || /error|missing|no WebGL/.test(ckStatus || ''))) { ckAt = t; mark('page: CanvasKit ready', t); }
+    if (!tickAt && tick) { tickAt = t; mark('page: first data from host', t); }
+    // The frame after both: the map has drawn with data.
+    if (ckAt && tickAt) { requestAnimationFrame(() => { mark('page: first map frame'); finish('map drawn'); }); return; }
+    // Never hide the app's own messages (no host, no WebGL) behind the loading screen for long.
+    if (t > 15000) { finish('15 s'); return; }
+    requestAnimationFrame(poll);
+  }
+  requestAnimationFrame(poll);
+  return { get marks() { return marks.slice(); } };
+})();
+// startup:end

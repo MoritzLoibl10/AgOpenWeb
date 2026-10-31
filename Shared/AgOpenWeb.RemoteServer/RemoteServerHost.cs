@@ -339,12 +339,16 @@ public sealed class RemoteServerHost
         // stale copy in the WebView's HTTP cache silently runs old code after an app update.
         // Force a fresh fetch every load.
         var noStore = new[] { ("Cache-Control", "no-store") };
-        server.MapGet("/", () => SimpleWebServer.Response.Text(ReadAsset("index.html"), "text/html", noStore));
-        server.MapGet("/app.js", () => SimpleWebServer.Response.Text(ReadAsset("app.js"), "text/javascript", noStore));
-        server.MapGet("/transport.js", () => SimpleWebServer.Response.Text(ReadAsset("transport.js"), "text/javascript", noStore));
+        // Fork (start time): the page and its scripts go out with an ETag (hash of this build's
+        // file) and "no-cache": the web view asks on every load, so an update is never stale,
+        // but an unchanged file comes back as 304 and the browser reuses the code it compiled
+        // last time (app.js, the CanvasKit wasm) instead of compiling it again at every start.
+        server.MapGet("/", () => Validated("index.html", "text/html"));
+        server.MapGet("/app.js", () => Validated("app.js", "text/javascript"));
+        server.MapGet("/transport.js", () => Validated("transport.js", "text/javascript"));
         // Translations (#143): the loader, and one JSON file per language (en.json is the
         // source Weblate reads). Filename-only (no path traversal); unknown names 404.
-        server.MapGet("/i18n.js", () => SimpleWebServer.Response.Text(ReadAsset("i18n.js"), "text/javascript", noStore));
+        server.MapGet("/i18n.js", () => Validated("i18n.js", "text/javascript"));
         server.MapGetPrefix("/i18n/", file =>
         {
             if (file.Contains('/') || file.Contains('\\') || file.Contains("..")
@@ -358,8 +362,8 @@ public sealed class RemoteServerHost
 
         // CanvasKit (WASM Skia) — bundled locally for offline in-cab use. The wasm is
         // served as application/wasm so the browser can streaming-compile it.
-        server.MapGet("/vendor/canvaskit.js", () => SimpleWebServer.Response.Text(ReadAsset("vendor.canvaskit.js"), "text/javascript"));
-        server.MapGet("/vendor/canvaskit.wasm", () => SimpleWebServer.Response.Bytes(ReadAssetBytes("vendor.canvaskit.wasm"), "application/wasm"));
+        server.MapGet("/vendor/canvaskit.js", () => Validated("vendor.canvaskit.js", "text/javascript"));
+        server.MapGet("/vendor/canvaskit.wasm", () => Validated("vendor.canvaskit.wasm", "application/wasm", binary: true));
 
         // Right-nav toolbar icons (PNG/GIF), embedded from wwwroot/icons. Filename-only
         // (no path traversal); unknown names 404.
@@ -368,7 +372,7 @@ public sealed class RemoteServerHost
             if (file.Contains('/') || file.Contains('\\') || file.Contains(".."))
                 return SimpleWebServer.Response.NotFound;
             var mime = file.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) ? "image/gif" : "image/png";
-            try { return SimpleWebServer.Response.Bytes(ReadAssetBytes("icons." + file), mime); }
+            try { return Validated("icons." + file, mime, binary: true); } // fork: ETag, see "/"
             catch (FileNotFoundException) { return SimpleWebServer.Response.NotFound; }
         });
 
@@ -379,7 +383,7 @@ public sealed class RemoteServerHost
         {
             if (file.Contains('/') || file.Contains('\\') || file.Contains(".."))
                 return SimpleWebServer.Response.NotFound;
-            try { return SimpleWebServer.Response.Bytes(ReadAssetBytes("sounds." + file), "audio/wav"); }
+            try { return Validated("sounds." + file, "audio/wav", binary: true); } // fork: ETag, see "/"
             catch (FileNotFoundException) { return SimpleWebServer.Response.NotFound; }
         });
 
@@ -579,6 +583,19 @@ public sealed class RemoteServerHost
             return new WebImage(jpg, "image/jpeg");
         }
         catch { return null; }
+    }
+
+    // Fork (start time): embedded assets read once, with their ETag (SHA-256 of the bytes).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (byte[] Body, string ETag)> ValidatedAssets = new();
+
+    private static SimpleWebServer.Response Validated(string name, string mime, bool binary = false)
+    {
+        var (body, etag) = ValidatedAssets.GetOrAdd(name, n =>
+        {
+            var bytes = binary ? ReadAssetBytes(n) : System.Text.Encoding.UTF8.GetBytes(ReadAsset(n));
+            return (bytes, "\"" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))[..32] + "\"");
+        });
+        return SimpleWebServer.Response.Bytes(body, mime, new[] { ("Cache-Control", "no-cache"), ("ETag", etag) });
     }
 
     private static string ReadAsset(string name)

@@ -1,0 +1,51 @@
+name: Fork Stable Release
+
+# Fork-only (feature/installer): release an existing test version as "Stable". Takes a
+# pre-release made by "Fork Test Pre-Release" and turns it into a full release, the latest one,
+# with a line saying when it was released. The update check on the devices offers only these on
+# the "Stable" channel (the default); "Test" also offers the pre-releases. Nothing is built here:
+# the files of the tested pre-release are the files of the stable release.
+# Run by hand only, for a version that passed its tests.
+# A stable release offers only the setup for Windows: the portable ZIP of the test version is
+# removed from it (it stays in the test versions). The Android APK stays.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag of the tested pre-release, e.g. 26.7.0-moritz.25'
+        required: true
+      note:
+        description: 'Short note for the release text (optional)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Release as stable
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          NOTE: ${{ inputs.note }}
+        run: |
+          case "$TAG" in
+            *[!A-Za-z0-9._-]*|"") echo "::error::Tag may only contain letters, digits, '.', '_' and '-'."; exit 1 ;;
+          esac
+          info=$(gh release view "$TAG" --json isPrerelease,isDraft,body) || { echo "::error::No release $TAG."; exit 1; }
+          if [ "$(jq -r .isDraft <<<"$info")" = "true" ]; then echo "::error::$TAG is a draft."; exit 1; fi
+          if [ "$(jq -r .isPrerelease <<<"$info")" != "true" ]; then echo "::error::$TAG is already a full release."; exit 1; fi
+          { printf '**Released as stable on %s.**' "$(date -u +%Y-%m-%d)"
+            [ -n "$NOTE" ] && printf ' %s' "$NOTE"
+            printf '\n\n'; jq -r .body <<<"$info"; } > notes.md
+          # Windows: only the setup in a stable release; the portable ZIP stays a test-version file.
+          gh release view "$TAG" --json assets -q '.assets[].name' | { grep -E '\.zip$' || true; } | while read -r a; do
+            echo "Removing $a from the stable release"; gh release delete-asset "$TAG" "$a" -y
+          done
+          gh release edit "$TAG" --prerelease=false --latest --notes-file notes.md
+          echo "$TAG is now a stable release."

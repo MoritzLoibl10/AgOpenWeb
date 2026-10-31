@@ -46,3 +46,25 @@ test('unpublished entries and junk are skipped', () => {
   assert.equal(U.compare(null, 'aaaaaaa').kind, 'none');
 });
 test('a draft that is this build is not claimed as installed', () => assert.equal(U.compare(R, 'ccccccc3').kind, 'unknown'));
+
+// feature/installer: channels. Stable = full releases only (the default); test = also pre-releases.
+const C = [rel('26.7.0', 'aaaaaaa111', '2026-10-20T10:00:00Z'),
+  rel('26.7.0-moritz.30', 'bbbbbbb222', '2026-10-25T10:00:00Z', { prerelease: true }),
+  rel('26.7.1', 'ccccccc333', '2026-10-28T10:00:00Z'),
+  rel('26.7.1-moritz.31', 'ddddddd444', '2026-10-29T10:00:00Z', { prerelease: true })];
+test('stable channel: only full releases are offered', () => {
+  const r = U.compare(C, 'aaaaaaa1');
+  assert.equal(r.kind, 'newer'); assert.equal(r.latest.tag_name, '26.7.1');
+  assert.equal(U.compare(C, 'ccccccc3').kind, 'current', 'the newest stable, though a newer test version exists');
+});
+test('test channel: pre-releases count too', () => {
+  assert.equal(U.compare(C, 'ccccccc3', 'test').latest.tag_name, '26.7.1-moritz.31');
+  assert.equal(U.compare(C, 'ccccccc3', 'test').kind, 'newer');
+  assert.equal(U.compare(C, 'ddddddd4', 'test').kind, 'current');
+});
+test('a test version on the stable channel: a newer stable is offered, an older one is not', () => {
+  assert.equal(U.compare(C, 'bbbbbbb2').kind, 'newer');
+  assert.equal(U.compare(C, 'bbbbbbb2').latest.tag_name, '26.7.1');
+  assert.equal(U.compare(C, 'ddddddd4').kind, 'ahead');
+});
+test('stable channel without any full release: none', () => assert.equal(U.compare([C[1], C[3]], 'bbbbbbb2').kind, 'none'));

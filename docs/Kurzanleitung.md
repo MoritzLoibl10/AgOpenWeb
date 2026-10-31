@@ -79,6 +79,11 @@ und Arbeitsbreite. Antippen: Tätigkeit, Mittel/Sorte, Menge, Bemerkung eintrage
 **Einrichtung → Info → Aktualisierungen → „Nach Aktualisierungen suchen“** (braucht Internet). Die
 App zeigt die neueste veröffentlichte Version mit Link. Installiert wird nichts automatisch: die
 neue Version selbst herunterladen und installieren. Auf Wunsch „Beim Start prüfen“ einschalten.
+- **Kanal:** „Stabil“ (Vorgabe) zeigt nur freigegebene Versionen, „Test“ auch Testversionen; gilt
+  nur für dieses Gerät.
+- **Windows:** `…-Setup-….exe` ausführen; sie installiert über die alte Version. Schläge, Profile und
+  Protokolle bleiben erhalten, auch beim Deinstallieren. Windows kann warnen, weil das Programm nicht
+  signiert ist („Weitere Informationen“ → „Trotzdem ausführen“).
 
 ---
 LM Steering Solutions basiert auf AgOpenWeb und AgOpenGPS. Lizenz: Apache License 2.0. Fremdkomponenten

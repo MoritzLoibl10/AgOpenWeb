@@ -49,6 +49,7 @@ internal sealed class BackendHost
     {
         if (IsRunning) return;
 
+        AgOpenWeb.RemoteWiring.StartupTrace.Mark("host: start");
         // The single host-loop thread that stands in for the Avalonia UI thread.
         var hostLoop = new HostLoopDispatcher();
 
@@ -80,6 +81,7 @@ internal sealed class BackendHost
                 services.AddHostedService<SystemdWatchdogService>();
             })
             .Build();
+        AgOpenWeb.RemoteWiring.StartupTrace.Mark("host: DI container built");
 
         var sp = host.Services;
 
@@ -108,6 +110,7 @@ internal sealed class BackendHost
         });
 
         await host.StartAsync();
+        AgOpenWeb.RemoteWiring.StartupTrace.Mark("host: generic host started");
 
         _hostLoop = hostLoop;
         _host = host;

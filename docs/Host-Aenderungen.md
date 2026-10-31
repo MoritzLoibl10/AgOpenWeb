@@ -397,3 +397,58 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
   Tests: `KeyedFailureTests.cs`, `ToastKeyTests`; Einrichtungsstatus im Vollständigkeitstest von
   `PersistentStateServiceTests`.
 - **Lenk-, Regel- und Sicherheitslogik:** nicht berührt (nur Texte der Meldungen).
+
+## 18. CI: Windows-Installer und Freigabe „Stabil“ (feature/installer, Oktober 2026)
+- **Dateien:** `.github/workflows/fork-prerelease.yml` (neuer Job `installer` auf `windows-latest`,
+  Inno Setup aus dem ZIP-Paket; die Vorabversion enthält zusätzlich `*-Setup-*.exe`),
+  `.github/workflows/fork-stable-release.yml` (neu: macht eine getestete Vorabversion zur
+  vollständigen Release), `deploy/windows/installer.iss` (neu). Genehmigt im Auftrag; Host und
+  Launcher unverändert. Einzelheiten: `docs/Installer.md`.
+- **Firewall und WebView2** (Nachtrag): `installer.iss` legt bei der Installation zwei
+  Firewall-Regeln nur für das Programm an (UDP 9999, 2211, 2222; TCP 5174; per `netsh`, mit
+  UAC-Abfrage) und entfernt sie bei der Deinstallation; fehlt die WebView2-Laufzeit, startet es
+  Microsofts Bootstrapper, den der Job `installer` herunterlädt und auf die Microsoft-Signatur
+  prüft. Host und Launcher unverändert.
+- **Produktname** (Nachtrag): `AppName` „LM Steering Solutions“ (Setup, Startmenü, Verknüpfung,
+  „Apps“, Firewall-Regeln; Setup-Datei ohne Leerzeichen); `AppId` endgültig, unverändert; Regeln und
+  Verknüpfungen der Testversionen „AgOpenWeb“ werden mit entfernt.
+- **Secrets:** keine neuen, keine geänderten; nur `GITHUB_TOKEN`.
+
+## 19. Startzeit (feature/installer, Oktober 2026; Launcher und Host nur für den Start genehmigt)
+- **Messung:** `Shared/AgOpenWeb.RemoteWiring/StartupTrace.cs` (neu): Zeitstempel ab Prozessstart
+  in `Program.Main`, `BackendHost`, `WebBackend.StartAsync` (nur `StartupTrace.Mark`-Zeilen) und im
+  Launcher; die Seite meldet ihre Phasen (`app.js`, Block `startup:begin`) über
+  `startup|{json}`. Ergebnis in `%TEMP%\agopenweb-startup.log`. Rebase: Mark-Zeilen sind
+  einzeln, bei Konflikt upstream nehmen und die Zeilen neu setzen.
+- **Paralleler Start:** `WebViewLauncher` startet das Backend sofort, parallel zu Fenster und
+  WebView2, statt erst nach `WindowCreated`; geladen wird die Oberfläche, wenn beides fertig ist.
+- **Ladebildschirm:** Produktname und Logo im Launcher-Splash (`LauncherEntry.SplashHtml`) und als
+  `#tui-boot` am Anfang von `index.html`; dunkler WebView2-Hintergrund
+  (`WEBVIEW2_DEFAULT_BACKGROUND_COLOR`, nur wenn nicht gesetzt).
+- **Zwischenspeicher:** `RemoteServerHost` liefert Seite, Skripte, CanvasKit, Symbole und Töne mit
+  ETag und `no-cache`; `SimpleWebServer` antwortet mit 304, wenn der Browser die Datei schon hat
+  (`NotModifiedIfCurrent`). Veraltet kann nichts sein (Prüfung bei jedem Laden), der Browser behält
+  aber den übersetzten Code. Test: `SimpleWebServerETagTests.cs`.
+- **ReadyToRun:** im Fork-Workflow (`PublishReadyToRun=true` als Umgebungsvariable des Schritts);
+  `deploy/windows/package.sh` unverändert.
+- **Lenk-, Regel- und Sicherheitslogik:** nicht berührt.
+
+## 20. Autostart und zweiter Start (feature/installer, Oktober 2026; genehmigt)
+- **`--autostart`:** `LauncherEntry` öffnet das Fenster sofort im Vollbild; `WebViewLauncher`
+  hängt `?winfs=1` an die Adresse, damit der ⛶-Knopf (app.js) den Zustand kennt.
+- **Zweiter Start:** `SingleInstance` (upstream #377) bleibt die Sperre; neu `AskRunningToShow`
+  (Named Pipe `AgOpenWeb.Desktop.Show`, unter Windows mit `AllowSetForegroundWindow`) und
+  `ListenForShow` im Launcher; `Launcher/WindowFront.cs` (neu) holt das Fenster nach vorne. Ein
+  headless laufender Host antwortet nicht: dann wie bisher die Meldung und Ende.
+- **Installer:** Aufgabe `autostart`, `[Registry]` HKCU Run (siehe `docs/Installer.md`).
+
+## 21. Installer verständlicher (feature/installer, Oktober 2026; genehmigt)
+- **Installer:** Firewall-Regeln jetzt im `[Code]` des Setups (Hinweis vor der UAC-Abfrage,
+  Prüfung danach, Meldung bei Fehlschlag, `firewall-status.txt`, `Firewall-freigeben.cmd` mit
+  Startmenü-Eintrag).
+- **Launcher:** `Launcher/FirewallCheck.cs` (neu) prüft beim Start per `netsh` (ohne Adminrechte);
+  fehlt eine Regel, schickt `WebViewLauncher` `firewall|missing` an die Seite; `app.js`
+  (`TabletFirewall`) zeigt den Hinweis.
+- **Workflows:** ZIP heißt `LM-Steering-Solutions-portable-<Tag>.zip`; „Fork Stable Release“
+  entfernt die ZIP aus der stabilen Release.
+

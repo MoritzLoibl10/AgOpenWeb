@@ -304,6 +304,11 @@
       font: 700 13px system-ui, sans-serif; cursor: pointer; touch-action: manipulation;
       pointer-events: auto; }
     #sim-launch.show { display: block; }
+    :root[data-tui-nosim] #sim-launch.show { display: none; } /* fork: customer version, see TabletSimAccess */
+    #filemenu .tui-expert { margin-top: 10px; }
+    #filemenu .tui-expert, #filemenu .tui-expert summary { font-family: system-ui, sans-serif; }
+    #filemenu .tui-expert summary { cursor: pointer; color: var(--text-dim, #9fb3cc); font-weight: 700; padding: 6px 0; }
+    #filemenu .tui-exp-n { color: var(--text-dim, #9fb3cc); font-size: 12px; margin-top: 6px; }
     /* Section bar (Phase 7) — colour-coded per-section buttons, one or more rows. */
     #sectionbar { display: none; flex-direction: column; align-items: center; gap: 4px;
       padding: 8px; border-radius: 10px; background: var(--float-bg2);
@@ -1670,6 +1675,11 @@
       background: var(--tui-card, #fff); color: var(--tui-ink, #111); border: 2px solid var(--tui-warn); box-shadow: 0 10px 30px rgba(0,0,0,0.4);
       font: 600 var(--tui-fs-lbl)/1.45 system-ui, sans-serif; }
     #tui-legal[hidden] { display: none; }
+    #tui-fw { position: fixed; z-index: 9990; left: 50%; top: 56px; transform: translateX(-50%); width: min(560px, calc(100vw - 24px));
+      box-sizing: border-box; padding: 12px 44px 12px 14px; border-radius: 12px; background: var(--tui-card, #fff); color: var(--tui-ink, #111);
+      border: 2px solid var(--tui-warn); box-shadow: 0 10px 30px rgba(0,0,0,0.4); font: 600 var(--tui-fs-lbl)/1.4 system-ui, sans-serif; }
+    #tui-fw .fw-t { font-weight: 900; margin-bottom: 4px; }
+    #tui-fw .x { position: absolute; top: 6px; right: 6px; min-width: 36px; min-height: 36px; border: 0; background: transparent; color: inherit; font-size: 18px; }
     #tui-legal .lg-n { color: var(--tui-acc); font: 800 var(--tui-fs-lbl) system-ui, sans-serif; margin-bottom: 2px; }
     #tui-legal .lg-t { font: 900 calc(var(--tui-fs-lbl) + 4px) system-ui, sans-serif; margin-bottom: 8px; }
     #tui-legal .lg-l { margin: 0 0 14px; padding-left: 22px; }
@@ -2267,6 +2277,14 @@
   </style>
 </head>
 <body>
+  <!-- fork (start time): loading screen, painted before anything else loads; app.js (block
+       startup:begin) removes it once the map has drawn its first frame. Product name as BRAND. -->
+  <div id="tui-boot" translate="no" style="position:fixed;inset:0;z-index:2147483000;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:#0b1020;color:#fff;font:600 18px system-ui,sans-serif;transition:opacity .25s">
+    <svg viewBox="0 0 96 96" width="96" height="96" aria-hidden="true"><rect x="4" y="4" width="88" height="88" rx="22" fill="#c995e0"/><g fill="none" stroke="#1d0b26" stroke-width="5" stroke-linecap="round" opacity=".55"><path d="M20 76 C30 52 34 38 36 20"/><path d="M36 78 C42 54 46 38 48 20"/><path d="M64 78 C58 54 54 38 52 20"/><path d="M80 76 C70 52 66 38 64 20"/></g><path d="M50 18 V62" stroke="#1d0b26" stroke-width="7" stroke-linecap="round"/><circle cx="50" cy="70" r="9" fill="#1d0b26"/></svg>
+    <div style="font:800 30px system-ui,sans-serif;letter-spacing:.02em">LM Steering Solutions</div>
+    <div id="tui-boot-t" style="color:#b9c3d6">Starting …</div>
+  </div>
+  <script>try { if (/^de/i.test(localStorage.getItem('agopenweb.lang') || navigator.language || '')) document.getElementById('tui-boot-t').textContent = 'Wird gestartet …'; } catch (_) { }</script>
   <canvas id="ck"></canvas>
   <div id="statusbar">
     <!-- LEFT/RIGHT groups swapped so the fullscreen exit "✕" pill (top-left) only ever
@@ -4121,6 +4139,13 @@ StbImageSharp 2.30.15 .................. Public Domain or MIT (project README)
 The desktop packages (Windows, Linux, macOS) contain the .NET 10 runtime
 (self-contained). .NET Foundation and Contributors, MIT (dotnet/runtime LICENSE.TXT).
 
+Windows installer
+-----------------
+Microsoft Edge WebView2 Runtime bootstrapper (MicrosoftEdgeWebview2Setup.exe), in the
+  setup only; runs only where the runtime is missing. Microsoft Corporation, passed on
+  unchanged under the WebView2 distribution terms. The setup is built with Inno Setup
+  (Jordan Russell, Martijn Laan; Inno Setup License).
+
 Icons and sounds
 ----------------
 wwwroot/icons, wwwroot/sounds: all 11 sounds and 164 icons are the same files as
@@ -4169,6 +4194,13 @@ StbImageSharp 2.30.15 .................. Public Domain oder MIT (README des Proj
 -------------
 Die Desktop-Pakete (Windows, Linux, macOS) enthalten die .NET-10-Laufzeit
 (eigenständig). .NET Foundation and Contributors, MIT (dotnet/runtime LICENSE.TXT).
+
+Windows-Installer
+-----------------
+Microsoft-Edge-WebView2-Laufzeit, Bootstrapper (MicrosoftEdgeWebview2Setup.exe), nur im
+  Setup; läuft nur, wo die Laufzeit fehlt. Microsoft Corporation, unverändert weitergegeben
+  nach den WebView2-Verteilungsbedingungen. Das Setup ist mit Inno Setup gebaut
+  (Jordan Russell, Martijn Laan; Inno-Setup-Lizenz).
 
 Symbole und Töne
 ----------------

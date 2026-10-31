@@ -22,11 +22,18 @@ sealed class Program
             return;
         }
 
+        AgOpenWeb.RemoteWiring.StartupTrace.Mark("Main");
         // One copy per computer. A second would share the module ports (ReuseAddress), talk
         // to the steering board, then crash on :5174; stop it before it loads anything.
         var single = SingleInstance.TryAcquire();
         if (single == null)
         {
+            // Fork: a running launcher window comes to the front instead (SingleInstance).
+            if (SingleInstance.AskRunningToShow())
+            {
+                Environment.Exit(0);
+                return;
+            }
             Console.Error.WriteLine($"{Brand.ProductName} is already running on this computer. Open it at http://localhost:5174.");
             Environment.Exit(1);
             return;

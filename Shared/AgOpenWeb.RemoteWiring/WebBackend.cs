@@ -46,16 +46,22 @@ public sealed class WebBackend
         // Slow-work reporting on the host loop (#169) once logging is available.
         if (sp.GetService<IUiDispatcher>() is AgOpenWeb.Services.Threading.HostLoopDispatcher hostLoop)
             hostLoop.Logger = sp.GetService<Microsoft.Extensions.Logging.ILoggerFactory>()?.CreateLogger("HostLoop");
+        StartupTrace.Mark("backend: begin");
         sp.GetRequiredService<ISettingsService>().Load();
+        StartupTrace.Mark("backend: settings loaded");
         var configService = sp.GetRequiredService<IConfigurationService>();
         configService.LoadAppSettings();
+        StartupTrace.Mark("backend: app settings -> configuration");
         sp.GetRequiredService<IPersistentStateService>().Load();
+        StartupTrace.Mark("backend: persistent state loaded");
 
         WireCrossServices(sp);
+        StartupTrace.Mark("backend: services wired");
 
         // Construct the single MainViewModel (starts the control loop + render-pull /
         // status timers on the host loop).
         var vm = sp.GetRequiredService<MainViewModel>();
+        StartupTrace.Mark("backend: MainViewModel built");
 
         // Start the embedded browser server, then wire its command handler + projectors.
         var server = new AgOpenWeb.RemoteServer.RemoteServerHost();
@@ -76,11 +82,15 @@ public sealed class WebBackend
             sp.GetRequiredService<IVehicleProfileService>(),
             sp.GetRequiredService<IPersistentStateService>(),
             sp.GetService<INtripClientService>()).ConfigureAwait(false);
+        StartupTrace.Mark("backend: web server listening");
 
         // Wire on the host loop so the command handler runs serialized with the render-pull /
         // status timers, exactly as the Avalonia UI thread did in the old windowed build.
         sp.GetRequiredService<IUiDispatcher>().Post(() =>
-            RemoteServerWiring.Wire(server, vm, sp, configService, imageryCapture));
+        {
+            RemoteServerWiring.Wire(server, vm, sp, configService, imageryCapture);
+            StartupTrace.Mark("backend: commands wired (host loop)");
+        });
 
         return new WebBackend { Server = server, ViewModel = vm };
     }
