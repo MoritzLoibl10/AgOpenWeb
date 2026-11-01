@@ -2,7 +2,7 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// TabletReady (wwwroot/app.js, between ready:begin/end): the ready light. The fix quality is
+// TabletReady (wwwroot/js/tablet.js, between ready:begin/end): the ready light. The fix quality is
 // judged by goodness, never looser than the host's gate (GpsFixQualityValidator: number <
 // MinFixQuality is refused).
 // Run: node --test Tests/web/ready.test.mjs
@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/app.js', import.meta.url), 'utf8');
+const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/js/tablet.js', import.meta.url), 'utf8');
 const block = app.slice(app.indexOf('// ready:begin'), app.indexOf('// ready:end'));
 
 export function node() {
