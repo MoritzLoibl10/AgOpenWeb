@@ -31,6 +31,8 @@ public sealed class MapBroadcaster : IAsyncDisposable
     private long _lastConfigFp = long.MinValue;
     private long _lastProfilesFp = long.MinValue;
     private long _lastNtripFp = long.MinValue;
+    private long _lastMountpointsFp = long.MinValue;
+    private long _lastWebCardsFp = long.MinValue;
     private long _lastFieldOpsFp = long.MinValue;
     private long _lastAgShareFp = long.MinValue;
     private long _lastAppInfoFp = long.MinValue;
@@ -101,6 +103,7 @@ public sealed class MapBroadcaster : IAsyncDisposable
             WireCodec.EncodeConfig(_projector.BuildConfig()),
             WireCodec.EncodeProfiles(_projector.BuildProfiles()),
             WireCodec.EncodeNtripProfiles(_projector.BuildNtripProfiles()),
+            WireCodec.EncodeWebCards(_projector.BuildWebCards()),
             WireCodec.EncodeFieldOps(_projector.BuildFieldOps()),
             WireCodec.EncodeAgShare(_projector.BuildAgShare()),
             WireCodec.EncodeAppInfo(_projector.BuildAppInfo()),
@@ -188,6 +191,22 @@ public sealed class MapBroadcaster : IAsyncDisposable
                 {
                     _lastNtripFp = nfp;
                     await _ws.BroadcastAsync(WireCodec.EncodeNtripProfiles(_projector.BuildNtripProfiles()), ct).ConfigureAwait(false);
+                }
+
+                // NTRIP mount points (profile editor): a request started or finished.
+                var mfp = _projector.NtripMountpointsFingerprint();
+                if (mfp != _lastMountpointsFp)
+                {
+                    _lastMountpointsFp = mfp;
+                    await _ws.BroadcastAsync(WireCodec.EncodeNtripMountpoints(_projector.BuildNtripMountpoints()), ct).ConfigureAwait(false);
+                }
+
+                // Web cards' bookmarks: add / edit / delete.
+                var wfp = _projector.WebCardsFingerprint();
+                if (wfp != _lastWebCardsFp)
+                {
+                    _lastWebCardsFp = wfp;
+                    await _ws.BroadcastAsync(WireCodec.EncodeWebCards(_projector.BuildWebCards()), ct).ConfigureAwait(false);
                 }
 
                 // Field Operations read-frame: field/job add / delete / open.

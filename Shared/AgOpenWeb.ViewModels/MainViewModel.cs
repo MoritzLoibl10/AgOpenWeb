@@ -408,6 +408,7 @@ public partial class MainViewModel : ObservableObject
         _gpsService.GpsDataUpdated += OnGpsDataUpdated;
         _autoSteerService.StateUpdated += OnAutoSteerStateUpdated;
         _autoSteerService.GuidanceLost += OnGuidanceLost;
+        _autoSteerService.SensorKickout += OnSensorKickout;
         (_autoSteerService as Services.AutoSteer.AutoSteerService)?.SetTramLineService(_tramLineService);
         (_autoSteerService as Services.AutoSteer.AutoSteerService)?.SetSmartWasService(_smartWasService);
         _autoSteerService.Start(); // Enable zero-copy GPS pipeline
@@ -465,7 +466,7 @@ public partial class MainViewModel : ObservableObject
         // Replaces Phase 2c #1's 10 Hz "display tick" — same architecture,
         // half the rate, and now also includes diagnostics like
         // GpsToPgnLatencyMs that AutoSteer was writing at 100 Hz.
-        // See Plans/perf_data/2026-05-20/ANALYSIS.md.
+        // See Plans/Ideas/perf_data/2026-05-20/ANALYSIS.md.
         _statusTickTimer = _timerFactory.Create();
         _statusTickTimer.Interval = TimeSpan.FromMilliseconds(200);
         _statusTickTimer.Tick += OnStatusTick;
@@ -473,6 +474,7 @@ public partial class MainViewModel : ObservableObject
         _udpService.ModuleConnectionChanged += OnModuleConnectionChanged;
         _ntripService.ConnectionStatusChanged += OnNtripConnectionChanged;
         _ntripService.RtcmDataReceived += OnRtcmDataReceived;
+        _ntripService.Notice += OnNtripNotice;
         ConfigStore.Connections.PropertyChanged += OnNtripEnabledChanged;
         _fieldService.ActiveFieldChanged += OnActiveFieldChanged;
         FieldFullyLoaded += OnFieldFullyLoaded;
@@ -481,6 +483,7 @@ public partial class MainViewModel : ObservableObject
         _boundaryRecordingService.StateChanged += OnBoundaryStateChanged;
         _moduleCommunicationService.AutoSteerToggleRequested += OnAutoSteerToggleRequested;
         _moduleCommunicationService.SectionMasterToggleRequested += OnSectionMasterToggleRequested;
+        _autoSteerService.RemoteSwitchesReceived += OnRemoteSwitchesReceived;
         _sectionControlService.SectionStateChanged += OnSectionStateChanged;
         _coverageMapService.BoundsExpanded += OnCoverageBoundsExpanded;
 
@@ -717,14 +720,8 @@ public partial class MainViewModel : ObservableObject
             toolN = hitchN - Math.Cos(toolHeading) * pivotOffset;
         }
 
-        // Lateral offset perpendicular to tool heading (right is positive,
-        // matching ToolPositionService.ApplyLateralOffset).
-        if (Math.Abs(tool.Offset) > 0.001)
-        {
-            double perp = toolHeading + Math.PI / 2.0;
-            toolE += Math.Sin(perp) * tool.Offset;
-            toolN += Math.Cos(perp) * tool.Offset;
-        }
+        // No lateral offset: the section spans the map draws from this point carry it,
+        // as in ToolPositionService (#446).
 
         _mapService.SetAllPositions(
             p.Position.Easting, p.Position.Northing, p.Heading,
@@ -1310,7 +1307,9 @@ public partial class MainViewModel : ObservableObject
 
             // Toggle autosteer when requested by module communication service
             // (e.g., from work switch or steer switch)
-            ToggleAutoSteerCommand?.Execute(null);
+            ToggleAutoSteerCommand?.Execute(IsAutoSteerEngaged
+                ? ModuleStoppedSteeringReason()
+                : "steer switch or button on the steer module");
         }
 
         // UpdateModuleSwitches runs on the host loop, so toggle right away and report the
@@ -1397,6 +1396,11 @@ public partial class MainViewModel : ObservableObject
         {
             _moduleSteeredSinceEngage = false;
             _audioService.Play(Services.Interfaces.SoundEffect.AutoSteerOff);
+            // With a Switch or Button set, UpdateModuleSwitches turns AutoSteer off next and
+            // logs why; with None it stays on, so say so here.
+            if (ConfigStore.AutoSteer.ExternalEnable == 0)
+                _logger.LogInformation("[AutoSteer] {Reason}; AutoSteer stays on (steer switch / button: None)",
+                    ModuleStoppedSteeringReason());
             ReportFailure("Steer module stopped steering (kickout, switch or button)");
         }
     }
@@ -1780,7 +1784,7 @@ public partial class MainViewModel : ObservableObject
                 // Migrate legacy/imported dense boundaries to normalized resolution
                 // in-memory so derived geometry (tram/headland), inside-tests, and
                 // rendering operate on a sane point count. Persisted on the next
-                // explicit boundary save. See Plans/BOUNDARY_RESOLUTION_NORMALIZATION.md.
+                // explicit boundary save. See Plans/Completed/BOUNDARY_RESOLUTION_NORMALIZATION.md.
                 NormalizeBoundaryInPlace(boundary);
                 SetCurrentBoundary(boundary);
                 CenterMapOnBoundary(boundary);
@@ -1900,7 +1904,7 @@ public partial class MainViewModel : ObservableObject
             // large saved file was costing seconds on the open critical path, so they
             // aren't saved at all. The tram buttons regenerate via UpdateTramLines from
             // the current track/systems. Start clean so a prior field's lines don't linger. See
-            // Plans/BOUNDARY_RESOLUTION_NORMALIZATION.md.
+            // Plans/Completed/BOUNDARY_RESOLUTION_NORMALIZATION.md.
             _tramLineService.Clear();
             _mapService.SetTramLines(
                 _tramLineService.OuterBoundaryTrack,
@@ -2070,6 +2074,7 @@ public partial class MainViewModel : ObservableObject
             IsAutoSteerEngaged = false;
             _autoSteerService.Disengage();
             SyncGuidanceStateToPipeline();
+            LogAutoSteerOff("field closed");
         }
 
         // CurrentFieldName clears via the pass-through when SetActiveField(null)
@@ -2277,7 +2282,7 @@ public partial class MainViewModel : ObservableObject
     // Curve recording state (drive mode)
     private List<Vec3> _recordedCurvePoints = new();
     private Vec3? _lastCurvePoint;
-    private const double CurveMinPointSpacing = 2.0; // Minimum 2m spacing between curve points
+    private const double CurveMinPointSpacing = 1.0; // a point a metre while driving a curve (AgOpenGPS: every fix)
 
     /// <summary>
     /// Whether curve recording is currently active
@@ -2371,6 +2376,7 @@ public partial class MainViewModel : ObservableObject
                 // Sync IsActive state with selection
                 if (oldValue != null)
                 {
+                    DiscardPendingRefNudge(oldValue); // an unsaved Ref Nudge move doesn't follow to the next line (#489)
                     oldValue.IsActive = false;
                 }
                 if (value != null)
@@ -2533,12 +2539,22 @@ public partial class MainViewModel : ObservableObject
                 _tramSystemLineRanges[sys.Name] = (startIdx, lines.Count, false);
             }
         }
+        else if (!_hasTramSystemsEverUsed && track is { IsABLine: true })
+        {
+            // An AB line: tram lines parallel to it, clipped to the fence, plus the
+            // boundary tram track, as AgOpenGPS's CABLine.BuildTram. A straight line's
+            // offsets can't fold, so this doesn't bring back the curved-field "web".
+            _tramLineService.GenerateParallelTramLines(track, fieldWidth);
+            if (State.Field.CurrentBoundary?.OuterBoundary?.Points is { Count: >= 3 } fence)
+                _tramLineService.GenerateBoundaryTramTracks(
+                    fence.Select(p => new Models.Base.Vec3(p.Easting, p.Northing, p.Heading)).ToList());
+        }
         else if (!_hasTramSystemsEverUsed)
         {
-            // Controlled-traffic lanes parallel to the field boundary, spaced at the
-            // tram (sprayer/CTF) width. Clean concentric Clipper offsets — replaces the
-            // legacy per-point lateral offset of the guidance curve, which folded into a
-            // self-intersecting "web" on irregular/curved fields.
+            // A curve, or no track: controlled-traffic lanes parallel to the field boundary,
+            // spaced at the tram (sprayer/CTF) width. Clean concentric Clipper offsets —
+            // replaces the legacy per-point lateral offset of the guidance curve, which
+            // folded into a self-intersecting "web" on irregular/curved fields.
             _tramLineService.GenerateConcentricTramLanes();
         }
 
@@ -4242,6 +4258,7 @@ public partial class MainViewModel : ObservableObject
 
     // AB Line Guidance Commands - Bottom Bar (always visible)
     public ICommand? SnapLeftCommand { get; private set; }
+    public ICommand? StartPivotRecordingCommand { get; private set; }
     public ICommand? SnapRightCommand { get; private set; }
     public ICommand? StopGuidanceCommand { get; private set; }
     public ICommand? UTurnCommand { get; private set; }
@@ -4683,7 +4700,7 @@ public partial class MainViewModel : ObservableObject
     /// GPS-captured or imported boundaries (e.g. ~3431 points at ~1 m for a 440-acre
     /// field) otherwise propagate that density into tram/headland generation,
     /// inside-tests, and rendering. Idempotent: an already-sparse boundary is left
-    /// essentially unchanged. See Plans/BOUNDARY_RESOLUTION_NORMALIZATION.md.
+    /// essentially unchanged. See Plans/Completed/BOUNDARY_RESOLUTION_NORMALIZATION.md.
     /// </summary>
     private void NormalizeBoundaryInPlace(Boundary boundary)
     {
@@ -6189,7 +6206,7 @@ public partial class MainViewModel : ObservableObject
 
         try
         {
-            Services.GeoJson.GeoJsonFieldService.SaveTracks(activeField.DirectoryPath, SavedTracks.ToList());
+            Services.GeoJson.GeoJsonFieldService.SaveTracks(activeField.DirectoryPath, TracksForSave());
             _logger.LogDebug("[NUDGE] SaveTracksToFile: Saved {TrackCount} tracks", SavedTracks.Count);
         }
         catch (System.Exception ex)
@@ -6274,9 +6291,22 @@ public partial class MainViewModel : ObservableObject
 
             foreach (var track in tracks)
             {
+                // A recorded path saved more than once (each open added a copy, fixed above) is
+                // loaded once; the next save drops the copies.
+                if (track.IsRecordedPath && SavedTracks.Any(t => t.IsRecordedPath && SamePoints(t, track)))
+                    continue;
+
                 // Ensure all tracks start inactive (SelectedTrack setter will activate)
                 track.IsActive = false;
                 MigrateCurveTrack(track);
+                // A pivot imported from AgOpenGPS has only its centre: its reference circle is a
+                // pass width out, so its passes are AgOpenGPS's (half a width, then whole widths).
+                if (track.IsPivot && track.Points.Count < 3 && track.Points.Count > 0)
+                {
+                    var c = track.Points[0];
+                    track.Points = Models.Guidance.CurveProcessing.Circle(new Vec3(c.Easting, c.Northing, 0), PassWidth);
+                    track.IsClosed = true;
+                }
                 SavedTracks.Add(track); // mirrors into State.Field.Tracks
 
                 // Debug: log track details
@@ -6298,6 +6328,10 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    private static bool SamePoints(Track a, Track b) =>
+        a.Points.Count == b.Points.Count
+        && a.Points.Zip(b.Points).All(p => Math.Abs(p.First.Easting - p.Second.Easting) < 0.01 && Math.Abs(p.First.Northing - p.Second.Northing) < 0.01);
+
     private void LoadRecPathFromField(string fieldPath)
     {
         try
@@ -6306,6 +6340,10 @@ public partial class MainViewModel : ObservableObject
             var recPath = recPoints is { Count: >= 2 }
                 ? Track.FromRecordedPath("Recorded Path", recPoints.Select(p => new Vec3(p.Easting, p.Northing, p.Heading)).ToList())
                 : null;
+            // The path in use is usually among the field's tracks already (saved with them when it
+            // was recorded): adding it again put one more copy in the track list at every open.
+            if (recPath != null && SavedTracks.Any(t => t.IsRecordedPath && SamePoints(t, recPath)))
+                recPath = null;
             if (recPath != null)
             {
                 SavedTracks.Add(recPath);
