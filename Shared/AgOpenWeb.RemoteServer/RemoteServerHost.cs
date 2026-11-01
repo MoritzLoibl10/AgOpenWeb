@@ -344,7 +344,6 @@ public sealed class RemoteServerHost
         // stale, but an unchanged file comes back as 304 and the browser reuses the code it
         // compiled last time (the scripts, the CanvasKit wasm) instead of compiling it again.
         server.MapGet("/", () => Validated("index.html", "text/html"));
-        server.MapGet("/app.js", () => Validated("app.js", "text/javascript"));
         server.MapGet("/transport.js", () => Validated("transport.js", "text/javascript"));
         // The client's scripts and styles, one file per feature (Plans/WEB_CLIENT_SPLIT_PLAN.md).
         // Filename-only (no path traversal); unknown names 404.
