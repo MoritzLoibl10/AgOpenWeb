@@ -4,7 +4,7 @@ name: CI
 # main or develop. develop is the integration branch and its protection requires the `test`
 # check, so CI must trigger there too (otherwise PRs into develop block forever awaiting a
 # check that never starts). It does NOT package or publish anything — all artifacts, tagged
-# releases, and the nightly prerelease are produced by build-deploy-bundles.yml.
+# releases, and the beta prerelease are produced by build-deploy-bundles.yml.
 on:
   push:
     branches: [main, develop]
@@ -70,8 +70,9 @@ jobs:
       # The client has no build step, so a syntax error would otherwise surface in the browser.
       - name: Check client scripts parse
         run: |
-          for f in app.js transport.js i18n.js; do
-            node --check "Shared/AgOpenWeb.RemoteServer/wwwroot/$f"
+          cd Shared/AgOpenWeb.RemoteServer/wwwroot
+          for f in *.js js/*.js; do
+            if [ -e "$f" ]; then node --check "$f"; fi
           done
 
       # The bug report Workers (Tools/bugreport-worker): plain node --test, no packages needed.
@@ -197,6 +198,15 @@ jobs:
 
       - name: Compile Android
         run: dotnet build Platforms/AgOpenWeb.Android/AgOpenWeb.Android.csproj -c Release
+
+      # The VT's native library comes with SharpIsoTerm's Android build; with its desktop build
+      # instead (the VT project not targeting net10.0-android) the app would build but have none.
+      - name: The terminal's native library is in the APK
+        run: |
+          APK=$(find Platforms/AgOpenWeb.Android/bin/Release -name "*.apk" | head -1)
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            unzip -l "$APK" "lib/$abi/libisoshim.so" > /dev/null || { echo "::error::$APK has no lib/$abi/libisoshim.so"; exit 1; }
+          done
 
   # Fork: build-ios runs only in fork-prerelease.yml (job ios). In PRs it waited 15 min for a
   # macos-26 runner and was cancelled every time (docs/Host-Aenderungen.md §12).
