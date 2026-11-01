@@ -2,12 +2,12 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// TabletUpdate.compare (wwwroot/app.js, update:begin/end): when a newer release is claimed.
+// TabletUpdate.compare (wwwroot/js/tablet.js, update:begin/end): when a newer release is claimed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/app.js', import.meta.url), 'utf8');
+const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/js/tablet.js', import.meta.url), 'utf8');
 const block = app.slice(app.indexOf('// update:begin'), app.indexOf('// update:end'));
 const U = new Function('I18n', 'tr', 'BRAND', 'appInfo', block + '\nreturn TabletUpdate;')(
   { text: k => k }, k => k, { source: 'https://github.com/MoritzLoibl10/AgOpenWeb' }, null);
