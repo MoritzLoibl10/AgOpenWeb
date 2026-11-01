@@ -2,7 +2,7 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// tuiSimInMenu (wwwroot/app.js, simaccess:begin/end): the simulator switch is in the normal menu
+// tuiSimInMenu (wwwroot/js/tablet.js, simaccess:begin/end): the simulator switch is in the normal menu
 // only in test versions; otherwise under "Expert" and through the demo mode.
 // Run: node --test Tests/web/simaccess.test.mjs
 import { test } from 'node:test';
