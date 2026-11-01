@@ -16,6 +16,7 @@ namespace AgOpenWeb.Models
         // application STATE, not config — it now lives in PersistentAppState
         // (appstate.json), not here.
         public bool StartFullscreen { get; set; } = false;
+        public bool ImageryVisible { get; set; } = true;
         public bool SvennArrowVisible { get; set; } = false;
         public bool KeyboardEnabled { get; set; } = false;
         public bool HeadlandDistanceVisible { get; set; } = true;
@@ -144,6 +145,13 @@ namespace AgOpenWeb.Models
         /// <summary>NTRIP on/off (Network IO). Off: the app does not connect to a caster.</summary>
         public bool NtripEnabled { get; set; } = true;
 
+        /// <summary>NTRIP profile per field (a loaded field switches the profile). Off, the default:
+        /// one profile in use, with its fallback service, and a field load changes nothing.</summary>
+        public bool NtripProfilePerField { get; set; } = false;
+
+        /// <summary>The one-time note that NTRIP now uses one profile with a fallback has been shown.</summary>
+        public bool NtripModeNoticeShown { get; set; } = false;
+
         /// <summary>The AOW link gateway the virtual terminal reaches the ISOBUS through:
         /// "host" or "host:port" (port 2323 when left out). Empty: no terminal.</summary>
         public string VtGateway { get; set; } = string.Empty;
@@ -161,6 +169,10 @@ namespace AgOpenWeb.Models
         /// gateway: its serial port ("/dev/cu.usbmodem…", "COM3", "/dev/ttyACM0"). Empty: the
         /// gateway.</summary>
         public string VtAdapter { get; set; } = string.Empty;
+
+        /// <summary>The add-on pages a web card can show (Plans/ADDON_WEB_CARDS_PLAN.md): the same
+        /// list on every browser. Replaced whole on a change, never edited in place.</summary>
+        public List<WebCardBookmark> WebCards { get; set; } = new();
 
         // Vehicle profile settings
         public string LastUsedVehicleProfile { get; set; } = string.Empty;
@@ -197,5 +209,13 @@ namespace AgOpenWeb.Models
 
             return fixes;
         }
+    }
+
+    /// <summary>A web card's bookmark: a name and an http(s) URL, where <c>{host}</c> is the
+    /// AgOpenWeb host as the browser reaches it.</summary>
+    public class WebCardBookmark
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Url { get; set; } = string.Empty;
     }
 }

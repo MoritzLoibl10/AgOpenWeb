@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 using System;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
@@ -20,26 +21,37 @@ namespace AgOpenWeb.Services;
 /// <summary>
 /// NTRIP client for receiving RTK correction data from base station
 /// Forwards RTCM3 corrections to GPS module via UDP port 2233
-/// Based on AgIO NTRIP implementation
+/// Based on AgIO NTRIP implementation.
+/// The connection itself (request, reply, retry, timeouts) is <see cref="NtripSession"/>;
+/// this class frames the stream it delivers and forwards it.
 /// </summary>
 public class NtripClientService : INtripClientService, IDisposable
 {
     public event EventHandler<NtripConnectionEventArgs>? ConnectionStatusChanged;
     public event EventHandler<RtcmDataReceivedEventArgs>? RtcmDataReceived;
+    public event EventHandler<NtripNoticeEventArgs>? Notice;
 
-    private Socket? _tcpSocket;
     private Socket? _udpSocket;
-    private readonly byte[] _receiveBuffer = new byte[4096];
-    private readonly List<byte> _headerBuffer = new List<byte>();
-    private bool _headerDumped = false;
+    private NtripSession? _session;
+    private NtripSessionStatus _status = NtripSessionStatus.Idle;
+    private (bool Connected, string Message)? _reported;   // the last status event raised, so repeats are not
+    private readonly NtripEventLog _events = new();   // for the bug report; kept across sessions
     private CancellationTokenSource? _cancellationTokenSource;
-    private NtripConfiguration? _config;
+    private NtripConfiguration? _config;       // the one in use: the main service, or the fallback after a switch
+    private NtripConfiguration? _mainConfig;   // as ConnectAsync got it, with the fallback
+    private NtripService _using;
+    private bool _mainIsBack;
+    private NtripSession? _probe;              // tries the main service in the background while the fallback is in use
+    internal int[] ProbeBackoff { get; set; } = NtripFailover.ProbeBackoff;   // a test shortens it
+    private CancellationTokenSource? _probeCts;
+    private CancellationTokenSource? _candidateCts;   // tries the fallback in the background before an automatic switch
     private bool _isDisposed;
+    // The NTRIP version that delivered corrections, per service: a reconnect starts with it.
+    private readonly ConcurrentDictionary<string, NtripVersion> _versions = new();
 
     private IPEndPoint? _rtcmUdpEndpoint;
     private bool _rtcmUnicast;   // _rtcmUdpEndpoint is the GPS module's own address
-    private Timer? _ggaTimer;
-    private Timer? _watchdogTimer;
+    private Timer? _healthTimer;
     // The caster's stream is framed into RTCM messages (_rtcmStats counts them by type) and
     // each whole message is queued for the paced sender: 256-byte datagrams 25 ms apart,
     // AgIO-style, because unpaced back-to-back datagrams of a post-pause TCP backlog stalled
@@ -66,62 +78,18 @@ public class NtripClientService : INtripClientService, IDisposable
     private long _lastLargeReadLogTimestamp;
     private int _largeReadsSuppressed;
 
-    // ── Stall watchdog ────────────────────────────────────────────────────
-    // Logs a 5 s health line so operators can distinguish caster pauses from
-    // app brokenness. Triggers a reconnect at WATCHDOG_RECONNECT_SECONDS of
-    // no data on the wire (catches silent half-open TCP and caster keep-alive
-    // timeout cases that the receive loop wouldn't notice on its own).
+    // A 5 s health line so operators can tell caster pauses from app brokenness. A stall
+    // itself is NtripSession's to handle (NtripTimeouts.NoData).
     private long _lastRtcmReceivedTimestamp;
-    private const double WATCHDOG_TIMER_INTERVAL_MS = 5000.0;
-    private const double WATCHDOG_RECONNECT_SECONDS = 30.0;
+    private const double HEALTH_LINE_INTERVAL_MS = 5000.0;
 
-    // ── Reconnect with backoff ────────────────────────────────────────────
-    // Triggered by any failure (a first connect that fails, receive error, send error,
-    // watchdog stall).
-    // Backoff schedule: 1s, 2s, 4s, 8s, 15s — then hold at 15s indefinitely.
-    // Small glitches recover quickly; long outages keep retrying without
-    // hammering the caster. Each reconnect is a full TCP teardown + new
-    // ConnectAsync (NTRIP is HTTP-style stateless — no session resume).
-    private static readonly int[] BackoffScheduleSec = new[] { 1, 2, 4, 8, 15 };
-    private int _reconnectInProgress;  // 0/1 flag, atomic via Interlocked
-    // Failed attempts since corrections last flowed. The backoff continues from here, so a
-    // caster that accepts the TCP connection but keeps turning us away isn't retried every
-    // second forever; reset by real RTCM or a new ConnectAsync.
-    private int _failureStreak;
-    private CancellationTokenSource? _reconnectCts;
     // Completed by the network watcher when an address changes: the retry waiting out its
     // backoff tries at once instead (#385). The backoff still spaces retries otherwise.
     private TaskCompletionSource _networkChanged = NewWake();
     private static TaskCompletionSource NewWake() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    // Cap header accumulation to prevent memory-exhaustion DoS from a
-    // malicious caster — or a MITM on the path — streaming bytes without
-    // the \r\n\r\n terminator. Real caster headers are well under 1 KB;
-    // 8 KiB is generous. See issue #286 / threat model finding F2.
-    private const int MaxHeaderBytes = 8 * 1024;
     private readonly IGpsService _gpsService;
     private readonly ILogger<NtripClientService> _logger;
-
-    // ── GGA to the caster ─────────────────────────────────────────────────
-    // A network RTK (VRS) caster such as APOS computes the corrections for the position in
-    // the client's GGA and closes the connection without one it can use. The GGA is built
-    // from the receiver's parsed position whenever it has any fix (quality > 0): not only
-    // when the fix passes the guidance quality gate (GpsData.IsValid, by default RTK fixed),
-    // which a receiver can't reach before the corrections arrive. With no fix yet, the last
-    // position with a fix is used; with none at all, no GGA is sent (never a made-up one).
-    // A class, so the timer thread and the connect path swap whole fixes, never torn ones.
-    private sealed record GgaFix(double Latitude, double Longitude, double Altitude, int FixQuality, int Satellites, long Stamp = 0);
-    private GgaFix? _lastGgaFix;
-    // How long the last fix stands in for a lost one: past that the position may be far away
-    // and the caster would build its virtual base there.
-    internal const double MaxLastFixAgeSeconds = 300;
-    private int _ggaSentThisSession;
-    private bool _ggaMissingLogged;
-    // What the caster sent: its reply header, and the first bytes after it while no RTCM
-    // has arrived (some casters write a text reason before closing). Shown on a failure.
-    private string _replyPreview = "";
-    private readonly List<byte> _earlyBody = new();
-    private const int EarlyBodyBytes = 256;
 
     /// <summary>The caster accepted the request (200); cleared on any disconnect.</summary>
     public bool IsConnected { get; private set; }
@@ -129,12 +97,14 @@ public class NtripClientService : INtripClientService, IDisposable
     /// retrying, or stopped after the caster rejected it.</summary>
     public bool IsActive => Volatile.Read(ref _wanted);
     public ulong TotalBytesReceived { get; private set; }
+    public NtripSessionStatus Status => _status;
+    public NtripServiceInfo? Service { get; private set; }
+
+    public IReadOnlyList<NtripEvent> Events => _events.ToArray();
 
     private bool _wanted;      // ConnectAsync called, DisconnectAsync not
-    private bool _sessionOpen; // sockets open: connecting, waiting for the reply, or streaming
-    private bool _rtcmSeen;    // an RTCM3 frame (0xD3) arrived since the caster accepted
+    private bool _sessionOpen; // a session is running: connecting, retrying or streaming
     private readonly object _sessionLock = new();
-    private int _generation;   // bumped by every Teardown; a session only tears down its own
 
     public NtripClientService(IGpsService gpsService, ILogger<NtripClientService> logger,
         INetworkWatcher? networkWatcher = null)
@@ -148,166 +118,248 @@ public class NtripClientService : INtripClientService, IDisposable
         });
     }
 
+    /// <summary>
+    /// Starts a session and returns at once: it connects, and keeps retrying with a backoff
+    /// after a drop or a failed connect (#385), on its own task. IsConnected stays false until
+    /// the caster has accepted; progress is reported through <see cref="ConnectionStatusChanged"/>.
+    /// </summary>
     public async Task ConnectAsync(NtripConfiguration config)
     {
-        CancelReconnect(); // a new request replaces any retry loop
         Volatile.Write(ref _wanted, true);
-        Interlocked.Exchange(ref _failureStreak, 0);
-        try
+        lock (_sessionLock)
         {
-            await ConnectCoreAsync(config);
+            _mainConfig = config;
+            _using = NtripService.Main;
+            StartSession(config);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException) // superseded: not ours
-        {
-            // No network yet (a unit that boots before Wi-Fi associates, a tablet out of
-            // signal) or the caster is down: keep trying with the backoff, as after a drop,
-            // instead of giving up until someone reconnects by hand (#385).
-            TriggerReconnect($"connect failed: {ex.Message}");
-            throw;
-        }
+        await Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Open a session: resolve, connect, send the request and start the receive loop.
-    /// IsConnected stays false until the caster's reply is checked (ReceiveLoop).
-    /// </summary>
-    private async Task ConnectCoreAsync(NtripConfiguration config)
+    public NtripService Using => _using;
+
+    public bool MainIsBack => _mainIsBack;
+
+    public bool HasFallback => NtripFailover.IsConfigured(_mainConfig?.Fallback);
+
+    public async Task SwitchToAsync(NtripService service)
     {
-        Teardown(null);
-        int gen = Volatile.Read(ref _generation);
-        _config = config;
+        SwitchTo(service, automatic: false);
+        await Task.CompletedTask;
+    }
 
-        Socket? tcp = null, udp = null;
-        try
+    // Starts a session for the other service. The pacer is cleared with it, so an old caster's
+    // epoch is never sent after the new caster's. A switch the session itself asked for is dropped
+    // when that session has been replaced in the meantime (<paramref name="requestedBy"/>).
+    private void SwitchTo(NtripService service, bool automatic, NtripSession? requestedBy = null)
+    {
+        NtripNoticeKind kind = service == NtripService.Fallback ? NtripNoticeKind.SwitchedToFallback : NtripNoticeKind.SwitchedToMain;
+        lock (_sessionLock)
         {
-            // UDP socket for forwarding RTCM data to the GPS module (subnet.255:2233)
-            udp = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-            udp.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, true);
-            udp.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-            var rtcmEndpoint = new IPEndPoint(
-                IPAddress.Parse($"{config.SubnetAddress}.255"),
-                config.UdpForwardPort);
+            if (_mainConfig == null || !Volatile.Read(ref _wanted) || service == _using) return;
+            if (requestedBy != null && !ReferenceEquals(requestedBy, _session)) return;
+            if (service == NtripService.Fallback && !NtripFailover.IsConfigured(_mainConfig.Fallback)) return;
 
-            // Resolved on every (re)connect, so a caster that moves (dynamic DNS) is followed.
-            IPAddress casterIP = await ResolveCasterAsync(config.CasterAddress);
-            tcp = new Socket(casterIP.AddressFamily, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+            // Only a main service that is failing is watched for coming back; one that was healthy needs no watch.
+            bool mainFailing = automatic || _status.State is NtripState.Waiting or NtripState.GaveUp;
+            _using = service;
+            StartSession(service == NtripService.Main ? _mainConfig : NtripFailover.ForFallback(_mainConfig, _mainConfig.Fallback!));
+            if (service == NtripService.Fallback && mainFailing) StartProbe();
+            string message = NtripFailover.NoticeText(kind, automatic);
+            _events.Add(new NtripEvent(Clock.Current.Now, Service?.ToString() ?? "", NtripState.Connecting, null, message, "", NtripVersion.V2, 0));
+            _logger.LogWarning("[NTRIP] {Message} ({Service})", message, Service);
+        }
+        Notice?.Invoke(this, new NtripNoticeEventArgs { Kind = kind, Automatic = automatic, Message = NtripFailover.NoticeText(kind, automatic) });
+    }
 
-            RaiseStatus(false, $"Connecting to {config.CasterAddress}:{config.CasterPort}/{config.MountPoint}…");
-            await tcp.ConnectAsync(new IPEndPoint(casterIP, config.CasterPort));
+    // Tries the main service in the background while the fallback is in use, slowly, to tell the
+    // operator when it answers again. Not when both are one login on one caster: a second
+    // connection could push the fallback's off. Called with _sessionLock held.
+    private void StartProbe()
+    {
+        if (_mainConfig is not { Fallback: { } fallback } main || NtripFailover.SameAccount(main, fallback)) return;
 
-            CancellationToken token;
-            Socket sock = tcp;
+        var cts = new CancellationTokenSource();
+        _probeCts = cts;
+        _ = Task.Run(() => ProbeLoopAsync(main, cts.Token));
+    }
+
+    // A session that ends for good (a main mount point that is down often answers 401 or 404)
+    // is started again after the longest step, until the main service answers or the probe is stopped.
+    private async Task ProbeLoopAsync(NtripConfiguration main, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            NtripSession probe = new(main, _ => { }, () => true, () => NextGgaSentence(main))
+            {
+                Backoff = ProbeBackoff,
+                NetworkChanged = () => Volatile.Read(ref _networkChanged).Task,
+                VersionMemory = _versions,
+            };
+            probe.StatusChanged += status => OnProbeStatus(probe, status);
             lock (_sessionLock)
             {
-                // A newer Connect/Disconnect ran meanwhile: this attempt is stale.
-                if (gen != _generation) throw new OperationCanceledException("superseded");
-                _tcpSocket = tcp;
-                _udpSocket = udp;
-                _rtcmUdpEndpoint = rtcmEndpoint;
-                _rtcmUnicast = false;
-                tcp = udp = null; // owned by the session now; Teardown closes them
-                _headerBuffer.Clear();
-                _headerDumped = false;
-                _rtcmSeen = false;
-                _rtcmStats.Reset();
-                _chunked = null;
-                _unframed = false;
-                _healthLineCounts = new();
-                _ggaSentThisSession = 0;
-                _ggaMissingLogged = false;
-                _replyPreview = "";
-                _earlyBody.Clear();
-                TotalBytesReceived = 0;
-                _sessionOpen = true;
-                _cancellationTokenSource = new CancellationTokenSource();
-                token = _cancellationTokenSource.Token;
-                // The GGA timer starts when the caster accepts (StartGgaTimer): the first GGA
-                // goes out right then, the next ones every GgaIntervalSeconds. Made here, before
-                // the request, so a fast "accepted" can never find it missing.
-                if (config.GgaIntervalSeconds > 0)
-                    _ggaTimer = new Timer(GgaTimerCallback, null, Timeout.Infinite, Timeout.Infinite);
+                if (ct.IsCancellationRequested) return;
+                _probe = probe;
             }
 
-            await SendNtripRequestAsync();
-
-            // NTRIP 1 lets the client send its GGA right after the request, and some VRS
-            // casters only answer once they have it.
-            if (config.GgaIntervalSeconds > 0 && NtripRequest.NormalizeVersion(config.NtripVersion) == 1
-                && TryBuildGga(out string firstGga))
-                await SendGgaCoreAsync(sock, firstGga);
-
-            // The loop gets its own socket, so a stale loop can never read a newer session's.
-            _ = Task.Run(() => ReceiveLoop(sock, gen, token));
-            _ = Task.Run(() => SendLoop(token));
-
-            // Stall watchdog — drives the periodic [NTRIP] health log line and reconnects
-            // if nothing has arrived for WATCHDOG_RECONNECT_SECONDS, including a caster
-            // that never answers the request (catches silent half-open TCP too).
-            _lastRtcmReceivedTimestamp = Clock.Current.GetTimestamp();
-            _watchdogTimer = new Timer(
-                WatchdogTimerCallback,
-                null,
-                TimeSpan.FromMilliseconds(WATCHDOG_TIMER_INTERVAL_MS),
-                TimeSpan.FromMilliseconds(WATCHDOG_TIMER_INTERVAL_MS));
-        }
-        catch (Exception ex)
-        {
-            // Don't leak the sockets of a failed attempt.
-            tcp?.Dispose();
-            udp?.Dispose();
-            if (Teardown(null, gen)) RaiseStatus(false, $"Connection failed: {ex.Message}");
-            throw;
+            await probe.RunAsync(ct).ConfigureAwait(false);
+            try { await Task.Delay(TimeSpan.FromSeconds(ProbeBackoff[^1]), ct).ConfigureAwait(false); }
+            catch (OperationCanceledException) { return; }
         }
     }
 
-    /// <summary>Caster IP: a literal address, or the host's IPv4 address when it has one
-    /// (else its first address; the socket is created for that address family).</summary>
-    private static async Task<IPAddress> ResolveCasterAsync(string host)
+    private void StopProbe()
     {
-        if (IPAddress.TryParse(host, out var ip)) return ip;
-        var addresses = await Dns.GetHostAddressesAsync(host);
-        return addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork)
-            ?? addresses.FirstOrDefault()
-            ?? throw new Exception($"Could not resolve caster host '{host}'");
+        lock (_sessionLock)
+        {
+            StopCandidate();
+            _probeCts?.Cancel();
+            _probeCts?.Dispose();
+            _probeCts = null;
+            _probe = null;
+            _mainIsBack = false;
+        }
+    }
+
+    // Make before break: the fallback is not switched to until it has delivered corrections itself.
+    // A dropout of the network fails both services, so the client then stays on the main service
+    // and simply resumes there. Called with _sessionLock held.
+    private void StartCandidate(NtripSession requestedBy)
+    {
+        if (_candidateCts != null || _mainConfig is not { Fallback: { } fallback } main) return;
+
+        var cts = new CancellationTokenSource();
+        _candidateCts = cts;
+        NtripConfiguration config = NtripFailover.ForFallback(main, fallback);
+        NtripSession candidate = new(config, _ => { }, () => true, () => NextGgaSentence(config))
+        {
+            NetworkChanged = () => Volatile.Read(ref _networkChanged).Task,
+            VersionMemory = _versions,
+        };
+        candidate.StatusChanged += status =>
+        {
+            if (status.State != NtripState.Streaming || cts.IsCancellationRequested) return;
+            SwitchTo(NtripService.Fallback, automatic: true, requestedBy: requestedBy);
+        };
+        _ = Task.Run(() => candidate.RunAsync(cts.Token));
+    }
+
+    private void StopCandidate()
+    {
+        lock (_sessionLock)
+        {
+            _candidateCts?.Cancel();
+            _candidateCts?.Dispose();
+            _candidateCts = null;
+        }
+    }
+
+    // The probe delivers corrections: the main service is really back. It stays open, so the flag
+    // follows it: gone again when the main service drops, and told again when it comes back.
+    private void OnProbeStatus(NtripSession probe, NtripSessionStatus status)
+    {
+        if (status.State == NtripState.Streaming) { OnMainBack(probe); return; }
+        bool cleared;
+        lock (_sessionLock)
+        {
+            cleared = ReferenceEquals(probe, _probe) && _mainIsBack;
+            if (cleared) _mainIsBack = false;
+        }
+        if (cleared) RaiseStatus(IsConnected, _status.Message);
+    }
+
+    // The main service delivers corrections to the probe: tell the operator. The fallback stays in use.
+    private void OnMainBack(NtripSession probe)
+    {
+        lock (_sessionLock)
+        {
+            if (!ReferenceEquals(probe, _probe) || _using != NtripService.Fallback || _mainIsBack) return;
+            _mainIsBack = true;
+            string message = NtripFailover.NoticeText(NtripNoticeKind.MainBack, automatic: false);
+            _events.Add(new NtripEvent(Clock.Current.Now, Service?.ToString() ?? "", NtripState.Connected, null, message, "", NtripVersion.V2, 0));
+            _logger.LogInformation("[NTRIP] {Message}", message);
+        }
+        Notice?.Invoke(this, new NtripNoticeEventArgs { Kind = NtripNoticeKind.MainBack, Message = NtripFailover.NoticeText(NtripNoticeKind.MainBack, false) });
+    }
+
+    private void StartSession(NtripConfiguration config)
+    {
+        lock (_sessionLock)
+        {
+            Teardown(null);
+            _config = config;
+            Service = new NtripServiceInfo(config.CasterAddress, config.CasterPort, config.MountPoint,
+                !string.IsNullOrEmpty(config.Username), !string.IsNullOrEmpty(config.Password));
+
+            // UDP socket for forwarding RTCM data to the GPS module (subnet.255:2233)
+            Socket udp = new(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+            try
+            {
+                udp.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, true);
+                udp.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                _rtcmUdpEndpoint = new IPEndPoint(IPAddress.Parse($"{config.SubnetAddress}.255"), config.UdpForwardPort);
+            }
+            catch
+            {
+                udp.Dispose();
+                throw;
+            }
+            _udpSocket = udp;
+            _rtcmUnicast = false;
+            _lastRtcmReceivedTimestamp = Clock.Current.GetTimestamp();
+            _status = NtripSessionStatus.Idle;
+            _sessionOpen = true;
+            _cancellationTokenSource = new CancellationTokenSource();
+            CancellationToken token = _cancellationTokenSource.Token;
+
+            // A session that was stopped can still deliver once more; only the current one is heard.
+            NtripSession? session = null;
+            session = new NtripSession(config,
+                data => { if (ReferenceEquals(session, _session)) ForwardRtcmData(data); },
+                () => _rtcmStats.Messages > 0 || _unframed, () => NextGgaSentence(config))
+            {
+                StreamStarted = chunked => { if (ReferenceEquals(session, _session)) OnStreamStarted(chunked); },
+                NetworkChanged = () => Volatile.Read(ref _networkChanged).Task,
+                VersionMemory = _versions,
+            };
+            session.StatusChanged += status => OnSessionStatus(session, status);
+            _session = session;
+
+            _ = Task.Run(() => session.RunAsync(token));
+            _ = Task.Run(() => SendLoop(token));
+
+            // Drives the periodic [NTRIP] health log line.
+            _healthTimer = new Timer(HealthLineCallback, null,
+                TimeSpan.FromMilliseconds(HEALTH_LINE_INTERVAL_MS), TimeSpan.FromMilliseconds(HEALTH_LINE_INTERVAL_MS));
+        }
     }
 
     public async Task DisconnectAsync()
     {
         bool wasActive = Volatile.Read(ref _wanted) || _sessionOpen;
         Volatile.Write(ref _wanted, false);
-        CancelReconnect(); // otherwise the retry loop reconnects after the user stopped it
+        lock (_sessionLock) _using = NtripService.Main;   // before the "Disconnected" event, which readers see
         Teardown(wasActive ? "Disconnected" : null);
         await Task.CompletedTask;
     }
 
-    private void CancelReconnect()
+    /// <summary>Stop the session (its connection closes as it ends) and the forwarding. Raises a
+    /// not-connected status with <paramref name="message"/> when one is given.</summary>
+    private void Teardown(string? message)
     {
-        try { _reconnectCts?.Cancel(); } catch (ObjectDisposedException) { }
-    }
-
-    /// <summary>Close the current session (timers, receive loop, sockets). Raises a
-    /// not-connected status with <paramref name="message"/> when one is given. With
-    /// <paramref name="onlyGeneration"/>, does nothing (returns false) if a newer
-    /// session has replaced that one.</summary>
-    private bool Teardown(string? message, int? onlyGeneration = null)
-    {
+        StopProbe();
         lock (_sessionLock)
         {
-            if (onlyGeneration is { } g && g != _generation) return false;
-            _generation++;
-
-            _ggaTimer?.Dispose();
-            _ggaTimer = null;
-
-            _watchdogTimer?.Dispose();
-            _watchdogTimer = null;
+            _healthTimer?.Dispose();
+            _healthTimer = null;
 
             _cancellationTokenSource?.Cancel();
+            _cancellationTokenSource?.Dispose();
+            _cancellationTokenSource = null;
             _pacer.Clear(); // a new session must not inherit the old one's corrections
-
-            _tcpSocket?.Close();
-            _tcpSocket?.Dispose();
-            _tcpSocket = null;
+            _session = null;   // what the session that is ending still reports is ignored
+            NtripVersion version = _status.Version;
+            _status = NtripSessionStatus.Idle;
 
             _udpSocket?.Close();
             _udpSocket?.Dispose();
@@ -315,269 +367,91 @@ public class NtripClientService : INtripClientService, IDisposable
 
             _sessionOpen = false;
             IsConnected = false;
+            _reported = null;
+            if (message != null)
+                _events.Add(new NtripEvent(Clock.Current.Now, Service?.ToString() ?? "", NtripState.Stopped, null, message, "", version, 0));
         }
 
         if (message != null) RaiseStatus(false, message);
-        return true;
+    }
+
+    // A caster should never repeat the login, but one that does must not put it in the report or the log.
+    // Each secret is replaced as typed, URL-escaped and (the pair) as the Basic value, longest first. A
+    // secret under three characters is left alone: it would mangle ordinary words.
+    private string Redact(string text, bool userName)
+    {
+        if (_mainConfig is not { } main || text.Length == 0) return text;
+        var secrets = new List<string>();
+        AddLogin(secrets, main.Username, main.Password, userName);
+        if (main.Fallback is { } fallback) AddLogin(secrets, fallback.Username, fallback.Password, userName);
+        foreach (string secret in secrets.OrderByDescending(s => s.Length))
+            text = text.Replace(secret, "***", StringComparison.OrdinalIgnoreCase);
+        return text;
+    }
+
+    private static void AddLogin(List<string> secrets, string user, string password, bool userName)
+    {
+        if (NtripCredentials.BasicAuthorization(user, password) is { } basic) secrets.Add(basic["Basic ".Length..]);
+        AddSecret(secrets, password);
+        if (userName) AddSecret(secrets, user);
+    }
+
+    private static void AddSecret(List<string> secrets, string secret)
+    {
+        if (secret.Length < 3) return;
+        secrets.Add(secret);
+        secrets.Add(Uri.EscapeDataString(secret));
     }
 
     private void RaiseStatus(bool connected, string message) =>
         ConnectionStatusChanged?.Invoke(this, new NtripConnectionEventArgs { IsConnected = connected, Message = message });
 
-    private async Task SendNtripRequestAsync()
+    private void OnSessionStatus(NtripSession source, NtripSessionStatus status)
     {
-        if (_tcpSocket == null || _config == null) return;
-
-        int version = NtripRequest.NormalizeVersion(_config.NtripVersion);
-        string request = NtripRequest.Build(version, _config.CasterAddress, _config.CasterPort,
-            _config.MountPoint, _config.Username, _config.Password);
-        _logger.LogInformation("[NTRIP] requesting {Host}:{Port}/{Mount} with NTRIP {Version}",
-            _config.CasterAddress, _config.CasterPort, _config.MountPoint, version == 2 ? "2.0" : "1.0");
-        await _tcpSocket.SendAsync(Encoding.ASCII.GetBytes(request), SocketFlags.None);
-    }
-
-    /// <summary>Send the first GGA now and the next ones every GgaIntervalSeconds; only for
-    /// the session <paramref name="gen"/> (a torn-down session's timer is gone).</summary>
-    private void StartGgaTimer(int gen)
-    {
+        bool raise, switchNow;
         lock (_sessionLock)
         {
-            if (gen != _generation || _ggaTimer == null || _config == null) return;
-            _ggaTimer.Change(TimeSpan.Zero, TimeSpan.FromSeconds(_config.GgaIntervalSeconds));
+            if (!ReferenceEquals(source, _session)) return;
+            // What the caster said loses the user name too; the text made here keeps it, because a mount point can be the same word.
+            string firstLine = Redact(status.FirstLine, userName: true);
+            string message = status.FirstLine.Length > 0 ? status.Message.Replace(status.FirstLine, firstLine, StringComparison.Ordinal) : status.Message;
+            status = status with { Message = Redact(message, userName: false), FirstLine = firstLine };
+            _status = status;
+            IsConnected = status.IsOpen;
+            if (status.State == NtripState.GaveUp) _sessionOpen = false;   // over until the user acts; IsActive stays
+            _events.Add(new NtripEvent(Clock.Current.Now, Service?.ToString() ?? "", status.State, status.LastError,
+                status.Message, status.FirstLine, status.Version, status.Attempts));
+            raise = _reported != (status.IsOpen, status.Message);
+            if (raise) _reported = (status.IsOpen, status.Message);
+            if (status.State == NtripState.Streaming && _using == NtripService.Main) StopCandidate();   // the main service is back before the fallback was
+            switchNow = _using == NtripService.Main && _mainConfig?.Fallback is { } fallback
+                && NtripFailover.IsConfigured(fallback) && NtripFailover.ShouldSwitch(status, fallback);
         }
-    }
 
-    /// <summary>"Caster replied: «…»" plus what it sent after its reply, for a failure message.</summary>
-    private string DescribeCasterReply()
-    {
-        string reply = string.IsNullOrEmpty(_replyPreview) ? "nothing" : $"\"{_replyPreview}\"";
-        string text = $"Caster replied: {reply}";
-        if (_earlyBody.Count > 0)
-            text += $"; then: \"{NtripResponse.Preview(_earlyBody.ToArray())}\"";
-        return text;
-    }
-
-    /// <summary>Whether a GGA went out in this session, for a failure message.</summary>
-    private string DescribeGgaState()
-    {
-        var c = _config;
-        if (c == null || c.GgaIntervalSeconds <= 0) return "GGA position sending is off";
-        if (_ggaSentThisSession > 0) return $"GGA position sent {_ggaSentThisSession}x";
-        return "no GGA position sent (no GPS fix yet; a network RTK/VRS caster needs one)";
-    }
-
-    private async Task ReceiveLoop(Socket socket, int gen, CancellationToken cancellationToken)
-    {
-        bool headerReceived = false;
-
-        while (!cancellationToken.IsCancellationRequested)
+        if (raise)
         {
-            try
-            {
-                int bytesReceived = await socket.ReceiveAsync(
-                    new ArraySegment<byte>(_receiveBuffer),
-                    SocketFlags.None,
-                    cancellationToken);
-                if (cancellationToken.IsCancellationRequested) return;
-
-                if (bytesReceived > 0)
-                {
-                    // First response is HTTP header - check for success
-                    if (!headerReceived)
-                    {
-                        // Bail if the header has grown past the cap without a
-                        // terminator. Without this an unbounded caster could
-                        // OOM the tablet by streaming bytes forever.
-                        if (_headerBuffer.Count + bytesReceived > MaxHeaderBytes)
-                        {
-                            _logger.LogWarning(
-                                "NTRIP header exceeded {Max} bytes without \\r\\n\\r\\n terminator; disconnecting",
-                                MaxHeaderBytes);
-                            Teardown("Caster sent an invalid reply", gen);
-                            return;
-                        }
-
-                        // Accumulate header bytes
-                        for (int i = 0; i < bytesReceived; i++)
-                        {
-                            _headerBuffer.Add(_receiveBuffer[i]);
-                        }
-
-                        // Dump header bytes once for debugging
-                        if (!_headerDumped && _headerBuffer.Count >= 10)
-                        {
-                            _headerDumped = true;
-                            int dumpSize = Math.Min(100, _headerBuffer.Count);
-                            string headerPreview = Encoding.ASCII.GetString(_headerBuffer.Take(dumpSize).ToArray());
-                            _logger.LogDebug("Response header: {Header}", headerPreview.Replace("\r\n", " "));
-                        }
-
-                        // Find header/body boundary
-                        // ICY protocol uses single \r\n, HTTP uses \r\n\r\n
-                        int headerEnd = -1;
-                        int dataStart = -1;
-
-                        // First check for ICY single line response (just \r\n)
-                        for (int i = 0; i < _headerBuffer.Count - 1; i++)
-                        {
-                            if (_headerBuffer[i] == '\r' && _headerBuffer[i + 1] == '\n')
-                            {
-                                // Check if this looks like ICY response
-                                if (i < 50)
-                                {
-                                    string testHeader = Encoding.ASCII.GetString(_headerBuffer.ToArray(), 0, i);
-                                    if (testHeader.StartsWith("ICY 200"))
-                                    {
-                                        headerEnd = i;
-                                        dataStart = i + 2; // After \r\n
-                                        break;
-                                    }
-                                }
-
-                                // Check for HTTP \r\n\r\n
-                                if (i + 3 < _headerBuffer.Count &&
-                                    _headerBuffer[i + 2] == '\r' && _headerBuffer[i + 3] == '\n')
-                                {
-                                    headerEnd = i;
-                                    dataStart = i + 4; // After \r\n\r\n
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (headerEnd >= 0)
-                        {
-                            // Parse header as ASCII string
-                            string response = Encoding.ASCII.GetString(_headerBuffer.ToArray(), 0, headerEnd);
-                            var (reply, reason) = NtripResponse.Classify(response);
-                            _replyPreview = NtripResponse.Preview(_headerBuffer.ToArray().AsSpan(0, headerEnd));
-
-                            if (reply == NtripReply.Accepted)
-                            {
-                                headerReceived = true;
-                                IsConnected = true;
-                                _logger.LogInformation("Connected and authorized, receiving RTCM data");
-                                // An NTRIP 2 caster may send the stream chunked: decode it, or the
-                                // chunk-size lines land inside RTCM messages and break them.
-                                bool chunked = NtripResponse.IsChunked(response);
-                                _rtcmStats.Reset(chunked);
-                                _chunked = chunked ? new ChunkedDecoder() : null;
-                                if (chunked)
-                                    _logger.LogInformation("[NTRIP] the caster replied with Transfer-Encoding: chunked; decoding it");
-                                var c = _config;
-                                RaiseStatus(true, c == null ? "Connected"
-                                    : $"Connected to {c.CasterAddress}:{c.CasterPort}/{c.MountPoint}");
-                                StartGgaTimer(gen);
-
-                                // Forward any RTCM data after header
-                                if (dataStart < _headerBuffer.Count)
-                                {
-                                    int rtcmBytes = _headerBuffer.Count - dataStart;
-                                    byte[] rtcmData = new byte[rtcmBytes];
-                                    _headerBuffer.CopyTo(dataStart, rtcmData, 0, rtcmBytes);
-                                    KeepEarlyBody(rtcmData);
-                                    ForwardRtcmData(rtcmData);
-                                }
-
-                                // Clear header buffer
-                                _headerBuffer.Clear();
-                            }
-                            else
-                            {
-                                // The caster's own words: the reason a caster gives is often
-                                // more precise than the status code.
-                                string said = reason.Contains(_replyPreview, StringComparison.Ordinal)
-                                    ? reason : $"{reason}. {DescribeCasterReply()}";
-                                _logger.LogWarning("NTRIP caster rejected the request: {Response}",
-                                    NtripResponse.Preview(_headerBuffer.ToArray(), maxLines: 12, maxChars: 1000));
-                                if (reply == NtripReply.RejectedRetry) TriggerReconnect(said);
-                                else Teardown("Rejected: " + said, gen); // wrong mount/login won't fix itself
-                                return;
-                            }
-                        }
-                        // If no complete header yet, accumulate more data
-                    }
-                    else
-                    {
-                        // All subsequent data is RTCM3 corrections - forward as raw bytes
-                        byte[] rtcmData = new byte[bytesReceived];
-                        Array.Copy(_receiveBuffer, rtcmData, bytesReceived);
-                        KeepEarlyBody(rtcmData);
-                        ForwardRtcmData(rtcmData);
-                    }
-                }
-                else
-                {
-                    // Connection closed by server (FIN). NTRIP has no resume,
-                    // so kick the backoff reconnect loop. (#334) A close before any
-                    // RTCM means the caster turned us away (AgOpenGPS #1219): some
-                    // reply 200 and then close for a bad mount point or account.
-                    string reason;
-                    if (!headerReceived)
-                    {
-                        _replyPreview = NtripResponse.Preview(_headerBuffer.ToArray());
-                        if (_headerBuffer.Count > 0)
-                        {
-                            if (StopOnRefusal(gen, out string said)) return;
-                            reason = said;
-                        }
-                        else
-                            reason = $"Caster closed the connection without answering; {DescribeGgaState()}";
-                    }
-                    else if (!_rtcmSeen)
-                        reason = "Caster closed the connection before sending corrections (mount point or account rejected?). "
-                            + $"{DescribeCasterReply()}; {DescribeGgaState()}";
-                    else
-                        reason = "caster sent FIN";
-                    _logger.LogInformation("Connection closed by caster: {Reason}", reason);
-                    TriggerReconnect(reason);
-                    return;
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                // A socket closed by Disconnect/Teardown lands here too — not a failure.
-                if (cancellationToken.IsCancellationRequested) break;
-                // A refusal followed by a reset (our GGA hit the closed socket) is a refusal too.
-                if (!headerReceived && _headerBuffer.Count > 0)
-                {
-                    _replyPreview = NtripResponse.Preview(_headerBuffer.ToArray());
-                    if (StopOnRefusal(gen, out _)) break;
-                }
-                _logger.LogError(ex, "Receive error");
-                TriggerReconnect($"receive error: {ex.Message}");
-                break;
-            }
+            if (status.State == NtripState.Connected)
+                _logger.LogInformation("[NTRIP] connected and authorized with NTRIP {Version}, receiving RTCM data", status.Version);
+            else if (status.State is NtripState.Waiting or NtripState.GaveUp)
+                _logger.LogWarning("[NTRIP] {Category}: {Message} (caster said: {FirstLine})", status.LastError, status.Message, status.FirstLine);
+            RaiseStatus(status.IsOpen, status.Message);
         }
+        if (switchNow) lock (_sessionLock) { if (ReferenceEquals(source, _session)) StartCandidate(source); }
     }
 
-    /// <summary>
-    /// A reply that ended without its blank line (the caster closed or reset the connection):
-    /// an NTRIP 1 refusal ("ERROR - Bad Password", "ICY 401") often looks like that. A refusal
-    /// stops the client, as a complete one does; anything else gives the reason for a retry.
-    /// </summary>
-    private bool StopOnRefusal(int gen, out string said)
+    /// <summary>A stream begins: forget the previous one's counts and queue, and decode it if the reply was chunked.</summary>
+    private void OnStreamStarted(bool chunked)
     {
-        var (reply, why) = NtripResponse.Classify(Encoding.ASCII.GetString(_headerBuffer.ToArray()));
-        said = why.Contains(_replyPreview, StringComparison.Ordinal) ? why : $"{why}. {DescribeCasterReply()}";
-        if (reply != NtripReply.Rejected) return false;
-        _logger.LogWarning("NTRIP caster rejected the request: {Response}",
-            NtripResponse.Preview(_headerBuffer.ToArray(), maxLines: 12, maxChars: 1000));
-        Teardown("Rejected: " + said, gen);
-        return true;
-    }
-
-    /// <summary>Keep the first bytes after the reply until RTCM shows up, to show them if the
-    /// caster closes before sending corrections.</summary>
-    private void KeepEarlyBody(byte[] data)
-    {
-        if (_rtcmSeen || _earlyBody.Count >= EarlyBodyBytes) return;
-        if (Array.IndexOf(data, (byte)0xD3) >= 0) { _earlyBody.Clear(); return; }
-        for (int i = 0; i < data.Length && _earlyBody.Count < EarlyBodyBytes; i++) _earlyBody.Add(data[i]);
+        _pacer.Clear();
+        _rtcmStats.Reset(chunked);
+        // An NTRIP 2 caster may send the stream chunked: decode it, or the chunk-size lines
+        // land inside RTCM messages and break them.
+        _chunked = chunked ? new ChunkedDecoder() : null;
+        _unframed = false;
+        _healthLineCounts = new();
+        TotalBytesReceived = 0;
+        if (chunked)
+            _logger.LogInformation("[NTRIP] the caster replied with Transfer-Encoding: chunked; decoding it");
     }
 
     /// <summary>The /24 to forward RTCM to: the provider's live subnet, else the configured one.</summary>
@@ -639,7 +513,7 @@ public class NtripClientService : INtripClientService, IDisposable
     public (string Address, bool Unicast) RtcmDestination =>
         _sessionOpen && _rtcmUdpEndpoint is { } e ? (e.Address.ToString(), _rtcmUnicast) : ("", false);
 
-    private void ForwardRtcmData(byte[] rtcmData)
+    private void ForwardRtcmData(ReadOnlySpan<byte> rtcmData)
     {
         if (rtcmData.Length == 0)
             return;
@@ -665,11 +539,6 @@ public class NtripClientService : INtripClientService, IDisposable
         }
         _sendSignal.Release();
 
-        if (!_rtcmSeen && Array.IndexOf(rtcmData, (byte)0xD3) >= 0)
-        {
-            _rtcmSeen = true;
-            Interlocked.Exchange(ref _failureStreak, 0); // corrections flow: next outage starts at 1 s
-        }
         TotalBytesReceived += (ulong)rtcmData.Length;
         Volatile.Write(ref _lastRtcmReceivedTimestamp, now);
         RtcmDataReceived?.Invoke(this, new RtcmDataReceivedEventArgs { BytesReceived = rtcmData.Length });
@@ -789,111 +658,51 @@ public class NtripClientService : INtripClientService, IDisposable
         }
     }
 
-    private void GgaTimerCallback(object? state)
-    {
-        var socket = _tcpSocket;
-        if (!IsConnected || _config == null || socket == null) return;
-
-        try
-        {
-            if (TryBuildGga(out string gga))
-                _ = SendGgaCoreAsync(socket, gga);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "[NTRIP] GGA timer error");
-        }
-    }
-
     /// <summary>
-    /// The GGA for the caster: the manual position when configured, else the receiver's
-    /// position whenever it has a fix of any quality, else the last position that had one
-    /// (for at most <see cref="MaxLastFixAgeSeconds"/>).
-    /// False (and a one-time log line) when there is no position at all.
+    /// The position a VRS caster builds its corrections for: the receiver's fix; after losing
+    /// it, the last one; before the first, the configured fallback (the open field's origin).
+    /// Null with none of these: a made-up position (this sent Kansas) gets corrections for the
+    /// wrong place or the connection dropped (#443), so no GGA goes out until one is known.
+    /// Any fix counts, single and DGPS too: IsValid means good enough to steer by (RTK by
+    /// default), and a receiver in single that waited for it would never get the corrections
+    /// to reach RTK. AgIO sends the receiver's position whatever its quality.
     /// </summary>
-    internal bool TryBuildGga(out string gga)
+    internal string? NextGgaSentence(NtripConfiguration config)
     {
-        gga = "";
-        var config = _config;
-        if (config == null) return false;
-
-        GgaFix? fix;
         if (config.UseManualPosition)
-            fix = new GgaFix(config.ManualLatitude, config.ManualLongitude, 0, 1, 12);
-        else
-        {
-            fix = UsableGgaFix(_gpsService.CurrentData);
-            long now = Clock.Current.GetTimestamp();
-            if (fix != null) _lastGgaFix = fix = fix with { Stamp = now };
-            else if (_lastGgaFix is { } last && Clock.Current.ElapsedSeconds(last.Stamp, now) <= MaxLastFixAgeSeconds) fix = last;
-        }
+            return GenerateGgaSentence(config.ManualLatitude, config.ManualLongitude, 0, 4, 12);
 
-        if (fix is not { } f)
+        var gpsData = _gpsService.CurrentData;
+        if (gpsData != null && HasFix(gpsData))
         {
-            if (!_ggaMissingLogged)
-            {
-                _ggaMissingLogged = true;
-                _logger.LogWarning("[NTRIP] no GPS fix yet, so no GGA position for the caster; a network RTK (VRS) caster needs one and may close the connection");
-            }
-            return false;
+            var p = gpsData.CurrentPosition;
+            _lastGgaFix = (p.Latitude, p.Longitude, p.Altitude);
+            return GenerateGgaSentence(p.Latitude, p.Longitude, p.Altitude, gpsData.FixQuality, gpsData.SatellitesInUse);
         }
-
-        gga = GenerateGgaSentence(f.Latitude, f.Longitude, f.Altitude, f.FixQuality, f.Satellites);
-        return true;
+        if (_lastGgaFix is { } last)
+            return GenerateGgaSentence(last.Latitude, last.Longitude, last.Altitude, 1, 8);
+        if (config.FallbackPositionProvider?.Invoke() is { } fallback)
+            return GenerateGgaSentence(fallback.Latitude, fallback.Longitude, 0, 1, 8);
+        return null;
     }
 
-    /// <summary>A receiver position good enough to tell a caster where we are: any fix
-    /// (quality 1–8), plausible coordinates. Deliberately not <see cref="GpsData.IsValid"/>,
-    /// the guidance quality gate (minimum fix quality, HDOP, differential age).</summary>
-    private static GgaFix? UsableGgaFix(GpsData? d)
-    {
-        if (d == null) return null;
-        if (d.FixQuality < 1 || d.FixQuality > 8) return null;
-        double lat = d.CurrentPosition.Latitude, lon = d.CurrentPosition.Longitude;
-        if (double.IsNaN(lat) || double.IsNaN(lon) || Math.Abs(lat) > 90 || Math.Abs(lon) > 180) return null;
-        if (lat == 0 && lon == 0) return null;
-        double alt = double.IsFinite(d.CurrentPosition.Altitude) ? d.CurrentPosition.Altitude : 0;
-        return new GgaFix(lat, lon, alt, d.FixQuality, Math.Clamp(d.SatellitesInUse, 0, 99));
-    }
+    private (double Latitude, double Longitude, double Altitude)? _lastGgaFix;
 
-    private async Task SendGgaCoreAsync(Socket socket, string gga)
-    {
-        try
-        {
-            await socket.SendAsync(Encoding.ASCII.GetBytes(gga + "\r\n"), SocketFlags.None);
-            if (Interlocked.Increment(ref _ggaSentThisSession) == 1)
-            {
-                // Not the sentence itself: every client's log viewer and the bug report show the
-                // log, and the exact position is not needed to see that a GGA went out.
-                var f = gga.Split(',');
-                _logger.LogInformation("[NTRIP] first GGA sent to the caster (fix quality {Quality}, {Sats} satellites)",
-                    f.Length > 7 ? f[6] : "?", f.Length > 7 ? f[7] : "?");
-            }
-        }
-        catch (ObjectDisposedException)
-        {
-            // Session torn down mid-send.
-        }
-        catch (Exception ex)
-        {
-            // Send failures usually mean the TCP path is broken even if the
-            // receive loop hasn't noticed yet. Kick the reconnect loop. (#334)
-            _logger.LogError(ex, "Failed to send GGA");
-            TriggerReconnect($"GGA send failed: {ex.Message}");
-        }
-    }
+    /// <summary>The receiver reports a fix of any quality, at a position (not 0,0).</summary>
+    private static bool HasFix(GpsData gpsData) =>
+        gpsData.FixQuality > 0
+        && (gpsData.CurrentPosition.Latitude != 0 || gpsData.CurrentPosition.Longitude != 0);
 
-    private void WatchdogTimerCallback(object? state)
+    private void HealthLineCallback(object? state)
     {
-        if (!_sessionOpen) return; // also while waiting for the caster's reply
+        if (!_sessionOpen) return;
 
         long now = Clock.Current.GetTimestamp();
         long last = Volatile.Read(ref _lastRtcmReceivedTimestamp);
         double secondsSinceData = Clock.Current.ElapsedMs(last, now) / 1000.0;
 
-        // Periodic health line — once per WATCHDOG_TIMER_INTERVAL_MS regardless
-        // of state. Operators read this to tell "caster paused" from
-        // "AgOpenWeb broke" without needing the debug log.
+        // Once per HEALTH_LINE_INTERVAL_MS regardless of state. Operators read this to tell
+        // "caster paused" from "AgOpenWeb broke" without needing the debug log.
         var gps = _gpsService.CurrentData;
         var snap = _rtcmStats.Snapshot();
         long superseded = _pacer.SupersededObservations + _pacer.SupersededOther + _pacer.MemoryGuardDrops;
@@ -905,13 +714,6 @@ public class NtripClientService : INtripClientService, IDisposable
             secondsSinceData, TotalBytesReceived, DescribeNewMessages(snap), newlySuperseded,
             datagrams, catchUp, maxLateMs,
             snap.ChecksumFailures, snap.BytesSkipped, gps?.FixQuality ?? 0, gps?.DifferentialAge ?? 0);
-
-        if (secondsSinceData >= WATCHDOG_RECONNECT_SECONDS)
-        {
-            TriggerReconnect(IsConnected
-                ? $"no RTCM for {secondsSinceData:F1}s"
-                : $"no reply from the caster for {secondsSinceData:F0}s");
-        }
     }
 
     /// <summary>"1005x1 1077x5 …": the messages that arrived since the previous health line.</summary>
@@ -941,92 +743,12 @@ public class NtripClientService : INtripClientService, IDisposable
         Unframed = _unframed,
     };
 
-    /// <summary>
-    /// Kick off the backoff reconnect loop. Idempotent — overlapping
-    /// triggers (e.g. watchdog stall + receive error firing in the same
-    /// window) are coalesced via the Interlocked guard. No-op once the user
-    /// has disconnected.
-    /// </summary>
-    private void TriggerReconnect(string reason)
-    {
-        if (!Volatile.Read(ref _wanted)) return;
-        if (Interlocked.CompareExchange(ref _reconnectInProgress, 1, 0) != 0)
-            return;
-        _logger.LogWarning("[NTRIP] reconnect triggered: {Reason}", reason);
-        _ = ReconnectWithBackoffAsync(reason);
-    }
-
-    private async Task ReconnectWithBackoffAsync(string reason)
-    {
-        var cts = new CancellationTokenSource();
-        _reconnectCts = cts;
-        var token = cts.Token;
-        bool ownsFlag = true;
-        try
-        {
-            // Always start with a clean teardown so the next connect opens fresh
-            // sockets and re-authenticates from scratch — NTRIP is HTTP-style
-            // stateless, the caster has dropped our mountpoint subscription anyway.
-            Teardown($"{reason} — reconnecting…");
-
-            while (!token.IsCancellationRequested)
-            {
-                int attempt = Interlocked.Increment(ref _failureStreak) - 1;
-                int backoffSec = BackoffScheduleSec[Math.Min(attempt, BackoffScheduleSec.Length - 1)];
-                _logger.LogInformation(
-                    "[NTRIP] reconnect attempt {Attempt} after {Sec}s backoff",
-                    attempt + 1, backoffSec);
-                var networkChanged = Volatile.Read(ref _networkChanged).Task;
-                try
-                {
-                    await Task.WhenAny(Task.Delay(TimeSpan.FromSeconds(backoffSec), token), networkChanged);
-                    token.ThrowIfCancellationRequested();
-                }
-                catch (OperationCanceledException) { return; }
-
-                var config = _config;
-                // A Connect (new profile, version, password) cancelled this loop just after its
-                // delay: it must not connect with the configuration it read before.
-                if (config == null || !Volatile.Read(ref _wanted) || token.IsCancellationRequested) return;
-
-                // Release the guard first: the new session's reply is checked on the
-                // receive loop, and a rejection there must be able to start a new loop.
-                Interlocked.Exchange(ref _reconnectInProgress, 0);
-                ownsFlag = false;
-                try
-                {
-                    await ConnectCoreAsync(config);
-                    _logger.LogInformation(
-                        "[NTRIP] reconnect attempt {Attempt}: request sent",
-                        attempt + 1);
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(
-                        "[NTRIP] reconnect attempt {Attempt} failed: {Msg}",
-                        attempt + 1, ex.Message);
-                    // Carry on retrying unless something else already started a loop.
-                    if (Interlocked.CompareExchange(ref _reconnectInProgress, 1, 0) != 0) return;
-                    ownsFlag = true;
-                }
-            }
-        }
-        finally
-        {
-            if (ownsFlag) Interlocked.Exchange(ref _reconnectInProgress, 0);
-            if (ReferenceEquals(_reconnectCts, cts))
-                _reconnectCts = null;
-            cts.Dispose();
-        }
-    }
-
     public async Task SendGgaSentenceAsync(string ggaSentence)
     {
-        var socket = _tcpSocket;
-        if (!IsConnected || socket == null) return;
-        await SendGgaCoreAsync(socket, ggaSentence);
+        if (_session is { } session)
+            await session.SendAsync(ggaSentence + "\r\n");
     }
+
 
     private string GenerateGgaSentence(double lat, double lon, double alt, int fixQuality, int sats)
     {
@@ -1034,11 +756,15 @@ public class NtripClientService : INtripClientService, IDisposable
         // latitude field and VRS casters got a broken position.
         var inv = CultureInfo.InvariantCulture;
         // Convert decimal degrees to NMEA format (DDMM.MMMM)
-        var (latDegrees, latMinutes) = ToDegreesMinutes(lat);
+        double latDeg = Math.Abs(lat);
+        int latDegrees = (int)latDeg;
+        double latMinutes = (latDeg - latDegrees) * 60.0;
         string latStr = string.Create(inv, $"{latDegrees:00}{latMinutes:00.0000}");
         string latDir = lat >= 0 ? "N" : "S";
 
-        var (lonDegrees, lonMinutes) = ToDegreesMinutes(lon);
+        double lonDeg = Math.Abs(lon);
+        int lonDegrees = (int)lonDeg;
+        double lonMinutes = (lonDeg - lonDegrees) * 60.0;
         string lonStr = string.Create(inv, $"{lonDegrees:000}{lonMinutes:00.0000}");
         string lonDir = lon >= 0 ? "E" : "W";
 
@@ -1059,16 +785,6 @@ public class NtripClientService : INtripClientService, IDisposable
         return $"${gga}*{checksum:X2}";
     }
 
-    /// <summary>Whole degrees and minutes rounded to the 4 decimals NMEA carries, so 47.9999999°
-    /// becomes 48° 00.0000' and not 47° 60.0000'.</summary>
-    private static (int Degrees, double Minutes) ToDegreesMinutes(double value)
-    {
-        double abs = Math.Abs(value);
-        int degrees = (int)abs;
-        double minutes = Math.Round((abs - degrees) * 60.0, 4, MidpointRounding.AwayFromZero);
-        if (minutes >= 60.0) { degrees++; minutes = 0; }
-        return (degrees, minutes);
-    }
 
     public void Dispose()
     {

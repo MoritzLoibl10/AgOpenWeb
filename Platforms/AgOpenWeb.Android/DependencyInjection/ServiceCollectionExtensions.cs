@@ -49,7 +49,7 @@ public static class ServiceCollectionExtensions
         // UI-thread dispatcher + timer abstraction. With the native UI gone the VM/pipeline
         // run on a single HostLoopDispatcher (owned by the foreground BackendService's
         // AndroidBackendHost, which re-registers its own instance — last-wins), so guidance
-        // stays live while the WebView Activity is backgrounded. See Plans/CONFIG_STATE_AUDIT.md §11.
+        // stays live while the WebView Activity is backgrounded. See Plans/Completed/CONFIG_STATE_AUDIT.md §11.
         services.AddSingleton<HostLoopDispatcher>();
         services.AddSingleton<IUiDispatcher>(sp => sp.GetRequiredService<HostLoopDispatcher>());
         services.AddSingleton<IUiTimerFactory>(sp => sp.GetRequiredService<HostLoopDispatcher>());
@@ -113,10 +113,8 @@ public static class ServiceCollectionExtensions
 
         // ISOBUS task controller link: PGN 240 heartbeat in, PGN 241 section control out
         services.AddSingleton<IIsobusTaskControllerService, AgOpenWeb.Services.Isobus.IsobusTaskControllerService>();
-#if AGISOSTACK
-        // ISOBUS virtual terminal for the VT card (built in only with SharpIsoTermDir)
+        // ISOBUS virtual terminal for the VT card
         services.AddSingleton<IVirtualTerminalService, AgOpenWeb.VirtualTerminal.VirtualTerminalService>();
-#endif
 
         // Smart WAS calibration (statistical WAS zero analyzer)
         services.AddSingleton<ISmartWasCalibrationService, SmartWasCalibrationService>();

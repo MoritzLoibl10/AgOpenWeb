@@ -28,7 +28,7 @@ window.RemoteTransport = {
     const url = `${proto}//${location.host}/ws`;
     let ws = null, stopped = false;
 
-    const TYPE = { SCENE: 1, TICK: 2, COVERAGE_INIT: 3, COVERAGE_CELLS: 4, STATUS: 5, CONTROL_STATE: 6, HELLO: 7, CONFIG: 8, PROFILES: 9, WIZARD: 10, NTRIP_PROFILES: 11, FIELD_OPS: 12, AGSHARE: 13, APP_INFO: 14, FIELD_TOOLS: 15, RECORDED_PATH: 16, BOUNDARY: 17, SOUND: 18, PONG: 19, COVERAGE_EDGE: 20, VIEW_PREFS: 21, PROMPT: 22, TOAST: 23, DRIVE_PICK: 24, HW_MSG: 25, VT: 26, VT_IMAGE: 27 };
+    const TYPE = { SCENE: 1, TICK: 2, COVERAGE_INIT: 3, COVERAGE_CELLS: 4, STATUS: 5, CONTROL_STATE: 6, HELLO: 7, CONFIG: 8, PROFILES: 9, WIZARD: 10, NTRIP_PROFILES: 11, FIELD_OPS: 12, AGSHARE: 13, APP_INFO: 14, FIELD_TOOLS: 15, RECORDED_PATH: 16, BOUNDARY: 17, SOUND: 18, PONG: 19, COVERAGE_EDGE: 20, VIEW_PREFS: 21, PROMPT: 22, TOAST: 23, DRIVE_PICK: 24, HW_MSG: 25, VT: 26, VT_IMAGE: 27, NTRIP_MOUNTPOINTS: 28, WEB_CARDS: 29 };
     const td = new TextDecoder();
 
     function decode(buffer) {
@@ -80,10 +80,14 @@ window.RemoteTransport = {
           const csc = i32(); const contourStrips = new Array(csc);
           for (let k = 0; k < csc; k++) contourStrips[k] = pts();
           const contourRef = optPts(), contourLocked = !!u8();
+          const glc = i32(); const guideLines = new Array(glc); // #450
+          for (let k = 0; k < glc; k++) guideLines[k] = pts();
+          const toolPass = optPts();
           handlers.onScene && handlers.onScene({
             version, originLat, originLon, fieldName, hasField, boundaries, boundaryInner, tracks,
             headland, guidanceLine, toolSections, uTurnPath, nextTrack, flags, imagery, trackList,
             headlandSegs, tramSystems, tramLines, recordedPaths, contourStrips, contourRef, contourLocked,
+            guideLines, toolPass,
           });
           break;
         }
@@ -118,11 +122,14 @@ window.RemoteTransport = {
           op.executing = !!u8(); // #50 — u-turn arc executing (blocks on-screen U-turn/Lateral)
           op.passNumber = i32(); // guidance pass offset (0 = on reference) — reference gate + label
           op.nudgeOffset = f32(); // driver-relative line nudge (m, +right) — AB flyout readout (#93)
+          op.refNudgeMoved = f32(); // Ref Nudge panel: track moved since it opened (m, +right) — #489
+          op.refNudgePending = !!u8(); // ... and it is not saved yet
           const hasGoal = !!u8(); const goalE = f64(), goalN = f64();
           const goal = hasGoal ? { e: goalE, n: goalN } : null; // Pure Pursuit target (#95)
           op.reverse = !!u8(); // #125 — vehicle reversing
           op.moduleNotSteering = !!u8(); // #126 — engaged, module reports not steering
           const chartGpsHeading = f32(); // #111 — heading chart, GPS fix-to-fix
+          tools.tramLights = u8(); // #451 — bit 0/1 R/L on a tram, 2/3 R/L forced, 4 show
           handlers.onTick && handlers.onTick({
             sceneVersion, pose, fix, sections, crossTrackError, guidanceActive, lineLabel,
             activeTrackName: atn.length ? atn : null, tool, op, roll, tools,
@@ -200,6 +207,13 @@ window.RemoteTransport = {
           const sendCorrectedPosition = !!u8();
           // Network IO: the subnet the scan came from (append-only, #334).
           const scanReplySubnet = str();
+          // NTRIP session (append-only): null without a client. state: 0 Stopped, 1 Connecting,
+          // 2 Connected, 3 Streaming, 4 Waiting, 5 GaveUp; lastError: NtripCategory, -1 none.
+          let ntripSession = null;
+          if (u8()) {
+            ntripSession = { usingFallback: !!u8(), mainIsBack: !!u8(), hasFallback: !!u8(), profilePerField: !!u8(),
+              state: u8(), lastError: i32(), attempts: i32(), retrySeconds: f32(), notice: str(), profile: str(), service: str() };
+          }
           handlers.onStatusBar && handlers.onStatusBar({
             fixQuality, fixText, age, sats, isMetric,
             gpsOk, imuOk, autoSteerOk, machineOk, imuIp, autoSteerIp, machineIp,
@@ -211,7 +225,7 @@ window.RemoteTransport = {
             gpsIp, moduleSubnet, hostIps, ntripConnected, ntripStatus, ntripBytes, ntripDestination, ntripUnicast, rtcmBroadcast, ntripEnabled, ntripTestStatus,
             simPanelVisible, driftEasting, driftNorthing, unsavedCoveragePrompt,
             devOverlay, gpsToPgnLatencyMs, gpsSentence, dualHeadingMissing, ntripRtcm, systemData,
-            gpsLost, isobus, fieldData, sendCorrectedPosition, scanReplySubnet,
+            gpsLost, isobus, fieldData, sendCorrectedPosition, scanReplySubnet, ntripSession,
           });
           break;
         }
@@ -222,12 +236,26 @@ window.RemoteTransport = {
             const username = str(), password = str(), autoConnect = !!u8(), isDefault = !!u8();
             const ac = i32(); const associatedFields = new Array(ac);
             for (let j = 0; j < ac; j++) associatedFields[j] = str();
-            const ntripVersion = u8();
-            profiles[k] = { id, name, casterHost, casterPort, mountPoint, username, password, autoConnect, isDefault, associatedFields, ntripVersion };
+            let fallback = null;
+            if (u8()) fallback = { host: str(), port: i32(), mount: str(), username: str(), password: str(), autoSwitch: !!u8(), after: i32() };
+            profiles[k] = { id, name, casterHost, casterPort, mountPoint, username, password, autoConnect, isDefault, associatedFields, fallback };
           }
           const af = i32(); const availableFields = new Array(af);
           for (let k = 0; k < af; k++) availableFields[k] = str();
           handlers.onNtripProfiles && handlers.onNtripProfiles({ profiles, availableFields });
+          break;
+        }
+        case TYPE.WEB_CARDS: {
+          const n = i32(); const cards = new Array(n);
+          for (let k = 0; k < n; k++) cards[k] = { name: str(), url: str() };
+          handlers.onWebCards && handlers.onWebCards(cards);
+          break;
+        }
+        case TYPE.NTRIP_MOUNTPOINTS: {
+          const seq = i32(), forService = str(), status = str();
+          const n = i32(); const items = new Array(n);
+          for (let k = 0; k < n; k++) items[k] = { mount: str(), name: str(), format: str(), systems: str(), country: str(), km: f32(), needsPosition: !!u8() };
+          handlers.onNtripMountpoints && handlers.onNtripMountpoints({ seq, forService, status, items });
           break;
         }
         case TYPE.FIELD_OPS: {
@@ -325,7 +353,7 @@ window.RemoteTransport = {
             isSteerSwitchEnabled: !!u8(), isSteerSwitchManualSections: !!u8(), totalWidth: f64(),
           };
           const uturn = { style: i32(), extension: f64(), smoothing: i32(), radius: f64(), distanceFromBoundary: f64() };
-          const tram = { passes: i32(), display: !!u8(), line: i32(), width: f64() };
+          const tram = { passes: i32(), display: !!u8(), line: i32(), width: f64(), outerInverted: !!u8() };
           const machine = {
             hydraulicLiftEnabled: !!u8(), raiseTime: i32(), lookAhead: f64(), lowerTime: i32(), invertRelay: !!u8(),
             user1: i32(), user2: i32(), user3: i32(), user4: i32(), pinAssignments: rdI32(),
@@ -337,7 +365,7 @@ window.RemoteTransport = {
             uTurnButtonVisible: !!u8(), lateralButtonVisible: !!u8(),
             autoSteerSound: !!u8(), uTurnSound: !!u8(), hydraulicSound: !!u8(), sectionsSound: !!u8(),
             keyboardEnabled: !!u8(), startFullscreen: !!u8(), elevationLogEnabled: !!u8(),
-            resolutionMultiplier: f64(), isDayMode: !!u8(), uiScale: i32(),
+            resolutionMultiplier: f64(), isDayMode: !!u8(), uiScale: i32(), imageryVisible: !!u8(),
           };
           // AutoSteer config — full 9-tab surface (positional, matches WireCodec).
           const autosteer = {
@@ -353,7 +381,7 @@ window.RemoteTransport = {
             uTurnCompensation: f64(), sideHillCompensation: f64(), steerInReverse: !!u8(),
             manualTurnsEnabled: !!u8(), manualTurnsSpeed: f64(), minSteerSpeed: f64(), maxSteerSpeed: f64(),
             lineWidth: i32(), nudgeDistance: i32(), nextGuidanceTime: f64(), cmPerPixel: i32(),
-            lightbarEnabled: !!u8(), steerBarEnabled: !!u8(), guidanceBarOn: !!u8(),
+            lightbarEnabled: !!u8(), steerBarEnabled: !!u8(), guidanceBarOn: !!u8(), refNudgeDistance: i32(),
           };
           gps.minFixQuality = o < dv.byteLength ? i32() : null; // append-only (fork, host-paket D)
           handlers.onConfig && handlers.onConfig({ vehicle, gps, roll, tool, uturn, tram, machine, display, autosteer });

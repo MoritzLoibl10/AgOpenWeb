@@ -1,11 +1,12 @@
-# Haftungshinweis und Nutzungsbedingungen
+# LM Steering Solutions – Haftungshinweis und Nutzungsbedingungen
 
 > **ENTWURF – RECHTLICH UNGEPRÜFT.** Dieser Text ist kein Rechtsrat und von keiner Juristin und
 > keinem Juristen geprüft. Er sammelt, was die App den Nutzern sagen soll, und die offenen Fragen.
 > Vor einer Weitergabe an Dritte prüfen lassen.
 
 ## A. Hinweis beim ersten Start (Text in der App)
-Die App zeigt beim ersten Start auf einem Gerät diesen Text und wartet auf „Gelesen und verstanden“.
+Die App (LM Steering Solutions) zeigt beim ersten Start auf einem Gerät diesen Text unter dem Produktnamen und der
+Überschrift „Bitte vor der Nutzung lesen“ und wartet auf „Gelesen und verstanden“.
 Gespeichert wird die Bestätigung nur auf dem Gerät (Browser-Speicher), mit der Fassung des Textes.
 
 1. Diese App ist eine Lenkhilfe. Sie ersetzt nicht den Fahrer.
