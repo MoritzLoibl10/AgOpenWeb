@@ -20,6 +20,7 @@ internal sealed class WebViewLauncher
 {
     private readonly PhotinoWindow _window;
     private readonly string[] _args;
+    private readonly WindowFullScreen _fullScreen;
     private BackendHost? _backend;
     private bool _closing;
     // Fork (start time): the backend starts at once, in parallel with the window and its web
@@ -30,6 +31,7 @@ internal sealed class WebViewLauncher
     {
         _window = window;
         _args = args;
+        _fullScreen = new WindowFullScreen(window);
     }
 
     public void Show()
@@ -75,14 +77,14 @@ internal sealed class WebViewLauncher
         var port = backend.Server?.Port ?? 5174;
         // App Settings › Start Fullscreen (AgOpenGPS isStartFullScreen): the settings are loaded
         // now, so go fullscreen instead of the default maximized window (#110).
-        // Fork (autostart): started with Windows (--autostart) is fullscreen too (LauncherEntry);
-        // ?winfs=1 tells the page's ⛶ button the window's state.
+        // Fork (autostart): started with Windows (--autostart) opens fullscreen too; the page's
+        // button asks the launcher for the state (fullscreen|state, #498).
         bool fullscreen = AgOpenWeb.Models.Configuration.ConfigurationStore.Instance.Display.StartFullscreen
             || Array.IndexOf(_args, "--autostart") >= 0;
         _window.Invoke(() =>
         {
-            if (fullscreen) _window.SetFullScreen(true);
-            _window.Load(new Uri($"http://localhost:{port}/" + (fullscreen ? "?winfs=1" : "")));
+            if (fullscreen) _fullScreen.Set(true);
+            _window.Load(new Uri($"http://localhost:{port}/"));
             StartupTrace.Mark("launcher: web UI requested");
             ScreenAwake.Hold();
         });
@@ -91,9 +93,10 @@ internal sealed class WebViewLauncher
     }
 
     // The page talks to its host through window.external.sendMessage (Photino's channel):
-    //   open|<url>   open a link in the system browser (window.open can't leave the web view)
-    //   fullscreen|1 / fullscreen|0   window fullscreen on / off (fork: the client's ⛶ button)
-    //   startup|{json}   fork: the page's start phases (wwwroot app.js, block startup:begin)
+    //   open|<url>          open a link in the system browser (window.open can't leave the web view)
+    //   fullscreen|toggle   the status bar's fullscreen button (#498); fullscreen|state asks.
+    //                       Both answer fullscreen|1 or fullscreen|0 for the button's icon.
+    //   startup|{json}      fork: the page's start phases (js/tablet.js, block startup:begin)
     private void OnWebMessage(object? sender, string message)
     {
         if (message.StartsWith("startup|", StringComparison.Ordinal))
@@ -102,16 +105,18 @@ internal sealed class WebViewLauncher
             _ = WarnIfFirewallMissingAsync(); // the page is ready for messages now
             return;
         }
-        if (message == "fullscreen|1" || message == "fullscreen|0")
-        {
-            _window.SetFullScreen(message == "fullscreen|1");
-            return;
-        }
         if (message.StartsWith("open|", StringComparison.Ordinal))
         {
             var url = message[5..];
             if (Uri.TryCreate(url, UriKind.Absolute, out var u) && (u.Scheme == "http" || u.Scheme == "https"))
                 LauncherEntry.OpenUrl(url);
+        }
+        else if (message is "fullscreen|toggle" or "fullscreen|state")
+        {
+            // The answer is the state asked for: macOS animates there and says so only after.
+            bool on = _fullScreen.IsOn;
+            if (message == "fullscreen|toggle") _fullScreen.Set(on = !on);
+            try { _window.SendWebMessage(on ? "fullscreen|1" : "fullscreen|0"); } catch { /* window going away */ }
         }
     }
 

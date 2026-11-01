@@ -434,8 +434,9 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
 - **Lenk-, Regel- und Sicherheitslogik:** nicht berührt.
 
 ## 20. Autostart und zweiter Start (feature/installer, Oktober 2026; genehmigt)
-- **`--autostart`:** `LauncherEntry` öffnet das Fenster sofort im Vollbild; `WebViewLauncher`
-  hängt `?winfs=1` an die Adresse, damit der ⛶-Knopf (app.js) den Zustand kennt.
+- **`--autostart`:** `WebViewLauncher` schaltet das Fenster mit upstreams `WindowFullScreen` (#498)
+  ins Vollbild, sobald das Backend bereit ist (wie „Start Fullscreen“); der ⛶-Knopf fragt den
+  Zustand beim Launcher ab (upstream).
 - **Zweiter Start:** `SingleInstance` (upstream #377) bleibt die Sperre; neu `AskRunningToShow`
   (Named Pipe `AgOpenWeb.Desktop.Show`, unter Windows mit `AllowSetForegroundWindow`) und
   `ListenForShow` im Launcher; `Launcher/WindowFront.cs` (neu) holt das Fenster nach vorne. Ein

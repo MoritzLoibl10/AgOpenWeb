@@ -3,11 +3,12 @@
 This file provides guidance to Claude Code when working with this repository.
 
 **Key documentation:**
-- **[Plans/ARCHITECTURE.md](Plans/ARCHITECTURE.md)** - Full architecture: services, state management, data flow
+- **[Docs/ARCHITECTURE.md](Docs/ARCHITECTURE.md)** - Full architecture: services, state management, data flow
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** - Contributor guide with cross-platform parity rules
 - **[PGN.md](PGN.md)** - UDP packet protocol for hardware communication
 - **[Docs/TRANSLATIONS.md](Docs/TRANSLATIONS.md)** - UI strings and Weblate
 - **[Docs/GPS_RECEIVERS.md](Docs/GPS_RECEIVERS.md)** - Receivers, sentence families, the bridge contract, per-receiver setup
+- **[Docs/FIELD_FILE_FORMATS.md](Docs/FIELD_FILE_FORMATS.md)** - `field.geojson`, sidecars and coverage tiles: the spec for tools that read or write fields
 
 ## Fork: report format (owner's rule, every session)
 
@@ -209,7 +210,7 @@ public class Track
 ### File Format Philosophy
 AgOpenWeb may use different/improved formats from AgOpenGPS when it benefits code simplicity or features. Provide **one-way import** from AgOpenGPS formats rather than maintaining full backwards compatibility.
 
-- **Formats**: a field is `field.geojson` (origin, boundaries, headland, tracks, flags, headland lines, background image placement) beside `background.png`, `contours.geojson`, `recorded-paths.geojson` and `elevation.csv`; a job's coverage is world-anchored tiles under `jobs/<task>/coverage/`. Profiles are JSON.
+- **Formats**: a field is `field.geojson` (origin, boundaries, headland, tracks, flags, headland lines, background image placement) beside `background.png`, `contours.geojson`, `recorded-paths.geojson` and `elevation.csv`; a job's coverage is world-anchored tiles under `jobs/<task>/coverage/`. Profiles are JSON; the spec for other programs is `Docs/FIELD_FILE_FORMATS.md` (keep it in step with the code).
 - **Migration**: AgOpenGPS files found in a field folder are imported once (on open) and **deleted**; AgOpenWeb never writes AgOpenGPS formats. No compatibility code for files from older AgOpenWeb builds (no installed base yet). See `Plans/Completed/FILE_FORMAT_MODERNIZATION_PLAN.md`.
 
 ## Technology Stack
@@ -241,7 +242,8 @@ AgOpenWeb may use different/improved formats from AgOpenGPS when it benefits cod
 | `Shared/AgOpenWeb.Services/Track/TrackGuidanceService.cs` | Pure Pursuit + Stanley guidance |
 | `Shared/AgOpenWeb.Services/YouTurn/YouTurnStateMachine.cs` | U-turn planning and following |
 | `Shared/AgOpenWeb.Services/Coverage/CoverageMapService.cs` | Coverage detection + display grids, tiles |
-| `Shared/AgOpenWeb.Services/NtripClientService.cs` | NTRIP RTK corrections |
+| `Shared/AgOpenWeb.Services/Ntrip/NtripSession.cs` | NTRIP connection: request, reply, retry, timeouts, status |
+| `Shared/AgOpenWeb.Services/NtripClientService.cs` | NTRIP RTK corrections: frames the stream, forwards it to the GPS module |
 | `Shared/AgOpenWeb.Services/ConfigurationService.cs` | AppSettings ↔ ConfigurationStore sync |
 | `Platforms/AgOpenWeb.Desktop/Program.cs` | Desktop mode selection |
 | `Platforms/AgOpenWeb.Desktop/Launcher/LauncherEntry.cs` | Photino window: all-in-one app or `--console` supervisor |
@@ -296,7 +298,7 @@ Everything else lives in `Shared/`.
 
 What each shell must provide to the web UI (JS + WASM, audio without a gesture, `window.open`
 to the system browser, keep the screen awake, localhost HTTP) is listed in
-`Plans/AVALONIA_REMOVAL_PLAN.md`.
+`Plans/Completed/AVALONIA_REMOVAL_PLAN.md`.
 
 ## Common Tasks
 
@@ -322,21 +324,39 @@ Playwright: wait for `iHoldControl === true`, then `transport.send(...)`; read `
 old build on `:5174`.
 
 ## NTRIP Connection Format
-Each NTRIP profile picks the protocol version (`NtripProfile.NtripVersion`, default 1);
-`NtripRequest.Build` writes the request for both the client and the connection test:
+`NtripSession` (`Services/Ntrip/`) makes the connection and asks with NTRIP 2.0:
 ```
-NTRIP 1 (reply "ICY 200 OK")          NTRIP 2 (reply "HTTP/1.1 200 OK")
-GET /mountpoint HTTP/1.0              GET /mountpoint HTTP/1.1
-User-Agent: NTRIP AgOpenWeb/1.0       Host: caster.example.com:2101
-Authorization: Basic base64(u:p)      Ntrip-Version: Ntrip/2.0
-                                      User-Agent: NTRIP AgOpenWeb/1.0
-                                      Authorization: Basic base64(u:p)
+GET /mountpoint HTTP/1.1
+Host: caster.example.com:2101
+Ntrip-Version: Ntrip/2.0
+User-Agent: NTRIP AgOpenWeb
+Authorization: Basic base64(username:password)
+Ntrip-GGA: $GPGGA,...
+Connection: close
 ```
-Network RTK (VRS) casters need a GGA: the first goes out as soon as the caster accepts
-(NTRIP 1: right after the request too), then every 10 s. It is built from the receiver's
-position whenever it has any fix (quality > 0), not only one that passes the guidance
-quality gate (`GpsData.IsValid`, by default RTK fixed); with no fix, none is sent. On a
-refusal or an early close the status line quotes the caster's reply (`NtripResponse.Preview`).
+A caster that did not understand it (a reply that is no NTRIP or HTTP reply, or HTTP 400 or 505) gets the
+NTRIP 1.0 request (`GET /mountpoint HTTP/1.0`, no Host or version header, the position sent right after
+the answer) once; never after a 401, 403, 404, an error text or a source table. The version that delivered
+corrections is remembered per service. `NtripResponse.Classify` sorts every reply into an `NtripCategory`
+(wrong login and unknown mount point end the session, the rest is retried after 1, 2, 4, 8, 15 s, and a
+network change ends the wait); `NtripConnectionTester` (the Test button) opens its connection the same way.
+Every wait has a timeout (`NtripTimeouts`). Design: `Plans/Completed/NTRIP_MAIN_FALLBACK_PLAN.md`.
+
+**Main and fallback service.** Two exclusive modes (`Connections.NtripProfilePerField`, `config.set|conn.ntripProfilePerField`).
+The default is one profile (the default profile) with an optional fallback service (`NtripProfile.Fallback`): a field load
+changes nothing. With the setting on, a loaded field switches the profile and the fallback is not used. The client
+(`NtripClientService`, rules in `NtripFailover`) switches to the fallback by itself only with the profile's Auto-switch on:
+after `SwitchAfterFailures` failed attempts, or at once for a wrong login or mount point. The operator switches in both
+directions at any time (`ntrip.switch|main|fallback`, `INtripClientService.SwitchToAsync`). It **never goes back by itself**:
+while the fallback is in use after a failure, the main service is tried slowly in the background and a `MainBack` notice
+says when it answers; not when both are one login on one caster. Every switch raises `Notice` and says that RTK may be lost.
+In the web client the Network IO card keeps to the first lines and the switch; NTRIP Settings (`renderNtripSettings` in
+`app.js`: headline, advice, checks, the mode) shows the rest, from the `NtripSessionDto` that ends the Status frame;
+`ntrip.use|id` connects with a profile now (`MainViewModel.UseNtripProfileAsync`; the default too in the one-profile mode); the session frame carries
+the profile name and the service in use (`ConnectionState.NtripProfileName/MainText/FallbackText`). A new default profile connects at once; the
+*NTRIP active / disabled* button (`conn.ntripEnabled`) connects the default profile even with its auto-connect off. `ntrip.mountpoints` asks the caster for its
+source table (`NtripSourcetable`), answered in its own frame; a profile's fallback ends its entry in the profiles frame; `ntrip.save` carries it (`NtripProfileFields`), `ntrip.test` can test it. A switch is a toast, "the main service
+is back" is the host's confirmation dialog.
 
 ### RTCM forwarding
 `NtripClientService` frames the caster's stream into RTCM 3 messages (`RtcmFramer`, after
@@ -359,13 +379,37 @@ picked from the list is kept by name too (`VtGatewayName`) and followed to a new
 terminals (`AppSettings.VtCount`), as displays in one cab, each implement choosing its terminal in
 its own menu, one card each. Their messages and pictures go to the browsers as `Vt` (with the
 terminal) and `VtImage` frames (`VirtualTerminalRemote`), the painter is in `app.js`, and each
-card sends `vt.*` commands naming its terminal. SharpIsoTerm is not published yet, so the
-terminal is built in only on request (any head: Desktop, Android, iOS device builds) and the
-project is not in the solution:
+card sends `vt.*` commands naming its terminal. Every head has it (iOS: device builds). SharpIsoTerm
+comes as its NuGet package from its GitHub release, pinned by version and SHA-256 in
+`Shared/AgOpenWeb.VirtualTerminal/AgOpenWeb.VirtualTerminal.csproj` and fetched by the build into
+`nuget-local/` (a package source in `nuget.config`); to take a new SharpIsoTerm, change both to its
+release's. To work on SharpIsoTerm itself, build against a checkout instead:
 `dotnet build Platforms/AgOpenWeb.Desktop/AgOpenWeb.Desktop.csproj -p:SharpIsoTermDir=$HOME/Code/SharpIsoTerm`
-(an absolute path). Without it no terminal is registered and the card never shows. The service
+(an absolute path; its native libraries built with its `native/build.sh`). The service
 is disposed with the backend: on Android and iOS the process outlives it, and the library allows
 one stack per process.
+
+## Web cards and the card pane
+**Web cards** show an add-on's own web page (the HAT's pages, a rate controller's) in a card, picked
+from a bookmark list kept on the host (`AppSettings.WebCards`, `webcard.save` / `webcard.delete`,
+the `WebCards` frame); `{host}` in a URL is the AgOpenWeb host as the browser reaches it. The page
+loads from the add-on on its own origin, never through AgOpenWeb; observers get a cover over it.
+Which cards are open, and where, is the browser's (`localStorage`). `WebCards` in `app.js`; plan:
+`Plans/ADDON_WEB_CARDS_PLAN.md`.
+
+**Card pane** (#456): Screen & Alerts › VT & Web Cards sets Floating (the default), Left or Right,
+per browser. In a split layout the open VT and web cards sit in a pane on that side, two to a
+tab, and the map has the rest of the window (`CardPane` in `app.js`; cards call `track`, `shown`
+and `untrack`). The map's area is set by `setMapArea(l, r)`; what that means for new code:
+- An overlay on the map keeps clear of the pane through `--sal` / `--sar` (the map's insets: the
+  pane's width on its side, else the safe area), a full-width bar uses `--map-l` / `--map-r`, and
+  one centred with `left: 50%` adds `var(--map-dx)`. Something spanning the window (a menu panel,
+  a dialog) uses `--win-sal` / `--win-sar`.
+- `vw` is the map's width, not the window's, and the canvas starts at `mapL`: a pointer's
+  `clientX` is `clientX - mapL` on the map (`s2w`, hit tests), and a DOM label placed from `w2s`
+  adds `mapL`.
+- A card moved in the page reloads its iframe, so the pane hides and shows cards on a tab switch
+  and moves them only when the layout changes. Plan: `Plans/CARD_PANE_SPLIT_PLAN.md`.
 
 ## Debugging Tips
 
@@ -373,7 +417,7 @@ one stack per process.
 2. **iOS device**: `xcrun devicectl device process launch --console --terminate-existing com.agopenweb.ios` streams the app's console; its web server is reachable from the Mac over the USB link
 3. **Android**: Debug builds enable WebView debugging (`chrome://inspect`); `adb forward tcp:5599 tcp:5174` reaches the host
 4. **A client shows something a fresh connection doesn't**: compare the incremental stream with the full snapshot (coverage deltas vs `Snapshot()`)
-5. **Bug Report Dump** (main menu) zips settings, state, the field, the active job's coverage tiles and the last 5 minutes of the GPS log (10 Hz; includes the sentence type, its pre-fusion heading and the receiver's differential age); with NTRIP in use, `ntrip_rtcm.txt` lists the RTCM messages the caster sent by type
+5. **Bug Report Dump** (main menu) zips settings, state, the field, the active job's coverage tiles and the last 5 minutes of the GPS log (10 Hz; includes the sentence type, its pre-fusion heading and the receiver's differential age); with NTRIP in use, `ntrip_rtcm.txt` lists the RTCM messages the caster sent by type and `ntrip_session.txt` what the connection did and why it failed (no login in it; `system_info.txt` has an `NTRIP:` line with the same outcome)
 6. **iOS Release builds hang in CI**: Use Debug configuration (Release triggers AOT compilation that hangs on runners). Simulator builds run on the interpreter (`MtouchInterpreter=all` in the csproj), so they skip AOT altogether; device builds keep it
 
 ## Code Style
@@ -432,12 +476,13 @@ Two GitHub Actions workflows, split by purpose:
 - **`build-deploy-bundles.yml`** — the single packaging + release publisher. Runs the
   `deploy/{linux,windows,macos}/package.sh` scripts + builds the signed Android APK on clean runners:
   - on a **`v*` tag** (or manual dispatch with a tag) → publishes one complete Release, marked
-    prerelease so it never shows as "Latest" (the nightly is the build users run), with every
+    prerelease so it never shows as "Latest" (the beta is the build users run), with every
     artifact: Linux daemon (x64/arm64) + desktop launcher (x64/arm64) tarballs, Windows zip
     (launcher + service installer), macOS `.dmg`, and the Android APK;
-  - on a **daily schedule** → refreshes a rolling `nightly` prerelease with the same artifacts;
-  - on a manual dispatch, by its `publish` input: `nightly` (default) refreshes the rolling
-    nightly from `develop` right away (title carries build time + commit); `release` publishes
+  - on a **daily schedule** → refreshes a rolling `beta` prerelease with the same artifacts, only
+    when `develop` has moved on since the beta was built (otherwise the run builds nothing);
+  - on a manual dispatch, by its `publish` input: `beta` (default) refreshes the rolling
+    beta from `develop` right away (title carries build time + commit); `release` publishes
     the Release named by `release_tag`; `none` builds + uploads artifacts only (dry run).
 
 To cut a release: bump `sys/version.h`, then push a tag — `git tag v26.6.x && git push origin v26.6.x`.

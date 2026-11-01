@@ -65,6 +65,7 @@ public class ConfigurationServiceMappingTests
         d.AutoDayNight = false;
         d.SvennArrowVisible = true;
         d.StartFullscreen = true;
+        d.ImageryVisible = false; // default on
         d.ElevationLogEnabled = true;
         d.FieldTextureVisible = false;
         d.FieldTextureMoveable = true;
@@ -102,6 +103,7 @@ public class ConfigurationServiceMappingTests
             Assert.That(r.AutoDayNight, Is.False);
             Assert.That(r.SvennArrowVisible, Is.True);
             Assert.That(r.StartFullscreen, Is.True);
+            Assert.That(r.ImageryVisible, Is.False);
             Assert.That(r.ElevationLogEnabled, Is.True);
             Assert.That(r.FieldTextureVisible, Is.False);
             Assert.That(r.FieldTextureMoveable, Is.True);
@@ -134,6 +136,7 @@ public class ConfigurationServiceMappingTests
         c.NtripUsername = "user";
         c.NtripPassword = "pass";
         c.NtripAutoConnect = true;
+        c.NtripProfilePerField = true;
         c.AgShareServer = "https://custom";
         c.AgShareApiKey = "key-123";
         c.AgShareEnabled = true;
@@ -153,6 +156,7 @@ public class ConfigurationServiceMappingTests
             Assert.That(r.NtripUsername, Is.EqualTo("user"));
             Assert.That(r.NtripPassword, Is.EqualTo("pass"));
             Assert.That(r.NtripAutoConnect, Is.True);
+            Assert.That(r.NtripProfilePerField, Is.True);
             Assert.That(r.AgShareServer, Is.EqualTo("https://custom"));
             Assert.That(r.AgShareApiKey, Is.EqualTo("key-123"));
             Assert.That(r.AgShareEnabled, Is.True);

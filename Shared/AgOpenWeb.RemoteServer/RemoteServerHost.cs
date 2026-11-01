@@ -339,13 +339,17 @@ public sealed class RemoteServerHost
         // stale copy in the WebView's HTTP cache silently runs old code after an app update.
         // Force a fresh fetch every load.
         var noStore = new[] { ("Cache-Control", "no-store") };
-        // Fork (start time): the page and its scripts go out with an ETag (hash of this build's
-        // file) and "no-cache": the web view asks on every load, so an update is never stale,
-        // but an unchanged file comes back as 304 and the browser reuses the code it compiled
-        // last time (app.js, the CanvasKit wasm) instead of compiling it again at every start.
+        // Fork (start time): the page, its scripts and styles go out with an ETag (hash of this
+        // build's file) and "no-cache": the web view asks on every load, so an update is never
+        // stale, but an unchanged file comes back as 304 and the browser reuses the code it
+        // compiled last time (the scripts, the CanvasKit wasm) instead of compiling it again.
         server.MapGet("/", () => Validated("index.html", "text/html"));
         server.MapGet("/app.js", () => Validated("app.js", "text/javascript"));
         server.MapGet("/transport.js", () => Validated("transport.js", "text/javascript"));
+        // The client's scripts and styles, one file per feature (Plans/WEB_CLIENT_SPLIT_PLAN.md).
+        // Filename-only (no path traversal); unknown names 404.
+        server.MapGetPrefix("/js/", file => ClientFile(file, ".js", "js.", "text/javascript", noStore));
+        server.MapGetPrefix("/css/", file => ClientFile(file, ".css", "css.", "text/css", noStore));
         // Translations (#143): the loader, and one JSON file per language (en.json is the
         // source Weblate reads). Filename-only (no path traversal); unknown names 404.
         server.MapGet("/i18n.js", () => Validated("i18n.js", "text/javascript"));
@@ -596,6 +600,16 @@ public sealed class RemoteServerHost
             return (bytes, "\"" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))[..32] + "\"");
         });
         return SimpleWebServer.Response.Bytes(body, mime, new[] { ("Cache-Control", "no-cache"), ("ETag", etag) });
+    }
+
+    private static SimpleWebServer.Response ClientFile(string file, string ext, string folder,
+        string contentType, (string, string)[] headers)
+    {
+        if (file.Contains('/') || file.Contains('\\') || file.Contains("..")
+            || !file.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
+            return SimpleWebServer.Response.NotFound;
+        try { return Validated(folder + file, contentType); } // fork: ETag, see "/"
+        catch (FileNotFoundException) { return SimpleWebServer.Response.NotFound; }
     }
 
     private static string ReadAsset(string name)
