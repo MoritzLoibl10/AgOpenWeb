@@ -49,10 +49,10 @@ public class NtripProfile
     public string Password { get; set; } = string.Empty;
 
     /// <summary>
-    /// NTRIP protocol version for this caster: 1 (HTTP/1.0, "ICY 200 OK") or 2
-    /// (HTTP/1.1 with "Ntrip-Version: Ntrip/2.0"). Profiles saved without it use 1.
+    /// The service to fall back to (the fields above are the main service); null for none.
+    /// Used in the "main + fallback" mode only.
     /// </summary>
-    public int NtripVersion { get; set; } = 1;
+    public NtripFallback? Fallback { get; set; }
 
     /// <summary>
     /// List of field directory names associated with this profile.

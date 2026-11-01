@@ -125,7 +125,7 @@ public partial class MainViewModel
                 NtripTestStatus = await AgOpenWeb.Services.NtripConnectionTester.TestAsync(
                     EditingNtripProfile.CasterHost, EditingNtripProfile.CasterPort,
                     EditingNtripProfile.MountPoint, EditingNtripProfile.Username,
-                    EditingNtripProfile.Password, EditingNtripProfile.NtripVersion);
+                    EditingNtripProfile.Password);
             }
             finally
             {

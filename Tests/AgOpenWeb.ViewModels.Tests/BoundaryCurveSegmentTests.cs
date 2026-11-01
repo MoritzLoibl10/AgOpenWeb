@@ -47,11 +47,11 @@ public class BoundaryCurveSegmentTests
         var track = _vm.SelectedTrack;
         Assert.That(track, Is.Not.Null);
         Assert.That(track!.Name, Is.EqualTo("Boundary Curve"));
-        Assert.That(track.NoPassOffset, Is.True);
+        Assert.That(track.NoPassOffset, Is.False, "ordinary passes, as AgOpenGPS's: the pass shown follows the tractor");
         var inField = track.Points.Where(p => p.Northing is > 60 and < 140).ToList();
         Assert.That(inField, Is.Not.Empty);
         double e0 = inField[0].Easting;
-        Assert.That(e0, Is.InRange(0.0, 10.0), "on the west side, at most the inset inside it");
+        Assert.That(e0, Is.EqualTo(0).Within(1e-6), "on the fence, as AgOpenGPS's");
         foreach (var p in inField) Assert.That(p.Easting, Is.EqualTo(e0).Within(1e-6));
     }
 
@@ -67,22 +67,13 @@ public class BoundaryCurveSegmentTests
     }
 
     [Test]
-    public void ACorner_IsRoundedToTheUTurnRadius()
+    public void ACorner_IsTheFenceCorner()
     {
-        // #422 follow-up: the curve rounds the corner as tightly as the rig can turn, not by a
-        // share of the side lengths (which left big gaps on long sides).
-        var vm = new MainViewModelBuilder { PolygonOffsetService = new AgOpenWeb.Services.Geometry.PolygonOffsetService() }.Build();
-        vm.State.Field.CurrentBoundary = _vm.State.Field.CurrentBoundary;
-        ConfigurationStore.Instance.Guidance.UTurnRadius = 8;
-        double inset = ConfigurationStore.Instance.ActualToolWidth / 2
-            + ConfigurationStore.Instance.Guidance.UTurnDistanceFromBoundary / 2;
+        // On the fence, as AgOpenGPS's; each pass rounds a corner the rig can't turn (OffsetPassCache).
+        _vm.RemoteCreateBoundaryCurveSegment(0, 150, 50, 200); // up the west side, round the NW corner
 
-        vm.RemoteCreateBoundaryCurveSegment(0, 150, 50, 200); // up the west side, round the NW corner
-
-        var pts = vm.SelectedTrack!.Points;
-        double cornerE = inset, cornerN = 200 - inset;
-        double nearest = pts.Min(p => Math.Sqrt((p.Easting - cornerE) * (p.Easting - cornerE) + (p.Northing - cornerN) * (p.Northing - cornerN)));
-        Assert.That(nearest, Is.EqualTo(8 * (Math.Sqrt(2) - 1)).Within(0.1));
+        var pts = _vm.SelectedTrack!.Points;
+        Assert.That(pts.Any(p => Math.Abs(p.Easting) < 1e-6 && Math.Abs(p.Northing - 200) < 1e-6));
     }
 
     private static double DistanceToLine(IReadOnlyList<AgOpenWeb.Models.Base.Vec3> pts, double e, double n)
@@ -94,6 +85,54 @@ public class BoundaryCurveSegmentTests
                 new AgOpenWeb.Models.Base.Vec2(pts[i - 1].Easting, pts[i - 1].Northing),
                 new AgOpenWeb.Models.Base.Vec2(pts[i].Easting, pts[i].Northing)));
         return best;
+    }
+
+    [Test]
+    public void TheLongWayRound_WhenItsPicked()
+    {
+        // #450: A and B on the west side; the operator picks the way round past the east side.
+        _vm.RemoteCreateBoundaryCurveSegment(0, 50, 0, 150, new AgOpenWeb.Models.Base.Vec2(100, 100));
+
+        var pts = _vm.SelectedTrack!.Points;
+        Assert.That(DistanceToLine(pts, 100, 100), Is.LessThan(10), "runs down the east side");
+        Assert.That(DistanceToLine(pts, 50, 0), Is.LessThan(10), "and along the south side");
+        // Both ends face each other across the gap between the taps: they run on towards each
+        // other, but stop short of halfway instead of overlapping.
+        Assert.That(pts[0].Easting, Is.EqualTo(pts[^1].Easting).Within(1e-6), "both ends on the west side");
+        Assert.That(pts[0].Northing, Is.LessThan(pts[^1].Northing - 1.5), "the ends stop apart, not overlapping");
+    }
+
+    [Test]
+    public void TheShortWayRound_WhenItsPicked()
+    {
+        _vm.RemoteCreateBoundaryCurveSegment(0, 50, 0, 150, new AgOpenWeb.Models.Base.Vec2(0, 100));
+
+        Assert.That(DistanceToLine(_vm.SelectedTrack!.Points, 0, 100), Is.LessThan(10));
+        Assert.That(DistanceToLine(_vm.SelectedTrack.Points, 100, 100), Is.GreaterThan(20));
+    }
+
+    [Test]
+    public void ATapOnACorner_RunsOnTheWayTheCurveGoes()
+    {
+        // B lands on the NE corner, a boundary vertex, at the end of a walk against the ring's
+        // order (the short way from the north side): the curve ends heading east, so it runs
+        // on east, not due north from a repeated end point.
+        _vm.RemoteCreateBoundaryCurveSegment(50, 200, 100, 200);
+
+        var pts = _vm.SelectedTrack!.Points;
+        Assert.That(pts[^1].Easting, Is.GreaterThan(105));
+        Assert.That(pts[^1].Northing, Is.EqualTo(200).Within(0.5));
+    }
+
+    [Test]
+    public void ATapOnTheCorner_RunsOnAlongTheSide()
+    {
+        // B tapped on the SE corner: the curve comes down the east side, so it runs on south.
+        _vm.RemoteCreateBoundaryCurveSegment(100, 150, 100, 0);
+
+        var pts = _vm.SelectedTrack!.Points;
+        Assert.That(pts[^1].Northing, Is.LessThan(-5), "runs on south past the fence");
+        Assert.That(pts[^1].Easting, Is.EqualTo(100).Within(0.5), "along the east side's line");
     }
 
     [Test]

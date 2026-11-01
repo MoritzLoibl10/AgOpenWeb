@@ -78,6 +78,7 @@ public static partial class RemoteServerWiring
             case "conn.rtcmBroadcast": con.RtcmBroadcast = B(); cfg.SaveAppSettings(); return;
             case "conn.sendCorrectedPosition": con.SendCorrectedPosition = B(); cfg.SaveAppSettings(); return;
             case "conn.ntripEnabled": con.NtripEnabled = B(); cfg.SaveAppSettings(); return; // the VM connects / disconnects
+            case "conn.ntripProfilePerField": con.NtripProfilePerField = B(); cfg.SaveAppSettings(); return; // the VM applies the mode
             // --- Vehicle config (Phase 9b). Live effect; persisted by a profile.save. ---
             case "vehicle.type":
                 if (I(out var ty))
@@ -173,6 +174,7 @@ public static partial class RemoteServerWiring
             case "tram.display": gd.TramDisplay = B(); return;
             case "tram.line": if (I(out var tl)) gd.TramLine = tl; return;
             case "tram.width": if (D(out var tw) && tw > 0) store.Tram.TramWidth = tw; return; // m (#110)
+            case "tram.outerInverted": store.Tram.IsOuterInverted = B(); return; // AgOpenGPS "Override" (#451)
             // --- Machine Control (ConfigStore.Machine) ---
             case "machine.hydraulicLiftEnabled": mch.HydraulicLiftEnabled = B(); return;
             case "machine.raiseTime": if (I(out var m1)) mch.RaiseTime = m1; return;
@@ -205,6 +207,7 @@ public static partial class RemoteServerWiring
             case "display.sectionsSound": disp.SectionsSound = B(); cfg.SaveAppSettings(); return;
             case "display.keyboardEnabled": disp.KeyboardEnabled = B(); cfg.SaveAppSettings(); return;
             case "display.startFullscreen": disp.StartFullscreen = B(); cfg.SaveAppSettings(); return;
+            case "display.imageryVisible": disp.ImageryVisible = B(); cfg.SaveAppSettings(); return;
             case "display.elevationLogEnabled": disp.ElevationLogEnabled = B(); cfg.SaveAppSettings(); return;
             // --- AutoSteer config (Phase 9). Live effect on ConfigStore.AutoSteer (the
             // SoT the VM binds to); MarkChanged re-fingerprints so the Config frame
@@ -260,17 +263,18 @@ public static partial class RemoteServerWiring
             case "autosteer.manualTurnsSpeed": if (D(out var a25)) { ast.ManualTurnsSpeed = Math.Clamp(a25, 0, 20); store.MarkChanged(); } return; // km/h, AgOpenGPS range (#112)
             case "autosteer.minSteerSpeed": if (D(out var a26)) { ast.MinSteerSpeed = Math.Clamp(a26, 0, 10); store.MarkChanged(); } return; // km/h, AgOpenGPS range (#112)
             case "autosteer.maxSteerSpeed": if (D(out var a27)) { ast.MaxSteerSpeed = Math.Clamp(a27, 0, 50); store.MarkChanged(); } return; // km/h, AgOpenGPS range (#112)
-            // Tab 9 — Display
-            case "autosteer.lineWidth": if (I(out var a28)) { ast.LineWidth = a28; store.MarkChanged(); } return;
-            case "autosteer.nudgeDistance": if (I(out var a29)) { ast.NudgeDistance = a29; store.MarkChanged(); } return;
-            case "autosteer.nextGuidanceTime": if (D(out var a30)) { ast.NextGuidanceTime = a30; store.MarkChanged(); } return;
-            case "autosteer.cmPerPixel": if (I(out var a31)) { ast.CmPerPixel = a31; store.MarkChanged(); } return;
-            // AgOpenGPS: "Light bar" turns the bar on/off (isLightbarOn), "Steer bar" picks
-            // its style (isLightBarNotSteerBar). Choosing the steer bar also turns the bar
-            // on, or nothing would show (#219).
-            case "autosteer.lightbarEnabled": ast.LightbarEnabled = B(); store.MarkChanged(); return;
-            case "autosteer.steerBarEnabled": ast.SteerBarEnabled = B(); if (ast.SteerBarEnabled) ast.LightbarEnabled = true; store.MarkChanged(); return;
-            case "autosteer.guidanceBarOn": ast.GuidanceBarOn = B(); store.MarkChanged(); return;
+            // Tab 9 — Display. Nothing here goes to the steer module, so each is saved at once,
+            // as AgOpenGPS does; Send+Save is for the steering settings (#479).
+            case "autosteer.lineWidth": if (I(out var a28)) { ast.LineWidth = a28; cfg.SaveAutoSteerDisplaySettings(); } return;
+            case "autosteer.nudgeDistance": if (I(out var a29)) { ast.NudgeDistance = a29; cfg.SaveAutoSteerDisplaySettings(); } return;
+            case "autosteer.refNudgeDistance": if (I(out var a29r)) { ast.RefNudgeDistance = a29r; cfg.SaveAutoSteerDisplaySettings(); } return;
+            case "autosteer.nextGuidanceTime": if (D(out var a30)) { ast.NextGuidanceTime = a30; cfg.SaveAutoSteerDisplaySettings(); } return;
+            case "autosteer.cmPerPixel": if (I(out var a31)) { ast.CmPerPixel = a31; cfg.SaveAutoSteerDisplaySettings(); } return;
+            // AgOpenGPS: the guidance bar's On/Off (isLightbarOn) and its style, light bar or
+            // steer bar (isLightBarNotSteerBar), are separate settings (#479).
+            case "autosteer.lightbarEnabled": ast.LightbarEnabled = B(); cfg.SaveAutoSteerDisplaySettings(); return;
+            case "autosteer.steerBarEnabled": ast.SteerBarEnabled = B(); cfg.SaveAutoSteerDisplaySettings(); return;
+            case "autosteer.guidanceBarOn": ast.GuidanceBarOn = B(); cfg.SaveAutoSteerDisplaySettings(); return;
             // unknown key → ignored
         }
     }
@@ -417,7 +421,7 @@ public static partial class RemoteServerWiring
     private static void ApplyNtripCommand(
         AgOpenWeb.Services.Interfaces.INtripProfileService svc,
         AgOpenWeb.Models.State.ApplicationState state, IUiDispatcher dispatcher,
-        string cmd, string arg, AgOpenWeb.ViewModels.MainViewModel? vm = null)
+        string cmd, string arg, AgOpenWeb.ViewModels.MainViewModel? vm = null, IGpsService? gps = null)
     {
         var inv = System.Globalization.CultureInfo.InvariantCulture;
         switch (cmd)
@@ -428,21 +432,45 @@ public static partial class RemoteServerWiring
             case "ntrip.setDefault": // arg = id
                 _ = svc.SetDefaultProfileAsync(arg);
                 return;
-            case "ntrip.test": // arg = host 	 port 	 mount 	 user 	 pass 	 id (the mask = id's stored pass) [	 ntripVersion]
+            case "ntrip.use": // arg = id: connect with that profile now
+                if (vm != null) _ = vm.UseNtripProfileAsync(arg);
+                return;
+            case "ntrip.switch": // arg = main | fallback: the service the corrections come from
+                if (vm != null && arg is "main" or "fallback")
+                    _ = vm.SwitchNtripServiceAsync(arg == "main" ? AgOpenWeb.Services.Interfaces.NtripService.Main : AgOpenWeb.Services.Interfaces.NtripService.Fallback);
+                return;
+            case "ntrip.test": // arg = host \t port \t mount \t user \t pass \t id \t fallback (1 = the fallback's); a masked pass = the stored one
             {
                 var t = arg.Split('\t');
                 if (t.Length < 3) return;
-                if (t.Length > 4 && t[4] == AgOpenWeb.RemoteServer.Secrets.Mask)
-                    t[4] = svc.Profiles.FirstOrDefault(p => p.Id == t.ElementAtOrDefault(5))?.Password ?? "";
                 int.TryParse(t.ElementAtOrDefault(1), System.Globalization.NumberStyles.Integer, inv, out var tport);
                 if (tport == 0) tport = 2101;
+                if (t.Length > 4 && t[4] == AgOpenWeb.RemoteServer.Secrets.Mask)
+                    t[4] = StoredPassword(svc.Profiles.FirstOrDefault(p => p.Id == t.ElementAtOrDefault(5)), t.ElementAtOrDefault(6) == "1", t[0], tport);
                 state.Connections.NtripTestStatus = "Testing connection...";
                 _ = TestNtripAndReportAsync(dispatcher, state, t[0], tport, t[2],
-                    t.ElementAtOrDefault(3) ?? "", t.ElementAtOrDefault(4) ?? "",
-                    t.ElementAtOrDefault(6) == "2" ? 2 : 1); // fork: version after upstream's id
+                    t.ElementAtOrDefault(3) ?? "", t.ElementAtOrDefault(4) ?? "");
                 return;
             }
-            case "ntrip.save": // id \t name \t host \t port \t mount \t user \t pass \t auto \t default \t assoc(csv) [\t ntripVersion]
+            case "ntrip.mountpoints": // arg = host \t port \t user \t pass \t id \t fallback (1 = the fallback's); a masked pass = the stored one
+            {
+                var t = arg.Split('\t');
+                if (t.Length < 2 || string.IsNullOrWhiteSpace(t[0])) return;
+                bool forFallback = t.ElementAtOrDefault(5) == "1";
+                int.TryParse(t[1], System.Globalization.NumberStyles.Integer, inv, out var mport);
+                if (mport == 0) mport = 2101;
+                string pass = t.ElementAtOrDefault(3) ?? "";
+                if (pass == AgOpenWeb.RemoteServer.Secrets.Mask)
+                    pass = StoredPassword(svc.Profiles.FirstOrDefault(p => p.Id == t.ElementAtOrDefault(4)), forFallback, t[0], mport);
+                _ = FetchMountpointsAsync(dispatcher, state, t[0], mport, t.ElementAtOrDefault(2) ?? "", pass,
+                    forFallback ? "fallback" : "main", gps);
+                return;
+            }
+            case "ntrip.mountpoints.clear": // the picker is closed: the list is not kept
+                CancelMountpoints();
+                state.Connections.NtripMountpoints = AgOpenWeb.Models.Ntrip.NtripMountpointList.None;
+                return;
+            case "ntrip.save": // id \t name \t host \t port \t mount \t user \t pass \t auto \t default \t assoc(csv) [\t fallback: present \t host \t port \t mount \t user \t pass \t auto \t after]
             {
                 var f = arg.Split('\t');
                 if (f.Length < 9) return;
@@ -465,20 +493,27 @@ public static partial class RemoteServerWiring
                     Password = f[6] == AgOpenWeb.RemoteServer.Secrets.Mask ? existing?.Password ?? "" : f[6],
                     AutoConnectOnFieldLoad = f[7] == "1", IsDefault = f[8] == "1",
                     AssociatedFields = assoc,
-                    // Optional, so an older client's save keeps the stored version.
-                    NtripVersion = f.ElementAtOrDefault(10) is { Length: > 0 } v
-                        ? (v == "2" ? 2 : 1) : existing?.NtripVersion ?? 1,
                 };
+                // The fallback block comes after the associated fields; without it an edit keeps the profile's fallback.
                 if (existing != null) { profile.Id = existing.Id; profile.FilePath = existing.FilePath; }
+                profile.Fallback = AgOpenWeb.Services.NtripProfileFields.FallbackFrom(f, 10, existing?.Fallback, AgOpenWeb.RemoteServer.Secrets.Mask);
                 // Copy the old caster settings before saving (the save may update the stored
                 // profile in place), to tell whether the connected one changed.
                 var before = existing == null ? null : new AgOpenWeb.Models.Ntrip.NtripProfile
                 {
                     Name = existing.Name, CasterHost = existing.CasterHost, CasterPort = existing.CasterPort,
                     MountPoint = existing.MountPoint, Username = existing.Username, Password = existing.Password,
-                    NtripVersion = existing.NtripVersion,
+                    Fallback = existing.Fallback?.Clone(),   // a copy: the editor will change the fallback in place
                 };
-                _ = svc.SaveProfileAsync(profile);
+                // The first profile is the default one, so it has something to connect with.
+                if (existing == null && !svc.Profiles.Any(p => p.IsDefault)) profile.IsDefault = true;
+                _ = SaveNewProfileAsync();
+                async Task SaveNewProfileAsync()
+                {
+                    await svc.SaveProfileAsync(profile);
+                    // back on the host loop: the connect sets VM and State properties
+                    if (existing == null && vm != null) dispatcher.Post(() => _ = vm.ConnectNewNtripProfileAsync(profile));
+                }
                 // Editing the profile we're connected with: reconnect with the new settings
                 // now, not at the next field load / restart (#111).
                 if (before != null && vm != null)
@@ -587,24 +622,53 @@ public static partial class RemoteServerWiring
                 var state = services.GetRequiredService<AgOpenWeb.Models.State.ApplicationState>();
                 state.BugReportStatus = "Creating bug report…";
                 BugReportRemote.NewReport(null);
+                var dir = System.IO.Path.Combine(
+                    AgOpenWeb.Services.AppDataRoot.Documents, "BugReports");
+                var slug = string.IsNullOrWhiteSpace(title) ? "untitled"
+                    : new string(title.Trim().ToLowerInvariant().Select(ch => char.IsLetterOrDigit(ch) ? ch : '-').ToArray());
+                if (slug.Length > 60) slug = slug.Substring(0, 60);
+                var notes = string.IsNullOrWhiteSpace(title) ? desc : "# " + title + "\n\n" + desc;
+                // The state as it is now, read here on the host loop; the coverage save, field files
+                // and compression run in the background, so a slow tablet keeps steering and
+                // simulating while the report is written (1-4 s held the loop, GPS lost).
+                AgOpenWeb.Services.DebugDumpService.DumpSnapshot snap;
                 try
                 {
-                    var dir = System.IO.Path.Combine(
-                        AgOpenWeb.Services.AppDataRoot.Documents, "BugReports");
-                    var slug = string.IsNullOrWhiteSpace(title) ? "untitled"
-                        : new string(title.Trim().ToLowerInvariant().Select(ch => char.IsLetterOrDigit(ch) ? ch : '-').ToArray());
-                    if (slug.Length > 60) slug = slug.Substring(0, 60);
-                    var notes = string.IsNullOrWhiteSpace(title) ? desc : "# " + title + "\n\n" + desc;
-                    var zip = AgOpenWeb.Services.DebugDumpService.CreateDump(
+                    snap = AgOpenWeb.Services.DebugDumpService.Capture(
                         services.GetRequiredService<ISettingsService>(), AgOpenWeb.Models.State.RuntimeStateCapture.From(state), store,
-                        additionalNotes: notes, outputDirectory: dir, filePrefix: "bugreport_" + slug,
-                        activeJobTaskName: SaveCoverageForDump(services, state),
                         ntripRtcmReport: AgOpenWeb.Services.NtripRtcmReport.Build(
-                            services.GetService<INtripClientService>(), services.GetService<IGpsService>()));
-                    state.BugReportStatus = "Saved: " + zip;
-                    BugReportRemote.NewReport(zip);
+                            services.GetService<INtripClientService>(), services.GetService<IGpsService>()),
+                        ntripSessionReport: AgOpenWeb.Services.NtripSupportReport.Build(
+                            services.GetService<INtripClientService>(), services.GetService<IGpsService>()),
+                        ntripSummary: AgOpenWeb.Services.NtripSupportReport.Summary(services.GetService<INtripClientService>()));
                 }
-                catch (Exception ex) { state.BugReportStatus = "Error: " + ex.Message; }
+                catch (Exception ex) { state.BugReportStatus = "Error: " + ex.Message; return; }
+                var job = ActiveJobForDump(services, state);
+                var coverage = services.GetRequiredService<ICoverageMapService>();
+                var ui = services.GetRequiredService<IUiDispatcher>();
+                _ = Task.Run(() =>
+                {
+                    string status;
+                    string? zip = null;
+                    try
+                    {
+                        if (job is { } j)
+                        {
+                            try { coverage.SaveToFile(j.FieldDir, j.Task); }
+                            catch { /* the dump still carries the last autosave */ }
+                        }
+                        zip = AgOpenWeb.Services.DebugDumpService.WriteDump(snap,
+                            additionalNotes: notes, outputDirectory: dir, filePrefix: "bugreport_" + slug,
+                            activeJobTaskName: job?.Task);
+                        status = "Saved: " + zip;
+                    }
+                    catch (Exception ex) { status = "Error: " + ex.Message; }
+                    ui.Post(() =>
+                    {
+                        state.BugReportStatus = status;
+                        if (zip != null) BugReportRemote.NewReport(zip);
+                    });
+                });
                 return;
             }
             case "app.bugReport.send": // arg = zip name \t GitHub user \t email \t title \t description
@@ -749,25 +813,91 @@ public static partial class RemoteServerWiring
     }
 
     /// <summary>
-    /// Save the active job's coverage so the dump's tiles are current, and return the
-    /// job's task name for <see cref="AgOpenWeb.Services.DebugDumpService.CreateDump"/>.
-    /// Null when no job is open; a failed save still returns the name (stale tiles beat none).
+    /// The open job's field folder and task name, whose coverage the dump saves first and
+    /// carries (<see cref="AgOpenWeb.Services.DebugDumpService.WriteDump"/>); null with no job.
     /// </summary>
-    private static string? SaveCoverageForDump(IServiceProvider services, AgOpenWeb.Models.State.ApplicationState state)
+    private static (string FieldDir, string Task)? ActiveJobForDump(IServiceProvider services, AgOpenWeb.Models.State.ApplicationState state)
     {
         var task = services.GetRequiredService<IJobService>().ActiveJob?.TaskName;
         var fieldDir = state.Field.ActiveField?.DirectoryPath;
         if (string.IsNullOrWhiteSpace(task) || string.IsNullOrEmpty(fieldDir)) return null;
-        try { services.GetRequiredService<ICoverageMapService>().SaveToFile(fieldDir, task); }
-        catch { /* the dump still carries the last autosave */ }
-        return task;
+        return (fieldDir, task);
+    }
+
+    // A stored password goes only to the host it belongs to. The editor holds the mask, not the password, so
+    // a host typed over the stored one gets no password rather than the stored one.
+    private static string StoredPassword(AgOpenWeb.Models.Ntrip.NtripProfile? profile, bool fallback, string host, int port)
+    {
+        string? storedHost, stored;
+        int storedPort;
+        if (fallback)
+        {
+            if (profile?.Fallback is not { } f) return "";
+            (storedHost, storedPort, stored) = (f.CasterHost, f.CasterPort, f.Password);
+        }
+        else
+        {
+            if (profile == null) return "";
+            (storedHost, storedPort, stored) = (profile.CasterHost, profile.CasterPort, profile.Password);
+        }
+        return string.Equals(storedHost?.Trim(), host.Trim(), StringComparison.OrdinalIgnoreCase) && storedPort == port ? stored ?? "" : "";
+    }
+
+    // One request at a time is wanted: a new one, or closing the picker, stops the one still running. The
+    // counter is not the state's, so a reset of the state cannot hand out a number twice.
+    private static int _mountpointSeq;
+    private static CancellationTokenSource? _mountpointsCts;
+
+    private static void CancelMountpoints() => Interlocked.Exchange(ref _mountpointsCts, null)?.Cancel();
+
+    // Asks a caster for its mount points off the UI thread and puts the answer in the state. The list is
+    // nearest first when the receiver has a position.
+    private static async Task FetchMountpointsAsync(
+        IUiDispatcher dispatcher, AgOpenWeb.Models.State.ApplicationState state,
+        string host, int port, string user, string pass, string which, IGpsService? gps)
+    {
+        CancelMountpoints();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        _mountpointsCts = cts;
+        int seq = Interlocked.Increment(ref _mountpointSeq);
+        state.Connections.NtripMountpoints = new AgOpenWeb.Models.Ntrip.NtripMountpointList(seq, which, "loading", []);
+
+        var position = gps?.CurrentData is { FixQuality: > 0 } data
+            && (data.CurrentPosition.Latitude != 0 || data.CurrentPosition.Longitude != 0)
+            ? (data.CurrentPosition.Latitude, data.CurrentPosition.Longitude)
+            : ((double Latitude, double Longitude)?)null;
+        AgOpenWeb.Services.SourcetableResult result;
+        try
+        {
+            result = await AgOpenWeb.Services.NtripSourcetable.FetchAsync(host, port, user, pass, position,
+                new AgOpenWeb.Services.NtripTimeouts(), cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            return;   // replaced by a newer request, or the picker was closed: nobody waits for this one
+        }
+        catch (Exception ex)
+        {
+            result = new AgOpenWeb.Services.SourcetableResult([], ex.Message);
+        }
+        finally
+        {
+            Interlocked.CompareExchange(ref _mountpointsCts, null, cts);   // before it is disposed: CancelMountpoints must not reach a disposed one
+        }
+        dispatcher.Post(() =>
+        {
+            if (state.Connections.NtripMountpoints.Seq != seq) return;
+            string status = result.Error != null ? "error:" + result.Error : result.Partial ? "partial" : "";
+            state.Connections.NtripMountpoints = new AgOpenWeb.Models.Ntrip.NtripMountpointList(
+                seq, which, status, result.Error == null ? result.Mountpoints : []);
+        });
     }
 
     private static async Task TestNtripAndReportAsync(
         IUiDispatcher dispatcher, AgOpenWeb.Models.State.ApplicationState state,
-        string host, int port, string mount, string user, string pass, int ntripVersion)
+        string host, int port, string mount, string user, string pass)
     {
-        var result = await AgOpenWeb.Services.NtripConnectionTester.TestAsync(host, port, mount, user, pass, ntripVersion);
+        var result = await AgOpenWeb.Services.NtripConnectionTester.TestAsync(host, port, mount, user, pass);
         // Marshal the status write through the registered dispatcher (Avalonia UI
         // thread when windowed, the host loop when headless) — not a hardcoded
         // Dispatcher.UIThread, which does not exist in the headless host.
