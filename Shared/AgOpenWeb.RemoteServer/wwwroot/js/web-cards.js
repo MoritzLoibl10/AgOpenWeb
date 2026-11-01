@@ -5,7 +5,7 @@
 // Web cards.
 
 // ---- Web cards ----
-// Add-ons' own web pages in cards (Plans/ADDON_WEB_CARDS_PLAN.md), apart from the VT cards. The
+// Add-ons' own web pages in cards (Plans/ADD_ON_CARDS_PLAN.md), apart from the VT cards. The
 // bookmarks (name + URL) are the host's, the same on every browser; which cards are open, their
 // page, size and place are this browser's (localStorage). {host} in a URL is the AgOpenWeb host
 // as this browser reaches it. The page loads from the add-on itself, on its own origin. A browser
@@ -186,42 +186,3 @@ const WebCards = (() => {
 
   return { setBookmarks, render };
 })();
-
-// Clock — browser-local 24h HH:MM:SS.
-const clockEl = document.getElementById('clock');
-function tickClock() {
-  if (!clockEl) return;
-  const d = new Date(), p = n => String(n).padStart(2, '0');
-  clockEl.textContent = p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
-}
-setInterval(tickClock, 1000); tickClock();
-
-// Reference grid (procedural, client-side — no wire). Spacing is a tool-width multiple on a
-// 1-2-5 series keyed to zoom, matching the native grid (#417). One line style, 1 px wide at any
-// zoom, no major lines and no coloured axes, as AgOpenGPS (#496).
-// Matches native NiceStep125 exactly: ≤1 → 1, then 2, 5, 10, 20 … (no 1.5 step).
-function niceStep125(x) {
-  if (x <= 1) return 1;
-  const pow = Math.pow(10, Math.floor(Math.log10(x)));
-  const f = x / pow;
-  return (f <= 2 ? 2 : f <= 5 ? 5 : 10) * pow;
-}
-// fork: the width the sections span, 0 when there are none (toolWidthM() then says 6 m).
-function sectionsWidthM() {
-  const ts = scene && scene.toolSections;
-  if (!ts || !ts.length) return 0;
-  let lo = Infinity, hi = -Infinity;
-  for (const s of ts) { if (s.left < lo) lo = s.left; if (s.right > hi) hi = s.right; }
-  return hi > lo ? hi - lo : 0;
-}
-function toolWidthM() {
-  const ts = scene && scene.toolSections;
-  if (ts && ts.length) {
-    let lo = Infinity, hi = -Infinity;
-    for (const s of ts) { if (s.left < lo) lo = s.left; if (s.right > hi) hi = s.right; }
-    if (hi > lo) return hi - lo;
-  }
-  // No sections: the host's tool width (#398); 0 when that isn't set either, never a guess.
-  const w = config && config.tool && config.tool.totalWidth;
-  return w > 0 ? w : 0;
-}
