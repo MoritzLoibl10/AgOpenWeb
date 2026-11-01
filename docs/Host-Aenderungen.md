@@ -453,3 +453,21 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
 - **Workflows:** ZIP heißt `LM-Steering-Solutions-portable-<Tag>.zip`; „Fork Stable Release“
   entfernt die ZIP aus der stabilen Release.
 
+## 22. Upstream-Abgleich November 2026 (upstream `develop` bis f8ee280a, #437 → #536)
+- **Web-Client geteilt (upstream #527, #528):** `app.js` ist upstream in `js/*.js` aufgeteilt, das
+  CSS aus `index.html` in `css/*.css`. Die Fork-Module vom Ende von `app.js` stehen jetzt in
+  **`js/tablet.js`** (nach `frame.js` geladen, gleiche Reihenfolge wie vorher), der Fork-Stil
+  bleibt `<style id="tablet-ui">` in `index.html`. Fork-Änderungen in upstream-Code sind mit
+  ihren Zeilen mitgewandert (`core.js`: `sectionsWidthM`, Toast mit Schlüssel; `field-builder.js`,
+  `overlays.js`: Arbeitsbreite; `css/dialogs.css`: `.fb-act`; `css/map-hud.css`: SIM-Knopf in der
+  Kundenversion). Die Web-Tests lesen `js/tablet.js`. Wo diese Datei „app.js“ nennt, ist jetzt
+  `js/tablet.js` bzw. die js-Datei mit der genannten Funktion gemeint.
+- **NTRIP:** upstreams neue Verbindungsschicht (2.0, bei Bedarf 1.0, Fallback-Dienst, Mountpoint-
+  Liste) ersetzt die Fork-Erweiterungen (Versionswahl im Profil, eigene GGA-Regel,
+  Antwortvorschau); `NtripVersion`, das Fork-`NtripRequest` und `NtripVrsTests` sind entfernt.
+- **Vollbild im Launcher:** upstreams #498 (`WindowFullScreen`, `fullscreen|toggle`/`state`) ersetzt
+  das Fork-`fullscreen|1/0`; `--autostart` nutzt upstreams Helfer.
+- **Abschaltgrund (upstream #442):** der Host zeigt, warum die Lenkung ausging; der Fork übersetzt
+  diese Texte (`js/tablet.js`, `TOASTS`/`TOAST_RX`).
+- **Lenk-, Regel- und Sicherheitslogik:** unverändert von upstream übernommen.
+

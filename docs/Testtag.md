@@ -1,4 +1,4 @@
-# Testtag: Checkliste zur Testversion 26.7.0-moritz.29 (#20–#27)
+# Testtag: Checkliste zur Testversion 26.7.0-moritz.30 (#20–#27)
 
 Reihenfolge wie beim Abarbeiten. Je Punkt: **tun** → **soll** · PR. Abhaken: ☐. Board und Motor
 sind nicht getestet; Lenkung nur mit Abstand zu Personen, auf eigenem Gelände.
@@ -24,13 +24,14 @@ sind nicht getestet; Lenkung nur mit Abstand zu Personen, auf eigenem Gelände.
 ☐ Autostart: Windows neu starten und anmelden → App startet von selbst im Vollbild (⛶-Knopf zeigt 🗗, ein Tipp → Fenster); Einstellungen → Apps → Autostart zeigt „LM Steering Solutions“ · #27
 ☐ Zweiter Start: App läuft (auch minimiert), Desktop-Verknüpfung doppelklicken → das laufende Fenster kommt nach vorne, keine zweite Instanz, keine Meldung · #27
 ☐ Startzeit: `%TEMP%\agopenweb-startup.log` nach dem Start öffnen → Zeiten pro Phase bis „page: loading screen off“; mit moritz.27 (vorher, ohne Protokoll: Stoppuhr vom Doppelklick bis zur Karte) vergleichen und beide Werte notieren; der Ladebildschirm „LM Steering Solutions“ erscheint sofort, kein weißes Fenster · #27
-☐ Simulator über die Feldgrenze fahren (U-Turn aus) → Lenkung geht aus und lässt sich draußen nicht halten; in diesem Stand **ohne** Hinweis (upstream behebt das mit #442, kommt mit dem nächsten Abgleich) · docs/Gesamtcheck.md
+☐ Feldgrenze überfahren (Simulator, Schlag mit Grenze, U-Turn aus, Lenkung ein) → an der Grenze geht die Lenkung aus und die Meldung „Lenkung aus – außerhalb der Schlaggrenze“ erscheint (Deutsch); erneut einschalten außerhalb → sofort wieder aus, dieselbe Meldung (upstream #442) · docs/Gesamtcheck.md
+☐ Lange Arbeit mit Teilbreiten (mind. 30 min, Simulator oder Feld): auf Lenkungsabbrüche ohne Meldung achten, die mit Rucklern der Karte beim Zeichnen der bearbeiteten Fläche zusammenfallen (Anzeige „Bediener“ springt kurz weg, Lenkung aus). Uhrzeit notieren, Diagnose-Datei sichern (Upstream-Issue 6, docs/Upstream-Issues.md)
 ☐ Simulator: Kanal „Stabil“, noch keine Update-Prüfung → App & Dateien zeigt den Simulator nur unter „Experte“, kein „SIM“-Knopf auf der Karte (Simulator aus); Kanal „Test“ oder Prüfung findet die Testversion → wie bisher sichtbar; Vorführmodus startet den Simulator wie bisher · #27
 ☐ Release-Dateien: Testversion enthält Setup, `LM-Steering-Solutions-portable-….zip` und APK; nach „Fork Stable Release“ nur noch Setup und APK · #27
 ☐ Einrichtung → Info → Aktualisierungen: Kanal „Stabil“ (Vorgabe) → nur freigegebene Versionen; „Test“ → auch Testversionen, Anzeige wechselt; anderes Gerät/Browser bleibt auf seinem Kanal · #27
 ☐ Ersteinrichtung schließen, App-Daten des Browsers löschen, neu öffnen → Ersteinrichtung kommt **nicht** wieder (Stand am Lenkrechner) · #25
 ☐ Einrichtung → Abnahmeprotokoll → „Neues Abnahmeprotokoll“: Kit-Daten zeigen Antennenmaße und Fahrzeugprofil wie eingestellt; Kunde/Traktor eintragen · #26
-☐ NTRIP-Profil bearbeiten: Passwort steht als Maske, „Verbindung testen“ mit NTRIP 1 und 2 klappt, Passwort bleibt erhalten · #20
+☐ NTRIP-Profil bearbeiten: Passwort steht als Maske, „Verbindung testen“ klappt (NTRIP 2.0, bei Bedarf selbst 1.0: upstream wählt die Version, die Auswahl im Profil gibt es nicht mehr), Passwort bleibt erhalten · #20
 
 ## 2. Am Prüfstand (Kit angeschlossen, Räder frei, niemand an den Rädern)
 Schritte der Prüfstand-Checkliste (`docs/Pruefstand-Checkliste.md`) wie bisher, dazu:
