@@ -11,5 +11,5 @@ namespace AgOpenWeb.Android;
 /// </summary>
 internal static class Brand
 {
-    public const string ProductName = "[PRODUKTNAME]";
+    public const string ProductName = "LM Steering Solutions";
 }

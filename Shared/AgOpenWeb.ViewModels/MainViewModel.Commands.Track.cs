@@ -61,10 +61,13 @@ public partial class MainViewModel
 
     /// <summary>
     /// Boundary curve from two tapped points (remote/web "Bnd. Curve"): snap A and B to the
-    /// nearest outer-boundary vertices, walk the shorter arc between them, and create an OPEN
-    /// curve following the boundary. Mirrors native FormABDraw's BtnMakeCurve segment logic.
+    /// nearest outer-boundary vertices, walk the boundary between them, and create an OPEN
+    /// curve following it. Without <paramref name="via"/> it takes the shorter way round, as
+    /// AgOpenGPS's FormABDraw BtnMakeCurve does; with it, the way round that passes nearer
+    /// that point (the operator's A → B / B → A pick, #450).
     /// </summary>
-    public void RemoteCreateBoundaryCurveSegment(double aE, double aN, double bE, double bN)
+    public void RemoteCreateBoundaryCurveSegment(double aE, double aN, double bE, double bN,
+        Models.Base.Vec2? via = null)
     {
         var boundary = State.Field.CurrentBoundary?.OuterBoundary;
         if (boundary?.Points == null || boundary.Points.Count < 3)
@@ -72,22 +75,12 @@ public partial class MainViewModel
             ReportFailure("Load a field with a boundary first");
             return;
         }
-        // Offset the boundary inward by half the tool width PLUS half the U-turn clearance so the
-        // curve sits a half-implement inside the fence AND clears the turn line (which is
-        // UTurnDistanceFromBoundary inside) with margin — following it keeps the whole implement in
-        // the field (#422) while the pass stays inside the cultivated/turn zone. Fall back to the
-        // raw boundary if the offset fails.
-        double insetDistance = ConfigStore.ActualToolWidth / 2.0
-            + ConfigStore.Guidance.UTurnDistanceFromBoundary / 2.0;
-        var rawVec2 = new System.Collections.Generic.List<Models.Base.Vec2>(boundary.Points.Count);
-        foreach (var p in boundary.Points) rawVec2.Add(new Models.Base.Vec2(p.Easting, p.Northing));
-        var offset = insetDistance > 0.05 ? _polygonOffsetService.CreateInwardOffset(rawVec2, insetDistance) : null;
-        var ring = (offset != null && offset.Count >= 3) ? offset : rawVec2;
-        // Round the corners to the U-turn radius (what the operator says the rig can turn), so
-        // the curve cuts a corner no more than the vehicle has to. Rounding by cutting each
-        // corner a share of its sides made arcs hundreds of metres across on long sides.
-        var rounded = _polygonOffsetService.RoundCorners(ring, ConfigStore.Guidance.UTurnRadius);
-        if (rounded != null && rounded.Count >= 3) ring = rounded;
+        // The fence itself between A and B, as AgOpenGPS's FormABDraw: passes lie half a width
+        // either side of it (PassGeometry), so the first one inside has the tool's edge on the
+        // fence, and the pass shown follows the tractor. A corner too tight for the rig is rounded
+        // on each pass (the U-turn radius, OffsetPassCache), not on this line (#450).
+        var ring = new System.Collections.Generic.List<Models.Base.Vec2>(boundary.Points.Count);
+        foreach (var p in boundary.Points) ring.Add(new Models.Base.Vec2(p.Easting, p.Northing));
         if (ring.Count > 3 && ring[0].Easting == ring[^1].Easting && ring[0].Northing == ring[^1].Northing)
             ring = ring.GetRange(0, ring.Count - 1); // a closing duplicate would be a zero-length side
         int n = ring.Count;
@@ -139,20 +132,38 @@ public partial class MainViewModel
             for (int i = 1; i < path.Count; i++) len += GeometryMath.Distance(path[i - 1], path[i]);
             return len;
         }
+        double Reach(System.Collections.Generic.List<Models.Base.Vec2> path, Models.Base.Vec2 p)
+        {
+            double best = double.MaxValue;
+            for (int i = 1; i < path.Count; i++)
+                best = Math.Min(best, GeometryMath.PointToSegmentDistance(p, path[i - 1], path[i]));
+            return best;
+        }
         var fwd = Walk(1); var back = Walk(-1);
-        var arc = Length(fwd) <= Length(back) ? fwd : back;
+        var arc = via is { } v
+            ? (Reach(fwd, v) <= Reach(back, v) ? fwd : back)
+            : (Length(fwd) <= Length(back) ? fwd : back);
         var seg = new System.Collections.Generic.List<Models.Base.Vec3>(arc.Count + 1);
-        foreach (var p in arc) seg.Add(new Models.Base.Vec3(p.Easting, p.Northing, 0));
+        foreach (var p in arc)
+        {
+            // A tap on a boundary vertex projects onto it, repeating that vertex: a zero-length
+            // end segment has no heading (atan2(0,0) = north), so the end ran on due north.
+            if (seg.Count > 0 && Math.Abs(seg[^1].Easting - p.Easting) < 0.01 && Math.Abs(seg[^1].Northing - p.Northing) < 0.01)
+                continue;
+            seg.Add(new Models.Base.Vec3(p.Easting, p.Northing, 0));
+        }
         if (seg.Count == 2) // both taps on one side: a straight run, still a curve track
             seg.Insert(1, new Models.Base.Vec3((seg[0].Easting + seg[1].Easting) / 2, (seg[0].Northing + seg[1].Northing) / 2, 0));
 
-        // Heading per point (guidance's forward test keys off it).
-        var headed = Models.Guidance.CurveProcessing.CalculateHeadings(seg);
+        // A point every metre or so, as the fence line has in AgOpenGPS, with a heading per point
+        // (guidance's forward test keys off it): the inner passes are offset point by point, and
+        // along a bare side they cut across the corner (#450).
+        var headed = Models.Guidance.CurveProcessing.Densify(seg, Models.Guidance.CurveProcessing.FenceSpacing(boundary.AreaSquareMeters));
         // Extend both ends past the field boundary along their tangents — exactly like the
         // hand-drawn curve tool (ExtendCurvePastBoundary) and an AB line. Without this the curve
         // stops inside the field and the U-turn generator has no boundary crossing to anchor the
         // turn at each pass end; with it, the ends run past the fence and turns fire normally.
-        var curvePoints = ExtendCurvePastBoundary(headed);
+        var curvePoints = ExtendCurvePastBoundary(headed, keepEndsApart: true);
         var track = new Models.Track.Track
         {
             Name = "Boundary Curve",
@@ -160,18 +171,17 @@ public partial class MainViewModel
             Type = Models.Track.TrackType.Curve,
             IsVisible = true,
             IsClosed = false,
-            // Drive the boundary itself: this curve isn't worked in parallel passes, so the
-            // guidance follows it directly (pass 0) instead of free-drive snapping to an inner pass.
-            NoPassOffset = true
         };
         SavedTracks.Add(track);
         SelectedTrack = track;
         SaveTracksToFile();
-        StatusMessage = $"Created boundary curve ({curvePoints.Count} points, {insetDistance:F1} m inside fence)";
+        StatusMessage = $"Created boundary curve ({curvePoints.Count} points)";
     }
 
     private void InitializeTrackCommands()
     {
+        InitializeRefNudgeCommands();
+
         // AB Line Guidance Commands - Bottom Bar
         SnapLeftCommand = new RelayCommand(() =>
         {
@@ -182,7 +192,7 @@ public partial class MainViewModel
                 return;
             }
             _intents.RequestGuidanceSnap(left: true);
-            StatusMessage = "Snapped left";
+            StatusMessage = "Moved one pass left";
         });
 
         SnapRightCommand = new RelayCommand(() =>
@@ -194,7 +204,7 @@ public partial class MainViewModel
                 return;
             }
             _intents.RequestGuidanceSnap(left: false);
-            StatusMessage = "Snapped right";
+            StatusMessage = "Moved one pass right";
         });
 
         StopGuidanceCommand = new RelayCommand(() =>
@@ -347,9 +357,19 @@ public partial class MainViewModel
             StatusMessage = ABCreationInstructions;
         });
 
+        // A water pivot: drive part of the way round it, recording like a curve; Finish fits the
+        // circle (AgOpenGPS adds three points by hand and fits a circle through them).
+        StartPivotRecordingCommand = new RelayCommand(() =>
+        {
+            StartCurveRecordingCommand!.Execute(null);
+            _recordingPivot = true;
+            StatusMessage = "Pivot: drive part of the way round it, then Finish";
+        });
+
         StartCurveRecordingCommand = new RelayCommand(() =>
         {
             State.UI.CloseDialog();
+            _recordingPivot = false;
             CurrentABCreationMode = ABCreationMode.Curve;
             _recordedCurvePoints.Clear();
             _lastCurvePoint = null;
@@ -380,10 +400,33 @@ public partial class MainViewModel
                 return;
             }
 
+            // The curve runs to where B was pressed, not to the last point recorded up to a metre
+            // before it (AgOpenGPS records every fix, so its last point is the B press).
+            var v = State.Vehicle;
+            if ((v.Easting != 0 || v.Northing != 0) && _recordedCurvePoints.Count > 0)
+            {
+                var lastRec = _recordedCurvePoints[^1];
+                if (Math.Sqrt(Math.Pow(v.Easting - lastRec.Easting, 2) + Math.Pow(v.Northing - lastRec.Northing, 2)) >= 0.3)
+                    _recordedCurvePoints.Add(new Vec3(v.Easting, v.Northing, v.Heading * Math.PI / 180.0));
+            }
+
             // Need at least 3 points for a valid curve
             if (_recordedCurvePoints.Count < 3)
             {
                 ReportFailure($"Need at least 3 points for a curve (have {_recordedCurvePoints.Count})");
+                return;
+            }
+
+            if (_recordingPivot)
+            {
+                AddPivotFromRecording(); // reports a failure; the recording ends either way, as the map's does
+                _mapService.ClearRecordingPoints();
+                _recordingPivot = false;
+                CurrentABCreationMode = ABCreationMode.None;
+                _recordedCurvePoints.Clear();
+                _lastCurvePoint = null;
+                OnPropertyChanged(nameof(IsRecordingCurve));
+                OnPropertyChanged(nameof(RecordedCurvePointCount));
                 return;
             }
 
@@ -393,9 +436,15 @@ public partial class MainViewModel
                 existingTrack.IsActive = false;
             }
 
+            // As AgOpenGPS finishes a driven curve: gaps over 1.6 m filled (a GPS dropout), then a
+            // moving average over a few points takes the steering wobble out (SmoothAB(4); centred
+            // here, where AgOpenGPS's window sits a point behind and shifts the curve back).
+            var driven = Models.Guidance.CurveProcessing.SmoothMovingAverage(
+                Models.Guidance.CurveProcessing.Densify(_recordedCurvePoints, 1.6), 2);
+
             // A driven curve is a pass: move the reference to the implement's edge (#345)
             var refPoints = Models.Guidance.CurveProcessing.CreateOffsetCurve(
-                Models.Guidance.CurveProcessing.CalculateHeadings(new List<Vec3>(_recordedCurvePoints)), RefSideOffset());
+                Models.Guidance.CurveProcessing.CalculateHeadings(driven), RefSideOffset());
 
             // Extend curve ends past boundary for U-turn detection
             var extendedPoints = ExtendCurvePastBoundary(refPoints);
@@ -470,8 +519,19 @@ public partial class MainViewModel
 
             Track newTrack;
 
+            // Two taps in a row on the fence: the curve follows the fence between them, the shorter
+            // way round, as AgOpenGPS's FormABDraw makes a curve from two picks on the boundary.
+            // Elsewhere it is a smooth curve through the taps (the map snaps a tap near the fence onto it).
+            var alongFence = FollowFence(_drawnCurvePoints);
+            if (alongFence != null)
+            {
+                var fencePoints = Models.Guidance.CurveProcessing.CalculateHeadings(
+                    Models.Guidance.CurveProcessing.SmoothLongSegments(alongFence));
+                newTrack = Track.FromCurve($"DrawnCurve {DateTime.Now:HH:mm:ss}", ExtendCurvePastBoundary(fencePoints), isClosed: false);
+                StatusMessage = $"Created curve along the boundary: {newTrack.Name}";
+            }
             // If only 2 points, create a straight AB line
-            if (_drawnCurvePoints.Count == 2)
+            else if (_drawnCurvePoints.Count == 2)
             {
                 var (extendedA, extendedB) = ExtendABLinePastBoundary(_drawnCurvePoints[0], _drawnCurvePoints[1]);
                 newTrack = Track.FromABLine(
@@ -976,7 +1036,9 @@ public partial class MainViewModel
         ManualYouTurnRightCommand = new RelayCommand(TriggerManualYouTurnRight);
         ToggleUTurnDirectionCommand = new RelayCommand(ToggleUTurnDirection);
 
-        ToggleAutoSteerCommand = new RelayCommand(() =>
+        // The parameter says what toggled it, for the log: null is the operator (the screen
+        // button or its hotkey); the module's steer switch, kickouts and guards pass a reason.
+        ToggleAutoSteerCommand = new RelayCommand<string?>(source =>
         {
             // Disengage is always allowed — the user must be able to stop the
             // tractor even after the track/field has been cleared. Engagement
@@ -1003,6 +1065,10 @@ public partial class MainViewModel
             //    GpsPipelineService.GetOrComputeSyntheticHeadland.
 
             IsAutoSteerEngaged = !IsAutoSteerEngaged;
+            if (IsAutoSteerEngaged)
+                _logger.LogInformation("[AutoSteer] On: {Source}", source ?? "AutoSteer button");
+            else
+                LogAutoSteerOff(source ?? "AutoSteer button");
             _audioService.Play(IsAutoSteerEngaged
                 ? Services.Interfaces.SoundEffect.AutoSteerOn
                 : Services.Interfaces.SoundEffect.AutoSteerOff);
@@ -1029,7 +1095,7 @@ public partial class MainViewModel
             IsContourModeOn = !IsContourModeOn;
             if (!IsContourModeOn && IsAutoSteerEngaged)
             {
-                ToggleAutoSteerCommand?.Execute(null);
+                ToggleAutoSteerCommand?.Execute("contour mode turned off");
                 ReportFailure("Guidance stopped - contour off");
                 return;
             }
@@ -1103,7 +1169,6 @@ public partial class MainViewModel
                 };
             }
 
-            ConfigStore.Guidance.TramDisplay = tram.DisplayMode != Models.Configuration.TramDisplayMode.Off;
             UpdateTramLines(SelectedTrack);
             OnPropertyChanged(nameof(TramDisplayLabel));
             StatusMessage = tram.DisplayMode switch
@@ -1129,7 +1194,6 @@ public partial class MainViewModel
             }
 
             ConfigStore.Tram.DisplayMode = Models.Configuration.TramDisplayMode.All;
-            ConfigStore.Guidance.TramDisplay = true;
             UpdateTramLines(SelectedTrack);
             OnPropertyChanged(nameof(TramDisplayLabel));
             StatusMessage = ConfigStore.Tram.Systems.Count > 0
@@ -1174,7 +1238,6 @@ public partial class MainViewModel
         void SetTramMode(Models.Configuration.TramDisplayMode mode)
         {
             ConfigStore.Tram.DisplayMode = mode;
-            ConfigStore.Guidance.TramDisplay = mode != Models.Configuration.TramDisplayMode.Off;
             UpdateTramLines(SelectedTrack);
             OnPropertyChanged(nameof(TramDisplayLabel));
         }
@@ -1368,19 +1431,16 @@ public partial class MainViewModel
 
             // The fence itself is the reference line, as in AgOpenGPS: passes lie half a
             // width either side of it (PassGeometry), so the one inside the field keeps the
-            // whole implement in (#422) and the nearest-pass pick takes it.
-            var curvePoints = new System.Collections.Generic.List<Models.Base.Vec3>(pts.Count + 1);
+            // whole implement in (#422) and the nearest-pass pick takes it. It gets a point
+            // every metre or so, as AgOpenGPS's fence line has, so inward passes round off
+            // their corners instead of keeping them sharp and skewed (#450). The loop is
+            // closed (last point = first) and the headings are recomputed in the curve-segment
+            // convention (atan2(dEast,dNorth)): guidance's "which way is forward" test keys
+            // off them, and the boundary's stored heading made it random (#422).
+            var ring = new System.Collections.Generic.List<Models.Base.Vec3>(pts.Count);
             for (int i = 0; i < pts.Count; i++)
-                curvePoints.Add(new Models.Base.Vec3(pts[i].Easting, pts[i].Northing, 0));
-            // Close the loop
-            curvePoints.Add(new Models.Base.Vec3(pts[0].Easting, pts[0].Northing, 0));
-
-            // Recompute per-point headings in the curve-segment convention
-            // (atan2(dEast,dNorth)). Guidance's "which way is forward" test keys
-            // entirely off these headings; copying the boundary's stored heading
-            // (often 0 or a different convention) made the direction decision
-            // random and the vehicle spin/reverse on the curve (#422).
-            curvePoints = Models.Guidance.CurveProcessing.CalculateHeadings(curvePoints);
+                ring.Add(new Models.Base.Vec3(pts[i].Easting, pts[i].Northing, 0));
+            var curvePoints = Models.Guidance.CurveProcessing.DensifyLoop(ring);
 
             var track = new Models.Track.Track
             {
@@ -1532,8 +1592,11 @@ public partial class MainViewModel
     /// </summary>
     /// <param name="points">Original curve points</param>
     /// <param name="marginMeters">How far past the boundary to extend (default 20m)</param>
+    /// <param name="keepEndsApart">An end heading towards the other end stops short of halfway
+    /// across the gap between them, so they don't overlap: a boundary curve the long way round
+    /// has both ends on the fence, facing each other across what it leaves out (#450).</param>
     /// <returns>New list with extended endpoints</returns>
-    private List<Vec3> ExtendCurvePastBoundary(List<Vec3> points, double marginMeters = 20.0)
+    private List<Vec3> ExtendCurvePastBoundary(List<Vec3> points, double marginMeters = 20.0, bool keepEndsApart = false)
     {
         if (points.Count < 2)
         {
@@ -1608,6 +1671,17 @@ public partial class MainViewModel
                 if (t > 0 && u >= 0 && u <= 1)
                     extendEnd = Math.Max(extendEnd, t + marginMeters);
             }
+        }
+
+        if (keepEndsApart)
+        {
+            double gapE = lastPoint.Easting - firstPoint.Easting, gapN = lastPoint.Northing - firstPoint.Northing;
+            double cap = Math.Max(1.0, Math.Sqrt(gapE * gapE + gapN * gapN) / 2 - 1.0);
+            // The start extends backwards (−heading), the end forwards (+heading).
+            if (-Math.Sin(startHeading) * gapE - Math.Cos(startHeading) * gapN > 0)
+                extendStart = Math.Min(extendStart, cap);
+            if (-Math.Sin(endHeading) * gapE - Math.Cos(endHeading) * gapN > 0)
+                extendEnd = Math.Min(extendEnd, cap);
         }
 
         // Create extended start point
@@ -1694,7 +1768,7 @@ public partial class MainViewModel
         for (int i = 1; i <= count; i++)
         {
             var t = SavedTracks[((start + step * i) % count + count) % count];
-            if (t.IsVisible) { next = t; break; }
+            if (t.IsVisible && t.IsGuidanceTrack) { next = t; break; }
         }
         if (next == null || ReferenceEquals(next, SelectedTrack)) return;
 
@@ -1703,6 +1777,7 @@ public partial class MainViewModel
             IsAutoSteerEngaged = false;
             _autoSteerService.Disengage();
             _audioService.Play(Services.Interfaces.SoundEffect.AutoSteerOff);
+            LogAutoSteerOff("track changed");
             ReportFailure("Guidance stopped: track changed");
         }
         if (IsYouTurnEnabled) IsYouTurnEnabled = false;
@@ -1757,6 +1832,84 @@ public partial class MainViewModel
     /// AB line from typed coordinates (AgOpenGPS Build Tracks "Lat/Lon + Heading"): A at
     /// the given point, along <paramref name="headingDeg"/> (degrees true) (#335).
     /// </summary>
+    private bool _recordingPivot;
+
+    /// <summary>
+    /// The drawn points with the fence between each two in a row that lie on it (within a
+    /// centimetre: the map snaps a tap near the fence onto it), or null when no two do.
+    /// </summary>
+    private System.Collections.Generic.List<Vec3>? FollowFence(System.Collections.Generic.IReadOnlyList<Vec3> taps)
+    {
+        var fence = State.Field.CurrentBoundary?.OuterBoundary?.Points;
+        if (fence == null || fence.Count < 3 || taps.Count < 2) return null;
+        var ring = fence.Select(p => new Models.Base.Vec2(p.Easting, p.Northing)).ToList();
+        bool OnFence(Vec3 p) => Models.Guidance.FencePath.Project(ring, new Models.Base.Vec2(p.Easting, p.Northing)).Distance < 0.01;
+
+        var path = new System.Collections.Generic.List<Vec3> { taps[0] };
+        bool any = false;
+        for (int i = 0; i + 1 < taps.Count; i++)
+        {
+            if (OnFence(taps[i]) && OnFence(taps[i + 1]))
+            {
+                var run = Models.Guidance.FencePath.ShorterRun(ring,
+                    new Models.Base.Vec2(taps[i].Easting, taps[i].Northing), new Models.Base.Vec2(taps[i + 1].Easting, taps[i + 1].Northing));
+                path.AddRange(run.Skip(1));
+                any = true;
+            }
+            else path.Add(taps[i + 1]);
+        }
+        return any ? path : null;
+    }
+
+    // Width of a pass (width − overlap), for a pivot's reference circle.
+    private double PassWidth => Math.Max(ConfigStore.ActualToolWidth - ConfigStore.Tool.Overlap, 0.1);
+
+    /// <summary>
+    /// The pivot through the recorded points: the circle that fits them, with a pass where the
+    /// tractor drove (its reference half a width outside, like a driven line's). Refuses points
+    /// that are not on a circle or one too small or too big to be a pivot.
+    /// </summary>
+    private bool AddPivotFromRecording()
+    {
+        var fit = Models.Guidance.CurveProcessing.FitCircle(_recordedCurvePoints);
+        if (fit is not { } c || c.Radius < 5 || c.Radius > 2000)
+        {
+            ReportFailure("Drive further round the pivot: the points don't make a circle yet");
+            return false;
+        }
+        if (c.Rms > Math.Max(1.0, 0.02 * c.Radius))
+        {
+            ReportFailure($"The driven points are not on a circle (they stray {c.Rms:F1} m from it)");
+            return false;
+        }
+        AddPivot(c.Center, c.Radius + PassWidth / 2);
+        return true;
+    }
+
+    /// <summary>
+    /// A water pivot from its centre typed in (AgOpenGPS Build Tracks "Pivot" lat/lon). A pass runs
+    /// where the tractor is, as for a driven line; standing at the centre, the passes are AgOpenGPS's,
+    /// half a width and then a whole width apart from the centre.
+    /// </summary>
+    public void CreateLatLonPivot(double lat, double lon)
+    {
+        State.UI.CloseDialog();
+        if (!TryLatLonToLocal(lat, lon, out var c)) return;
+        var v = State.Vehicle;
+        double here = Math.Sqrt(Math.Pow(v.Easting - c.Easting, 2) + Math.Pow(v.Northing - c.Northing, 2));
+        AddPivot(new Vec3(c.Easting, c.Northing, 0), here > PassWidth / 2 ? here + PassWidth / 2 : PassWidth);
+    }
+
+    private void AddPivot(Vec3 center, double referenceRadius)
+    {
+        foreach (var t in SavedTracks) t.IsActive = false;
+        var track = Track.FromPivot($"Pivot {DateTime.Now:HH:mm}", center, referenceRadius);
+        SavedTracks.Add(track);
+        SaveTracksToFile(); // before selecting: the previous track's pass and nudge stay its own
+        SelectedTrack = track;
+        StatusMessage = $"Created pivot: centre {center.Easting:F1}, {center.Northing:F1}, passes {PassWidth:F1} m apart";
+    }
+
     public void CreateLatLonHeadingLine(double lat, double lon, double headingDeg)
     {
         State.UI.CloseDialog();

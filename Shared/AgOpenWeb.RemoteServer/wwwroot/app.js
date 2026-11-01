@@ -15,20 +15,37 @@ const ckcv = document.getElementById('ck'); // CanvasKit (Skia) — the sole ren
 // retina) — otherwise thin strokes look faint and shimmer when panning. All draw
 // code works in these logical coordinates; the Skia canvas applies scale(dpr) per frame.
 let vw = innerWidth, vh = innerHeight, dpr = 1;
+// The map's area in the window: the card pane (CardPane, split layout) takes mapL screen pixels
+// on the left or mapR on the right, else both are 0 and the map is the whole window. The canvas
+// covers the map only; pointer events arrive in window pixels, so map code takes x - mapL.
+let mapL = 0, mapR = 0;
 // Skia/CanvasKit renderer state — declared before resize() (which calls
 // recreateSkSurface) to avoid a temporal-dead-zone ReferenceError.
 let CK = null, skSurface = null, skTri = null, SKP = null;
 let grCtx = null; // WebGL GrDirectContext — hoisted so the coverage render target shares it
 function resize() {
   dpr = Math.min(window.devicePixelRatio || 1, 2); // cap: 3× phones don't need 9× fill
-  vw = innerWidth; vh = innerHeight;
+  vw = Math.max(1, innerWidth - mapL - mapR); vh = innerHeight;
   ckcv.width = Math.round(vw * dpr);
   ckcv.height = Math.round(vh * dpr);
+  ckcv.style.left = mapL + 'px';
   ckcv.style.width = vw + 'px';
   ckcv.style.height = vh + 'px';
   recreateSkSurface(); // the GL surface is tied to the canvas size
 }
 addEventListener('resize', resize); resize();
+// Give the map the window less the card pane (screen pixels each side). The overlays follow
+// through --map-l / --map-r, in their zoomed pixels.
+function setMapArea(l, r) {
+  l = Math.max(0, Math.round(l)); r = Math.max(0, Math.round(r));
+  if (l === mapL && r === mapR) return;
+  mapL = l; mapR = r;
+  const root = document.documentElement.style;
+  root.setProperty('--map-l', (l / uiZoom) + 'px');
+  root.setProperty('--map-r', (r / uiZoom) + 'px');
+  resize();
+  dispatchEvent(new Event('maparea'));
+}
 
 // ---- model (fed by the transport) ----
 let scene = null;      // SceneDto
@@ -76,6 +93,7 @@ let mapIsDay = false;  // day/night theme (mirrors config.display.isDayMode) —
 let profiles = null;   // Vehicle & Tool picker hub: profile lists + active pair
 let profilesDirty = false;
 let ntripProfiles = null; // Network IO: saved NTRIP profiles + associable fields
+let ntripMounts = { seq: 0, forService: '', status: '', items: [] }; // the mount points last asked for in the profile editor
 let ntripDirty = false;
 let fieldOps = null;   // Field Operations: field list + jobs + suggestions + import files
 let fieldOpsDirty = false;
@@ -331,6 +349,7 @@ const transport = RemoteTransport.create({
     } else {
       imageryRect = null; imageryImg = null; imageryVer = null;
     }
+    if (saPanel.classList.contains('open')) populateScreenAlerts(); // Aerial Imagery follows the field
     // Keep the Tracks manager list live (activate/add/delete/hide change the Scene).
     if (document.getElementById('dlg-tracks').classList.contains('open')) renderTracksList();
     if (document.getElementById('fieldbuilder').classList.contains('open') && fbTab === 'tracks'
@@ -425,6 +444,7 @@ const transport = RemoteTransport.create({
   onConfig(c) { config = c; configDirty = true; applyTheme(c && c.display && c.display.isDayMode); applyUiScale(c && c.display && c.display.uiScale); },
   onProfiles(p) { profiles = p; profilesDirty = true; },
   onNtripProfiles(p) { ntripProfiles = p; ntripDirty = true; },
+  onNtripMountpoints(m) { ntripMounts = m; renderNtripMounts(); },
   onFieldOps(f) { fieldOps = f; fieldOpsDirty = true; },
   onAgShare(a) { agShare = a; agShareDirty = true; },
   onAppInfo(a) { appInfo = a; appInfoDirty = true; I18n.setLanguage(a.currentLanguage); },
@@ -436,8 +456,9 @@ const transport = RemoteTransport.create({
     if (document.getElementById('boundaryplayer').classList.contains('open')) renderBoundaryPlayer();
   },
   onWizard(w) { wizard = w; wizardDirty = true; },
-  onHello(id) { myClientId = id; updateControlUi(); claimSeatIfFree(); Vt.render(); },
-  onControlState(s) { lastControl = s; updateControlUi(); claimSeatIfFree(); Vt.render(); },
+  onHello(id) { myClientId = id; updateControlUi(); claimSeatIfFree(); Vt.render(); WebCards.render(); },
+  onControlState(s) { lastControl = s; updateControlUi(); claimSeatIfFree(); Vt.render(); WebCards.render(); },
+  onWebCards(list) { WebCards.setBookmarks(list); },
   onSound(id) { Sounds.play(id); },
   onPrompt(p) { hostPrompt = p; renderHostPrompt(); },
   onToast(msg) { showToast(msg); },
@@ -661,6 +682,26 @@ function applyMobileQualityCap() {
   transport.send('display.capResolution|2.5'); // 2.5 = Medium
 }
 
+// The largest texture this browser's GPU holds (often 4096 on tablets). The host keeps the
+// coverage grid within it, so coverage always fits one GPU render target; a bigger grid
+// falls back to a 2D canvas that is copied whole several times over and can get a tablet's
+// web view killed for memory. Read from CanvasKit's own context once it exists; sent once.
+let maxTextureSide = 0;
+let maxTextureSent = false;
+function readMaxTextureSide() {
+  try {
+    // The context CanvasKit made: asking for the same type returns it, not a new one.
+    const gl = ckcv.getContext('webgl2') || ckcv.getContext('webgl');
+    if (!gl) return 0;
+    return Math.min(gl.getParameter(gl.MAX_TEXTURE_SIZE), gl.getParameter(gl.MAX_RENDERBUFFER_SIZE)) | 0;
+  } catch (e) { return 0; }
+}
+function reportMaxTexture() {
+  if (maxTextureSent || !iHoldControl || maxTextureSide <= 0) return;
+  maxTextureSent = true;
+  transport.send('display.maxTexture|' + maxTextureSide);
+}
+
 // An observer (a browser without control) sees everything and changes nothing (#397): the
 // host drops its commands, so say why when a tap of its own was refused. The host's
 // ObserverIds plus the hub's own control.* / diag.ping are what it may send.
@@ -701,6 +742,11 @@ function recreateSkSurface() {
   if (!grCtx) {
     const ctxHandle = CK.GetWebGLContext(ckcv);
     if (ctxHandle) grCtx = CK.MakeWebGLContext(ctxHandle);
+    if (grCtx) {
+      maxTextureSide = readMaxTextureSide();
+      reportMaxTexture();
+      upgradeCovToGpu(); // a grid built before the GPU context existed moves onto it
+    }
   }
   if (grCtx) skSurface = CK.MakeOnScreenGLSurface(grCtx, ckcv.width, ckcv.height, null);
   if (!skSurface) skSurface = CK.MakeWebGLCanvasSurface(ckcv);
@@ -712,15 +758,14 @@ function ckColor(s) {
   return CK.Color(m[0], m[1], m[2], m.length > 3 ? m[3] : 1);
 }
 // Day/Night theme. CSS chrome flips via [data-theme]; the Skia map (clear + grid) is
-// recoloured here. Grid greys read on dark; dark-blue greys read on the light day field.
+// recoloured here. Grid greys read on dark; dark-blue greys read on the light day field. One grid
+// colour: every line looks the same, as in AgOpenGPS (#496).
 const MAP_CLEAR = { night: '#0f1115', day: '#d7dee7' };
 const GRID_MINOR = { night: 'rgba(180,180,180,0.314)', day: 'rgba(80,92,110,0.33)' };
-const GRID_MAJOR = { night: 'rgba(200,200,200,0.47)', day: 'rgba(60,72,90,0.5)' };
 function applyMapTheme() {
   if (!CK || !SKP) return; // paints not built yet — buildSkPaints() re-applies on init
   const k = mapIsDay ? 'day' : 'night';
   SKP.gridMinor.setColor(ckColor(GRID_MINOR[k]));
-  SKP.gridMajor.setColor(ckColor(GRID_MAJOR[k]));
 }
 // UI size (Screen & Alerts): the controls are zoomed by CSS (--ui-zoom), the map is not.
 // Anything that turns screen pixels into a zoomed element's left/top divides by uiZoom.
@@ -735,8 +780,12 @@ function applyUiScale(pct) {
   if (z === uiZoom) return;
   uiZoom = z;
   document.documentElement.style.setProperty('--ui-zoom', String(z));
+  document.documentElement.style.setProperty('--map-l', (mapL / z) + 'px');
+  document.documentElement.style.setProperty('--map-r', (mapR / z) + 'px');
   calibrateZoom();
   placeCorner();
+  placeHud();
+  dispatchEvent(new Event('uizoom'));
 }
 function calibrateZoom() {
   const root = document.documentElement.style;
@@ -798,6 +847,54 @@ if (window.ResizeObserver) {
   ro.observe(document.getElementById('bottomstack'));
 }
 addEventListener('resize', placeCorner);
+addEventListener('maparea', placeCorner);
+// Menu panels open beside the left nav and may cover the card pane (Plans/CARD_PANE_SPLIT_PLAN.md
+// §1.8). With the pane on the left the nav sits far to the right, so a panel too wide for the
+// rest of the window is moved left until it fits; a panel opening grows from 0, which the
+// observer sees.
+function placePanel(p) {
+  p.style.left = ''; p.classList.remove('ln-moved');
+  if (!mapL || !p.classList.contains('open')) return;
+  const r = zoomRect(p), over = r.right - (innerWidth - 16);
+  if (over > 0) { p.style.left = Math.max(16, r.left - over) / uiZoom + 'px'; p.classList.add('ln-moved'); }
+}
+if (window.ResizeObserver) {
+  const ro = new ResizeObserver(es => { for (const e of es) placePanel(e.target); });
+  for (const p of document.querySelectorAll('.ln-panel')) ro.observe(p);
+  addEventListener('maparea', () => { for (const p of document.querySelectorAll('.ln-panel.open')) placePanel(p); });
+}
+// Top-centre HUD (#hud-top) and everything docked under the status bar hang from the bar's
+// measured bottom (--bar-bottom): the dev diagnostics row adds 26 px, the UI size zooms the
+// bar, iOS adds the safe area. The HUD scales with the screen height, roughly as AgOpenGPS
+// sizes its light-bar and track text: ×1 up to 540 px, ×1.33 on a 720p screen, at most ×2.
+// The map canvas isn't zoomed, so the light bar's cells (drawn on it) take hudK, the HUD
+// scale times the UI zoom, to match the readout beside them.
+let hudScale = 0, hudBarBottom = -1, hudK = 1;
+function placeHud() {
+  const root = document.documentElement.style;
+  const s = Math.min(2, Math.max(1, innerHeight / 540));
+  if (s !== hudScale) { hudScale = s; root.setProperty('--hud-s', s.toFixed(3)); }
+  hudK = hudScale * uiZoom;
+  let bottom = 0;
+  for (const id of ['statusbar', 'sb-diag']) {
+    const el = document.getElementById(id);
+    if (el) bottom = Math.max(bottom, zoomRect(el).bottom);
+  }
+  if (bottom !== hudBarBottom) {
+    hudBarBottom = bottom;
+    // No bar on screen (not connected yet): keep the CSS default, the bar's usual place.
+    if (bottom > 0) root.setProperty('--bar-bottom', (bottom / uiZoom).toFixed(2) + 'px');
+    else root.removeProperty('--bar-bottom');
+  }
+}
+if (window.ResizeObserver) {
+  const ro = new ResizeObserver(placeHud);
+  ro.observe(document.getElementById('statusbar'));
+  ro.observe(document.getElementById('sb-diag'));
+}
+addEventListener('resize', placeHud);
+addEventListener('maparea', placeHud);
+placeHud();
 function applyTheme(isDay) {
   mapIsDay = !!isDay;
   document.documentElement.setAttribute('data-theme', mapIsDay ? 'day' : 'night');
@@ -821,13 +918,12 @@ function buildSkPaints() {
     // updateLineWidths() (world metres × pxPerM, like native's world-space strokes).
     boundary: mk('rgba(242,112,89,0.8)', 5), boundaryInner: mk('rgb(245,245,77)', 5), headland: mk('rgb(251,235,107)', 4),
     track: mk('#ffd24a', 4), reference: mk('rgb(180,100,255)', 5, [9, 7]),
-    guidance: mk('rgb(252,86,186)', 5), uturn: mk('rgb(77,242,77)', 5), next: mk('rgb(0,200,200)', 4),
+    guidance: mk('rgb(252,86,186)', 5), guidanceOutline: mk('rgb(0,0,0)', 15), uturn: mk('rgb(77,242,77)', 5), next: mk('rgb(0,200,200)', 4),
     // Extra guidelines (adjacent passes) — native _extraGuidePaint green(51,153,50,153)
     // over a black shadow, both 0.3 m. Widths set per frame in updateLineWidths.
     extraGuide: mk('rgba(51,153,50,0.6)', 1), extraGuideShadow: mk('rgba(0,0,0,0.5)', 1),
-    // Match native (night-mode) grid: grey, ~0.31/0.47 alpha, major ~2× thickness.
-    gridMinor: mk('rgba(180,180,180,0.314)', 1), gridMajor: mk('rgba(200,200,200,0.47)', 2),
-    axisX: mk('rgba(204,51,51,0.275)', 1.5), axisY: mk('rgba(51,204,51,0.275)', 1.5),
+    // Grid: grey, ~0.31 alpha, one line style (#496); its width is set per frame in drawGridSk.
+    gridMinor: mk('rgba(180,180,180,0.314)', 1),
     vehicle: fill('#39FF6A'),
     flagFill: fill('#FF0000'), flagOutline: mk('#101010', 1.5), // colour set per flag
     // Field Builder headland-editor offset lines: yellow = contributes to the closed
@@ -835,6 +931,9 @@ function buildSkPaints() {
     hlEdit: mk('rgba(245,235,90,0.95)', 3), hlEditOff: mk('rgba(232,86,74,0.95)', 3),
     // Tram lines (wheel tracks) — orange, set per frame in drawTramLinesSk.
     tram: mk('rgba(255,140,60,0.9)', 2),
+    // AgOpenGPS's shadow on the current line: where the tool will land. Lighter than its 20 %
+    // grey (shadowAreaGray), with clear edges, so it reads over the aerial image.
+    toolBand: fill('rgba(220,220,220,0.3)'), toolBandEdge: mk('rgba(240,240,240,0.75)', 1.5),
     // Saved recorded paths / contour strips — AgOpenGPS's pale-yellow lines (#110).
     recPath: mk('rgb(250,235,117)', 2), contourStrip: mk('rgb(250,235,107)', 2),
   };
@@ -859,6 +958,14 @@ function buildSkPaints() {
   SKP.lbFill = new CK.Paint();
   SKP.lbFill.setStyle(CK.PaintStyle.Fill);
   SKP.lbFill.setAntiAlias(false);
+  // Steer bar (steerBarSk): its bar and arrows, outlined in black.
+  SKP.sbFill = new CK.Paint();
+  SKP.sbFill.setStyle(CK.PaintStyle.Fill);
+  SKP.sbFill.setAntiAlias(true);
+  SKP.sbLine = new CK.Paint();
+  SKP.sbLine.setStyle(CK.PaintStyle.Stroke);
+  SKP.sbLine.setAntiAlias(true);
+  SKP.sbLine.setStrokeJoin(CK.StrokeJoin.Miter);
   // Vehicle triangle in marker-local px (drawn under canvas translate+rotate).
   skTri = CK.Path.MakeFromSVGString('M 0 -14 L 9 11 L -9 11 Z');
   applyMapTheme(); // sync grid colours if the theme arrived before paints were built
@@ -916,6 +1023,34 @@ addEventListener('touchend', e => {
   _lastTapEnd = now;
 }, { passive: false });
 
+// #465: some Linux touch stacks follow a finger tap with an emulated mouse press when the
+// finger lifts. The UI acts on pointerdown, so that second press shut the menu the finger had
+// just opened (a stylus sends one press, and a second finger cancels the emulation). Drop it,
+// before any other handler sees it: a mouse press right after a touch ended near the same
+// spot, and a second press from a pointer that is already down (a real one never does that).
+const GHOST_PRESS_MS = 800, GHOST_PRESS_PX = 30;
+let _touchEnd = null;
+const _pointersDown = new Set();
+function noteTouchEnd(t, x, y) { _touchEnd = { t, x, y }; }
+addEventListener('pointerup', e => {
+  _pointersDown.delete(e.pointerId);
+  if (e.pointerType === 'touch') noteTouchEnd(e.timeStamp, e.clientX, e.clientY);
+}, true);
+addEventListener('pointercancel', e => _pointersDown.delete(e.pointerId), true);
+addEventListener('blur', () => _pointersDown.clear()); // a release we never saw
+addEventListener('touchend', e => {
+  const t = e.changedTouches[0];
+  if (t) noteTouchEnd(e.timeStamp, t.clientX, t.clientY);
+}, true);
+addEventListener('pointerdown', e => {
+  // Forget a pointer once it is caught pressing twice, so a lost release costs one press at most.
+  const ghost = _pointersDown.delete(e.pointerId) || (e.pointerType === 'mouse' && _touchEnd
+    && e.timeStamp - _touchEnd.t < GHOST_PRESS_MS
+    && Math.hypot(e.clientX - _touchEnd.x, e.clientY - _touchEnd.y) < GHOST_PRESS_PX);
+  if (ghost) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+  _pointersDown.add(e.pointerId);
+}, true);
+
 // A tap on the vehicle resets its direction, as in AgOpenGPS: the heading is learned again
 // from the next forward travel. It is the way out when the first heading was taken while
 // backing, after which (with an IMU) forward travel reads as reverse.
@@ -944,7 +1079,7 @@ let dragging = false, moved = false, gestureOnMap = false, lastX = 0, lastY = 0,
 addEventListener('pointerdown', e => {
   // Stage-4 edit: grab a handle if the press starts on one (else fall through to pan).
   if (editSession) {
-    const hi = editHitTest(e.clientX, e.clientY);
+    const hi = editHitTest(e.clientX - mapL, e.clientY);
     if (hi >= 0) { editDragIdx = hi; gestureOnMap = false; dragging = false; return; }
   }
   gestureOnMap = true; dragging = true; moved = false;
@@ -958,10 +1093,10 @@ addEventListener('pointerup', e => {
   dragging = false;
   // A clean tap while a map-tap capture mode is armed → unproject and dispatch.
   if (gestureOnMap && !moved && mapTap) {
-    const w = s2w(e.clientX, e.clientY);
+    const w = s2w(e.clientX - mapL, e.clientY);
     if (w) mapTap.onTap(w.e, w.n);
   } else if (gestureOnMap && !moved && !editSession) {
-    vehicleTap(e.clientX, e.clientY);
+    vehicleTap(e.clientX - mapL, e.clientY);
   }
   gestureOnMap = false;
 });
@@ -976,7 +1111,7 @@ addEventListener('pointermove', e => {
     else if (abLabelEl) abLabelEl.classList.remove('show');
   }
   if (editDragIdx >= 0 && editSession) {       // drag the grabbed handle
-    const w = s2w(e.clientX, e.clientY);
+    const w = s2w(e.clientX - mapL, e.clientY);
     if (w) editSession.points[editDragIdx] = editSession.kind === 'headland' ? hlSnap(w.e, w.n) : { e: w.e, n: w.n };
     return;
   }
@@ -1197,6 +1332,8 @@ function showConfirm(title, message, onConfirm, onBack) {
 }
 dialogHost.querySelector('.dlg-backdrop').addEventListener('pointerdown', e => {
   e.stopPropagation();
+  // A sticky card (a long list to pick from) stays until it is closed: an outside tap on a screen this size is a slip.
+  if (dialogHost.querySelector('.dlg-card.open.sticky')) return;
   // Backdrop-dismiss of the unsaved-coverage guard must resolve it (= Cancel), else the
   // host stays blocked with its dialog open and the field never closes.
   if (_ucovOpen) { _ucovOpen = false; transport.send('coverage.cancelClose'); }
@@ -1208,26 +1345,50 @@ const dlgLat = document.getElementById('dlg-lat'), dlgLon = document.getElementB
 // FormNumeric for numbers) (#110). For touch boxes with no OS keyboard (kiosk/Linux): when
 // on, focusing a text field opens a QWERTY panel, a numeric field a number pad, and the OS
 // keyboard is suppressed (inputmode=none). Keys edit the field in place and fire 'input', so
-// every existing handler sees them; OK sends Enter and closes.
+// every existing handler sees them; OK sends Enter and closes. Leaving the field another way
+// (tapping the next box, a button, the map) also commits it, as the OS keyboard does. Shift
+// works as on a phone: one tap capitalises the next letter, a second tap straight after locks
+// it (caps lock) until Shift is tapped again.
+// Replace or edit (#516): the keyboard opens with the value selected ("fresh"). The first
+// character key replaces the whole value; ⌫ first, or a tap in the field, keeps the value to
+// correct it. Cancel puts back the value the field had when the keyboard opened. A tap outside
+// on another field, a button or another control confirms (so Save right after typing saves the
+// typed value); a tap on an empty spot, the map or a dialog backdrop cancels.
 const OSK = (() => {
   const root = document.getElementById('osk');
-  let target = null, shift = false;
+  const SHIFT_LOCK_MS = 400;                  // second Shift tap within this locks caps
+  let target = null, shift = 0, shiftAt = 0;  // shift: 0 off, 1 next letter, 2 caps lock
+  let edited = false;                         // keys changed the field since its last 'change'
+  let orig = '';                              // the value when the keyboard opened (Cancel)
+  // The first key replaces the value. Kept apart from the selection: a tap's release can
+  // collapse the selection on mobile engines, and the first key must replace it even then.
+  let fresh = false;
   const TEXT = ['1234567890', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
   const NUM = ['789', '456', '123', '-0.'];
+  // #+= swaps the letter rows for symbols, for web addresses, caster logins and passwords (the
+  // digits and - _ . stay). It stays until abc is tapped; each new field starts on the letters.
+  const SYM = [':/?=&@#%+~', '()[]{}<>!', ',;\'"^|\\$*`'];
+  let sym = false;
   const on = () => !!(config && config.display && config.display.keyboardEnabled);
   const isField = el => el instanceof HTMLTextAreaElement
     || (el instanceof HTMLInputElement && ['text', 'password', 'search', 'email', 'url', ''].includes(el.type) && !el.readOnly && !el.disabled);
+  // When the keyboard hides the field, a line above the keys shows the field's label and text
+  // (like the text box at the top of AgOpenGPS's keyboard form).
+  const pv = document.createElement('div'); pv.className = 'osk-row osk-pv'; pv.hidden = true;
+  pv.innerHTML = '<span class="osk-pv-lbl"></span><span class="osk-pv-txt"></span>';
+  const [pvLbl, pvTxt] = pv.children, caret = document.createElement('i');
   function render() {
     const num = !!(target && target.dataset.numField);
     root.classList.toggle('num', num);
-    const rows = (num ? NUM : TEXT).map(r => [...r].map(c => ({ k: c, t: shift ? c.toUpperCase() : c })));
-    if (num) rows.push([{ k: 'BS', t: '⌫', c: 'wide' }, { k: 'OK', t: 'OK', c: 'wide ok' }]);
+    const rows = (num ? NUM : sym ? [TEXT[0], ...SYM] : TEXT).map(r => [...r].map(c => ({ k: c, t: shift ? c.toUpperCase() : c })));
+    const cancel = { k: 'ESC', t: tr('Cancel'), c: 'wide esc' };
+    if (num) rows.push([{ k: 'CLR', t: 'Clear' }, { k: 'BS', t: '⌫' }, { k: 'ESC', t: tr('Cancel'), c: 'esc' }, { k: 'OK', t: 'OK', c: 'ok' }]);
     else {
-      rows[3].unshift({ k: 'SH', t: shift ? '⇧' : '⇪', c: 'wide' });
+      if (!sym) rows[3].unshift({ k: 'SH', t: shift === 2 ? '⇪' : '⇧', c: ['wide', 'wide on', 'wide on lock'][shift] });
       rows[3].push({ k: 'BS', t: '⌫', c: 'wide' });
-      rows.push([{ k: '-', t: '-' }, { k: '_', t: '_' }, { k: ' ', t: 'space', c: 'xwide' }, { k: '.', t: '.' }, { k: 'CLR', t: 'Clear', c: 'wide' }, { k: 'OK', t: 'OK', c: 'wide ok' }]);
+      rows.push([{ k: 'SYM', t: sym ? 'abc' : '#+=', c: 'wide' }, { k: '-', t: '-' }, { k: '_', t: '_' }, { k: ' ', t: 'space', c: 'xwide' }, { k: '.', t: '.' }, { k: 'CLR', t: 'Clear', c: 'wide' }, cancel, { k: 'OK', t: 'OK', c: 'wide ok' }]);
     }
-    root.innerHTML = '';
+    root.replaceChildren(pv);
     for (const r of rows) {
       const row = document.createElement('div'); row.className = 'osk-row';
       for (const b of r) {
@@ -1240,51 +1401,129 @@ const OSK = (() => {
   }
   function insert(s) {
     const el = target; if (!el) return;
+    if (fresh) { fresh = false; selectAll(el); }  // the first key replaces the whole value
     const a = el.selectionStart ?? el.value.length, b = el.selectionEnd ?? a;
     try { el.setRangeText(s, a, b, 'end'); } catch (_) { el.value += s; }
+    edited = true;
     el.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  // The browser only fires 'change' on blur after a user edit, and text set by these keys does
+  // not count as one, so a value typed here and left without OK never reached its handler (the
+  // box showed it, the host never got it). Fire 'change' once on the way out instead.
+  function commit(el) {
+    if (!edited) return;
+    edited = false;
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  function selectAll(el) { try { el.setSelectionRange(0, el.value.length); } catch (_) {} }
+  function caretToEnd(el) { const n = el.value.length; try { el.setSelectionRange(n, n); } catch (_) {} }
+  // Put the value back as it was when the keyboard opened. 'input' lets live handlers (the
+  // numeric filter, previews) follow; no 'change', so nothing is committed.
+  function restore() {
+    const el = target; if (!el) return;
+    fresh = false; edited = false;
+    if (el.value !== orig) { el.value = orig; el.dispatchEvent(new Event('input', { bubbles: true })); }
+  }
+  function echo() {
+    const el = target; if (!el || pv.hidden) return;
+    const v = el.type === 'password' ? '•'.repeat(el.value.length) : el.value;
+    if (fresh && v) {  // the value is selected: the first key replaces it
+      const sel = document.createElement('span'); sel.className = 'sel'; sel.textContent = v;
+      pvTxt.replaceChildren(sel); pvTxt.scrollLeft = 0; return;
+    }
+    const a = Math.min(el.selectionEnd ?? v.length, v.length);
+    pvTxt.replaceChildren(v.slice(0, a), caret, v.slice(a));
+    pvTxt.scrollLeft = Math.max(0, caret.offsetLeft - pvTxt.clientWidth + 24); // keep the caret in sight
+  }
+  function place() {
+    pv.hidden = true;
+    pv.hidden = target.getBoundingClientRect().bottom <= root.getBoundingClientRect().top;
+    const lb = (target.labels && target.labels[0]) || target.previousElementSibling; // <label for> or <label></label><input>
+    pvLbl.textContent = lb && lb.tagName === 'LABEL' ? lb.textContent.trim() : '';
+    echo();
   }
   function key(k) {
     const el = target; if (!el) return;
-    if (k === 'SH') { shift = !shift; render(); return; }
+    if (k === 'SH') {
+      const now = performance.now();
+      shift = shift === 1 && now - shiftAt < SHIFT_LOCK_MS ? 2 : shift ? 0 : 1;
+      shiftAt = now; render(); return;
+    }
+    if (k === 'SYM') { sym = !sym; render(); return; }
     if (k === 'OK') {
+      edited = false; fresh = false; // the 'change' below commits it
       el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
       el.dispatchEvent(new Event('change', { bubbles: true }));
       close(); el.blur(); return;
     }
-    if (k === 'CLR') { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); return; }
+    if (k === 'ESC') { restore(); close(); el.blur(); return; }
+    if (k === 'CLR') { fresh = false; el.value = ''; edited = true; el.dispatchEvent(new Event('input', { bubbles: true })); return; }
     if (k === 'BS') {
+      if (fresh) { fresh = false; caretToEnd(el); } // ⌫ first: keep the value, remove its last character
       const a = el.selectionStart ?? el.value.length, b = el.selectionEnd ?? a;
       if (a !== b) insert('');
-      else if (a > 0) { try { el.setRangeText('', a - 1, a, 'end'); } catch (_) { el.value = el.value.slice(0, -1); } el.dispatchEvent(new Event('input', { bubbles: true })); }
+      else if (a > 0) { try { el.setRangeText('', a - 1, a, 'end'); } catch (_) { el.value = el.value.slice(0, -1); } edited = true; el.dispatchEvent(new Event('input', { bubbles: true })); }
       return;
     }
     insert(shift ? k.toUpperCase() : k);
-    if (shift) { shift = false; render(); }
+    if (shift === 1) { shift = 0; render(); }
   }
   function open(el) {
-    target = el; shift = false;
+    if (el === target) return; // focus came back to the field the keyboard is already on
+    target = el; shift = 0; edited = false;
+    orig = el.value; fresh = true;
     if (!el.dataset.oskIm) el.dataset.oskIm = el.getAttribute('inputmode') ?? '';
     el.setAttribute('inputmode', 'none'); // no OS keyboard on top of ours
-    render(); root.hidden = false;
+    sym = false;
+    render(); root.hidden = false; place();
+    // Show the value selected. The tap that focused the field may still drop a caret on its
+    // release, so select again once that has landed.
+    selectAll(el);
+    const again = () => { if (target === el && fresh) { selectAll(el); echo(); } };
+    el.addEventListener('click', again, { once: true });
+    setTimeout(again, 0);
   }
   function close() {
     if (target && target.dataset.oskIm !== undefined) {
       if (target.dataset.oskIm) target.setAttribute('inputmode', target.dataset.oskIm); else target.removeAttribute('inputmode');
       delete target.dataset.oskIm;
     }
-    target = null; root.hidden = true;
+    target = null; fresh = false; root.hidden = true;
   }
   // Keep focus in the field while tapping keys (pointerdown would blur it), and don't pan the map.
   root.addEventListener('pointerdown', e => {
     e.preventDefault(); e.stopPropagation();
-    const b = e.target.closest('button'); if (b) key(b.dataset.k);
+    const b = e.target.closest('button'); if (b) { key(b.dataset.k); echo(); }
   });
+  // A tap anywhere else while the keyboard is up. Runs capturing on window, before focus moves
+  // and before handlers that stop the event (the dialog backdrop): the value must be back
+  // before the field's own blur handlers (rename flows, the steer value box) commit it.
+  const CONTROL = 'input, textarea, select, button, a[href], label, [role="button"], [role="tab"], [role="checkbox"], [role="switch"], [role="option"], [contenteditable="true"]';
+  window.addEventListener('pointerdown', e => {
+    const el = target; if (!el || root.contains(e.target)) return;
+    if (e.target === el) {                                                  // tap in the field: edit, caret where tapped
+      if (!fresh) return;
+      fresh = false; echo();
+      // A touch on a selected value can leave the selection in place (Chromium on Android
+      // shows handles instead of a caret); then the next key would still replace it all.
+      el.addEventListener('click', () => {
+        if (target === el && el.value && el.selectionStart === 0 && el.selectionEnd === el.value.length) { caretToEnd(el); echo(); }
+      }, { once: true });
+      return;
+    }
+    // Another field or a button: confirm (focusout). Focus moves by itself to a field; a button
+    // may stop that on its pointerdown (the slider nudges), so the field is left now.
+    const c = e.target.closest && e.target.closest(CONTROL);
+    if (c) { if (!isField(c)) el.blur(); return; }
+    restore(); close(); el.blur();                                          // empty spot, map, backdrop: cancel
+  }, true);
   document.addEventListener('focusin', e => { if (on() && isField(e.target)) open(e.target); else if (!root.contains(e.target)) close(); });
   document.addEventListener('focusout', e => {
     if (e.target !== target) return;
+    commit(target); // now, not in the timeout: a Save pressed next must see the value first
     setTimeout(() => { if (document.activeElement !== target) close(); }, 0);
   });
+  window.addEventListener('resize', () => { if (target) place(); });
   return { close };
 })();
 // Uniform numeric input, everywhere. A tablet's decimal keypad (Android Samsung / iOS) has no
@@ -1359,9 +1598,10 @@ function llFill(pt) {
 }
 function openLatLonLine(mode) {
   llMode = mode;
-  const ab = mode === 'latLonAB';
-  llEl('ll-title').textContent = ab ? tr('AB Line from Two Points') : tr('AB Line from Point and Heading');
-  llEl('ll-heading-row').hidden = ab;
+  const ab = mode === 'latLonAB', pivot = mode === 'latLonPivot';
+  llEl('ll-title').textContent = pivot ? tr('Water Pivot from its Centre') : ab ? tr('AB Line from Two Points') : tr('AB Line from Point and Heading');
+  llEl('ll-a-label').textContent = pivot ? tr('Centre') : 'A';
+  llEl('ll-heading-row').hidden = ab || pivot;
   llEl('ll-b-row').hidden = !ab;
   for (const id of ['ll-lat-a', 'll-lon-a', 'll-heading', 'll-lat-b', 'll-lon-b']) llEl(id).value = '';
   llEl('ll-err').textContent = '';
@@ -1380,7 +1620,8 @@ llEl('ll-ok').addEventListener('pointerdown', e => {
   const latA = num('ll-lat-a'), lonA = num('ll-lon-a');
   let err = !okLat(latA) || !okLon(lonA) ? tr('Point A needs a latitude (−90 to 90) and longitude (−180 to 180)') : '';
   let cmd = '';
-  if (!err && llMode === 'latLonAB') {
+  if (!err && llMode === 'latLonPivot') cmd = 'track.latLonPivot|' + [latA, lonA].join(',');
+  else if (!err && llMode === 'latLonAB') {
     const latB = num('ll-lat-b'), lonB = num('ll-lon-b');
     if (!okLat(latB) || !okLon(lonB)) err = tr('Point B needs a latitude (−90 to 90) and longitude (−180 to 180)');
     else cmd = 'track.latLonAB|' + [latA, lonA, latB, lonB].join(',');
@@ -1600,7 +1841,56 @@ document.getElementById('flag-deleteall').addEventListener('pointerdown', e => {
   showConfirm(tr('Delete All Flags'), tr('Delete all flags? This cannot be undone.'), () => transport.send('flag.deleteAll'));
 });
 document.getElementById('flag-close').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); closeDialog(); });
-document.getElementById('bn-abmenu').addEventListener('pointerdown', e => { e.stopPropagation(); bnToggleFly(bnAb, e.currentTarget); });
+document.getElementById('bn-abmenu').addEventListener('pointerdown', e => {
+  e.stopPropagation(); bnToggleFly(bnAb, e.currentTarget);
+  populateCfgControls(bnAb, true); // the snap distance
+});
+wireCfgControls(bnAb);
+
+// ---- Ref Nudge panel (#489, AgOpenGPS FormRefNudge) ----
+// Moves the saved line itself (the AB flyout's nudge only offsets the guidance line). The panel
+// stays open: the right nav's track buttons pick the next line, each move is saved by the host
+// at once, Exit closes. The total and the step come from the host (tick.op.refNudgeMoved, the
+// vehicle profile's autosteer.refNudgeDistance); nothing is computed here.
+const refPanel = document.getElementById('refnudge');
+const refMoved = document.getElementById('rf-moved');
+const refName = document.getElementById('rf-name');
+let refNudgeOpen = false;
+function openRefNudge() {
+  refNudgeOpen = true;
+  transport.send('track.refNudgeBegin'); // the total starts at zero
+  refPanel.hidden = false;
+  populateCfgControls(refPanel, true);
+}
+function closeRefNudge() { refNudgeOpen = false; refPanel.hidden = true; }
+document.getElementById('bn-refnudge').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); abFlyoutClose(); openRefNudge(); });
+const refUndo = document.getElementById('rf-undo');
+const refSave = document.getElementById('rf-save');
+let refPending = false; // an unsaved move on the selected line (tick.op.refNudgePending)
+document.getElementById('rf-exit').addEventListener('pointerdown', e => {
+  e.preventDefault(); e.stopPropagation();
+  if (!refPending) { closeRefNudge(); return; }
+  // Leaving would undo the move (the next line takes over): ask, Cancel keeps the panel for Undo.
+  showConfirm(tr('Reference Line Nudge'), tr('Save the moved line before closing?'), () => { transport.send('track.refNudgeSave'); closeRefNudge(); });
+});
+for (const b of refPanel.querySelectorAll('button[data-cmd]'))
+  b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); transport.send(b.dataset.cmd); });
+wireCfgControls(refPanel);
+function renderRefNudge(hasTrack) {
+  const show = refNudgeOpen && hasTrack;
+  if (refPanel.hidden === show) refPanel.hidden = !show;
+  if (!show) return;
+  const m = (tick && tick.op && tick.op.refNudgeMoved) || 0;
+  const amt = Math.round(Math.abs(m) * (isMetric() ? 100 : 39.3701));
+  const text = amt === 0 ? '0' : amt + ' ' + unitLabel('cm') + (m < 0 ? ' L' : ' R');
+  if (refMoved.textContent !== text) refMoved.textContent = text;
+  const name = tick.activeTrackName || '';
+  if (refName.textContent !== name) refName.textContent = name;
+  refPending = !!(tick.op && tick.op.refNudgePending);
+  refUndo.disabled = !refPending;
+  refSave.disabled = !refPending;
+  populateCfgControls(refPanel); // the step; not while it is being typed
+}
 
 // ---- AB-line creation (mirrors native QuickABSelector + DrawAB dialogs) ----
 // All four modes run the REAL native commands on the host (no geometry in JS):
@@ -1623,7 +1913,9 @@ function abHint() {
     case 'straight': return drawPts.length === 0 ? tr('Tap Point A') : tr('Tap Point B');
     case 'curve': return tr('Tap points ({n}) — Finish when done', { n: drawPts.length });
     case 'driveAB': return driveStep === 0 ? tr('Drive to A, then Set Point') : tr('Drive to B, then Set Point');
-    case 'recordCurve': return driveStep === 0 ? tr('Drive to A, then Set Point A') : tr('Drive the curve to B, then Set Point B');
+    case 'recordCurve': return recPivot
+      ? (driveStep === 0 ? tr('Drive onto the pivot track, then Start') : tr('Drive part of the way round the pivot, then Finish'))
+      : (driveStep === 0 ? tr('Drive to A, then Set Point A') : tr('Drive the curve to B, then Set Point B'));
   }
   return '';
 }
@@ -1654,15 +1946,17 @@ function updateAbCursorLabel(x, y) {
 // frame from drawPts (world→screen); cleared when the draw ends. DOM (CanvasKit has no text).
 function renderAbDotLabels() {
   if (!abDotLabelsEl) return;
-  const n = drawPts.length || 0; // letters for map-tap AND Drive-AB markers (drawMode may be null)
+  // Letters for map-tap AND Drive-AB markers (drawMode may be null), else the active line's A/B.
+  const active = activeAbPoints(), pts = drawPts.length ? drawPts : (active || []);
+  const n = pts.length;
   while (abDotLabelsEl.children.length < n) abDotLabelsEl.appendChild(document.createElement('span'));
   for (let i = 0; i < abDotLabelsEl.children.length; i++) {
     const span = abDotLabelsEl.children[i];
-    if (i >= n || pw(drawPts[i].e, drawPts[i].n) < 1.0) { span.style.display = 'none'; continue; }
-    const xy = w2s(drawPts[i].e, drawPts[i].n);
+    if (i >= n || pw(pts[i].e, pts[i].n) < 1.0) { span.style.display = 'none'; continue; }
+    const xy = w2s(pts[i].e, pts[i].n);
     span.textContent = abLetter(i);
-    span.style.color = abLabelColor(i);
-    span.style.left = xy[0] + 'px';
+    span.style.color = drawPts.length ? abLabelColor(i) : (i ? ACTIVE_B_COLOR : ACTIVE_A_COLOR);
+    span.style.left = (xy[0] + mapL) + 'px';
     span.style.top = xy[1] + 'px';
     span.style.display = 'block';
   }
@@ -1687,28 +1981,98 @@ function startDriveAB() {                  // GPS: set A then B at the vehicle
   document.getElementById('draw-setpoint').textContent = tr('Set Point A');
   hintEl.classList.add('show'); setAbHint();
 }
-function startRecordCurve() {              // GPS: record by driving — Set Start → Set End
-  abFlow = 'recordCurve'; driveStep = 0; curveMarks = []; _lastCurveMark = null;
+// A water pivot is recorded the same way: Start, drive part of the way round, Finish; the host
+// fits the circle (AgOpenGPS adds three points round it by hand).
+let recPivot = false;
+function startRecordCurve(pivot = false) { // GPS: record by driving — Set Start → Set End
+  abFlow = 'recordCurve'; driveStep = 0; curveMarks = []; _lastCurveMark = null; recPivot = pivot;
   // Recording doesn't begin until "Set Start" (deferred track.recordCurve), so the operator
   // can position at the curve's start first. The set-point button drives the two-step.
   showAbBar(true, false, false);
-  document.getElementById('draw-setpoint').textContent = tr('Set Point A');
+  document.getElementById('draw-setpoint').textContent = pivot ? tr('Start') : tr('Set Point A');
   hintEl.classList.add('show'); setAbHint();
 }
-// "Bnd. Curve" — tap point A then point B on the boundary; the host walks the shorter arc
-// between them and builds a curve following the boundary. Each tap lands on the fence where
-// it's nearest (a corner when one is close) for display; the host projects it again.
+// "Bnd. Curve" — tap point A then point B on the boundary, then pick which way round the
+// curve goes (#450): A → B runs on from A in the boundary's own order, B → A the other way;
+// the shorter one is picked first and drawn on the map. Each tap lands on the fence where
+// it's nearest (a corner when one is close); the host projects A and B again and takes the
+// way round that passes the chosen arc's midpoint.
+let bcArcs = null, bcSel = 0;  // the two ways round on the outer boundary, [A→B, B→A]
 function startBoundaryCurve() {
-  abFlow = 'boundaryCurve'; drawPts = [];
+  abFlow = 'boundaryCurve'; drawPts = []; bcArcs = null;
   showAbBar(false, false, false);          // draw toolbar shows just Cancel
   startMapTap({ hint: tr('Tap point A on the boundary'), onTap: boundaryCurveTap });
 }
 function boundaryCurveTap(e, n) {
   drawPts.push(snapToFence(e, n, Infinity)); // A/B on the fence (dot shown)
   if (drawPts.length < 2) { hintEl.textContent = tr('Tap point B on the boundary'); return; }
-  const a = drawPts[0], b = drawPts[1];
-  transport.send('track.boundaryCurveSeg|' + a.e.toFixed(3) + ',' + a.n.toFixed(3) + ',' + b.e.toFixed(3) + ',' + b.n.toFixed(3));
-  endAbFlow();
+  const ring = scene && scene.boundaries && scene.boundaries[0];
+  bcArcs = ring && ring.length >= 3 ? boundaryArcs(ring, drawPts[0], drawPts[1]) : null;
+  if (!bcArcs) { abFinish(); return; }     // no ring to choose on: the host takes the shorter
+  bcSel = polyLen(bcArcs[0]) <= polyLen(bcArcs[1]) ? 0 : 1;
+  mapTap = null; document.getElementById('maptap-hint').classList.remove('show'); // no more taps
+  showAbBar(false, false, true);
+  document.getElementById('draw-finish').textContent = tr('Create');
+  for (const b of bcDirBtns) b.style.display = '';
+  setBcDir(bcSel);
+}
+const bcDirBtns = [document.getElementById('draw-dir-ab'), document.getElementById('draw-dir-ba')];
+bcDirBtns.forEach((b, i) => b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); setBcDir(i); }));
+function setBcDir(i) {
+  bcSel = i;
+  bcDirBtns.forEach((b, k) => b.classList.toggle('active', k === i));
+  hintEl.textContent = tr('Pick which way round, then Create'); hintEl.classList.add('show');
+}
+function polyLen(pts) { let l = 0; for (let i = 1; i < pts.length; i++) l += Math.hypot(pts[i].e - pts[i - 1].e, pts[i].n - pts[i - 1].n); return l; }
+// The two ways round a ring between points a and b on it: [a on in ring order to b, b on to a].
+function boundaryArcs(ring, a, b) {
+  const m = ring.length;
+  const at = (p) => {                      // the side (i → i+1) a point lies on, and how far along
+    let best = { i: 0, t: 0 }, bd = Infinity;
+    for (let i = 0; i < m; i++) {
+      const p0 = ring[i], p1 = ring[(i + 1) % m];
+      const dx = p1.e - p0.e, dn = p1.n - p0.n, l2 = dx * dx + dn * dn;
+      const t = l2 > 0 ? Math.max(0, Math.min(1, ((p.e - p0.e) * dx + (p.n - p0.n) * dn) / l2)) : 0;
+      const d = Math.hypot(p0.e + t * dx - p.e, p0.n + t * dn - p.n);
+      if (d < bd) { bd = d; best = { i, t }; }
+    }
+    return best;
+  };
+  const walk = (p, pa, q, qa) => {         // from p on in ring order to q
+    const out = [p];
+    if (!(pa.i === qa.i && pa.t <= qa.t))
+      for (let k = (pa.i + 1) % m; ; k = (k + 1) % m) { out.push(ring[k]); if (k === qa.i) break; }
+    out.push(q);
+    return out;
+  };
+  const sa = at(a), sb = at(b);
+  return [walk(a, sa, b, sb), walk(b, sb, a, sa)];
+}
+// A drawn curve as the host will make it: between two taps in a row on the fence it follows
+// the fence the shorter way round (AgOpenGPS FormABDraw); elsewhere it runs from tap to tap.
+function drawnCurvePreview() {
+  const ring = scene && scene.boundaries && scene.boundaries[0];
+  if (!ring || ring.length < 3) return drawPts;
+  const onFence = p => ring.some((a, i) => {
+    const b = ring[(i + 1) % ring.length], dx = b.e - a.e, dn = b.n - a.n, l2 = dx * dx + dn * dn;
+    const t = l2 > 0 ? Math.max(0, Math.min(1, ((p.e - a.e) * dx + (p.n - a.n) * dn) / l2)) : 0;
+    return Math.hypot(a.e + t * dx - p.e, a.n + t * dn - p.n) < 0.01;
+  });
+  const out = [drawPts[0]];
+  for (let i = 1; i < drawPts.length; i++) {
+    const a = drawPts[i - 1], b = drawPts[i];
+    if (onFence(a) && onFence(b)) {
+      const arcs = boundaryArcs(ring, a, b);
+      const run = polyLen(arcs[0]) <= polyLen(arcs[1]) ? arcs[0] : arcs[1].slice().reverse();
+      out.push(...run.slice(1));
+    } else out.push(b);
+  }
+  return out;
+}
+// The chosen way round, drawn while picking (#450).
+function drawBoundaryCurvePreviewSk(canvas) {
+  if (abFlow !== 'boundaryCurve' || !bcArcs) return;
+  strokePtsSk(canvas, bcArcs[bcSel], false, SKP.track);
 }
 // A drawn line is the edge between passes (PassGeometry), as in AgOpenGPS's FormABDraw,
 // whose taps all land on fence points. A tap near the fence snaps onto it (a corner when
@@ -1776,8 +2140,8 @@ function abSetPoint() {                     // Set-point button — drives Drive
   } else if (abFlow === 'recordCurve') {
     if (driveStep > 1) return;              // guard a double-B while B lingers
     if (driveStep === 0) {                  // Set Point A → drop the A endpoint + begin recording
-      transport.send('track.recordCurve');
-      driveStep = 1; btn.textContent = tr('Set Point B');
+      transport.send(recPivot ? 'track.recordPivot' : 'track.recordCurve');
+      driveStep = 1; btn.textContent = recPivot ? tr('Finish') : tr('Set Point B');
       if (tick && tick.pose) {
         drawPts.push(poseEdgePt());                          // labeled "A" endpoint dot (orange)
         _lastCurveMark = { e: tick.pose.e, n: tick.pose.n }; // seed green-dot spacing; no dot at A itself
@@ -1798,7 +2162,23 @@ function abUndo() {
   setAbHint();
 }
 function abFinish() {
-  if (abFlow === 'curve') transport.send('track.drawFinish');
+  if (abFlow === 'boundaryCurve') {
+    if (drawPts.length < 2) return;
+    const a = drawPts[0], b = drawPts[1], f = (v) => v.toFixed(3);
+    let msg = 'track.boundaryCurveSeg|' + f(a.e) + ',' + f(a.n) + ',' + f(b.e) + ',' + f(b.n);
+    if (bcArcs) {                          // + a point halfway along the chosen way round
+      const arc = bcArcs[bcSel], half = polyLen(arc) / 2;
+      let run = 0, via = arc[0];
+      for (let i = 1; i < arc.length; i++) {
+        const l = Math.hypot(arc[i].e - arc[i - 1].e, arc[i].n - arc[i - 1].n);
+        if (run + l >= half) { const u = l > 0 ? (half - run) / l : 0; via = { e: arc[i - 1].e + u * (arc[i].e - arc[i - 1].e), n: arc[i - 1].n + u * (arc[i].n - arc[i - 1].n) }; break; }
+        run += l;
+      }
+      msg += ',' + f(via.e) + ',' + f(via.n);
+    }
+    transport.send(msg);
+  }
+  else if (abFlow === 'curve') transport.send('track.drawFinish');
   else if (abFlow === 'recordCurve') transport.send('track.finishCurve');
   else return;
   endAbFlow();
@@ -1810,6 +2190,8 @@ function abCancel() {
 }
 function endAbFlow() {
   abFlow = null; drawMode = null; drawPts = []; driveRaw = []; driveStep = 0;
+  bcArcs = null; for (const b of bcDirBtns) b.style.display = 'none';
+  document.getElementById('draw-finish').textContent = tr('Finish');
   curveMarks = []; _lastCurveMark = null; // clear record-curve path dots
   drawBar.classList.remove('show');
   endMapTap();
@@ -2028,7 +2410,8 @@ document.getElementById('dlg-quickab').querySelectorAll('[data-qab]').forEach(b 
       transport.send('track.aPlus' + (v !== '' && isFinite(+v) ? '|' + (+v) : ''));
     }
   }
-  else if (m === 'latLonHeading' || m === 'latLonAB') openLatLonLine(m);
+  else if (m === 'latLonHeading' || m === 'latLonAB' || m === 'latLonPivot') openLatLonLine(m);
+  else if (m === 'recordPivot') startRecordCurve(true);
   else if (m === 'driveAB') startDriveAB();
   else if (m === 'recordCurve') startRecordCurve();
   else if (m === 'boundaryEdge') transport.send('track.createFromBoundary');
@@ -2041,8 +2424,9 @@ document.getElementById('dlg-qab-cancel').addEventListener('pointerdown', e => {
 
 // ---- Tracks manager (mirrors native TracksDialogPanel) ----
 // View-only without control (just reads scene.trackList); the actions are Tier-2.
-// Like AgOpenGPS's track list: tapping a row only highlights it (trkSel); guidance
-// changes when Activate is pressed. Delete / Swap act on the highlighted row (#109).
+// Tapping a row highlights it (trkSel) and makes it the active track at once (#148), where
+// AgOpenGPS waits for Use; Activate on the active track turns guidance off. Delete / Swap act
+// on the highlighted row (#109).
 let trkSel = -1; // index into scene.trackList, or -1
 function openTracksManager() { trkSel = -1; renderTracksList(); openDialog('dlg-tracks'); }
 function renderTracksList() {
@@ -2119,13 +2503,13 @@ document.getElementById('dlg-tracks-close').addEventListener('pointerdown', e =>
 // to ConfigurationStore). Grows one entry per sub-phase.
 // Navigation: top-level buttons open a panel; sub-panels (vehicle/tool config) are
 // reached from the hub and carry a Back button. One panel open at a time.
-const LN_NAV_PANELS = ['screenalerts', 'tools', 'rollcorr', 'fieldtools', 'fieldbuilder', 'offsetfix', 'importtracks', 'recpath', 'boundarymenu', 'boundaryplayer', 'kmlboundary', 'vehtoolhub', 'vehiclecfg', 'toolcfg', 'autosteercfg', 'networkio', 'systemdata', 'ntripprofiles', 'ntripeditor', 'smartwas', 'fieldops', 'fieldsandjobs', 'newfield', 'fromexisting', 'isoimport', 'kmlimport', 'resumejob', 'agsettings', 'agupload', 'agdownload', 'filemenu', 'appsettings', 'language', 'viewsettings', 'logviewer', 'hotkeys', 'help', 'about', 'bugreport'];
+const LN_NAV_PANELS = ['screenalerts', 'tools', 'rollcorr', 'fieldtools', 'fieldbuilder', 'offsetfix', 'importtracks', 'recpath', 'boundarymenu', 'boundaryplayer', 'kmlboundary', 'vehtoolhub', 'vehiclecfg', 'toolcfg', 'autosteercfg', 'networkio', 'ntripsettings', 'systemdata', 'ntripprofiles', 'ntripeditor', 'smartwas', 'fieldops', 'fieldsandjobs', 'newfield', 'fromexisting', 'isoimport', 'kmlimport', 'resumejob', 'agsettings', 'agupload', 'agdownload', 'filemenu', 'appsettings', 'language', 'viewsettings', 'logviewer', 'hotkeys', 'help', 'about', 'bugreport'];
 // Watch-the-tractor panels opt OUT of the light-dismiss scrim — the map must stay
 // interactive (pan/zoom to follow the tractor while capturing). They close only via
 // the header (Back / ✕).
 // The bug report panel too: leave it open while driving and press the button the
 // moment a problem shows, since the dump holds only the last 60 s of GPS data.
-const NO_SCRIM = new Set(['smartwas', 'recpath', 'boundaryplayer', 'fieldbuilder', 'bugreport']);
+const NO_SCRIM = new Set(['smartwas', 'recpath', 'boundaryplayer', 'fieldbuilder', 'bugreport', 'ntripsettings', 'ntripprofiles', 'ntripeditor']);
 const lnScrim = document.getElementById('ln-scrim');
 function lnCloseAll() {
   for (const id of LN_NAV_PANELS) document.getElementById(id).classList.remove('open');
@@ -2343,7 +2727,10 @@ document.getElementById('fb-trk-edit').addEventListener('pointerdown', e => { e.
 document.getElementById('fb-trk-delete').addEventListener('pointerdown', e => {
   e.stopPropagation();
   const tl = scene && scene.trackList; if (fbSel < 0 || !tl || !tl[fbSel] || !iHoldControl) return;
-  transport.send('track.delete|' + tl[fbSel].index); fbSel = -1;
+  const t = tl[fbSel];
+  // Asks first, as the Tracks manager does: a track can't be brought back.
+  showConfirm(tr('Delete Track'), tr("Delete '{name}'? This cannot be undone.", { name: t.name }),
+    () => { transport.send('track.delete|' + t.index); fbSel = -1; });
 });
 document.getElementById('fb-trk-deleteall').addEventListener('pointerdown', e => {
   e.stopPropagation();
@@ -2533,6 +2920,14 @@ document.getElementById('bm-delete').addEventListener('pointerdown', e => {
     () => transport.send('boundary.delete'));
 });
 document.getElementById('bm-buildtracks').addEventListener('pointerdown', e => { e.stopPropagation(); transport.send('boundary.buildFromTracks'); });
+// The aerial covering the field's boundary, however it was made (driven, KML, AgShare), into
+// the field background; replaces any it has. Needs the internet (#500).
+document.getElementById('bm-imagery').addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  if (!imageryImg) { transport.send('boundary.captureImagery'); return; }
+  showConfirm(tr('Get Aerial Imagery'), tr('Replace the field\'s aerial imagery with a new one for its boundary?'),
+    () => transport.send('boundary.captureImagery'));
+});
 document.getElementById('bm-drawmap').addEventListener('pointerdown', e => { e.stopPropagation(); startSatBoundary(); });
 // Import-KML boundary picker: lists KML/KMZ from the Import folder (FieldOps frame),
 // tapping one imports it as the field boundary (host parses + imports, replacing the outer).
@@ -2593,22 +2988,57 @@ for (const b of document.querySelectorAll('.ln-closex'))
 const saPanel = document.getElementById('screenalerts');
 // Units + device settings (keyboard/fullscreen/elevation) moved to App Settings (File menu).
 // Screen & Alerts toggles → config.set|display.X; action rows (theme/quality) → command.
-for (const b of saPanel.querySelectorAll('.sa-tgl'))
+for (const b of saPanel.querySelectorAll('.sa-tgl[data-key]'))
   b.addEventListener('pointerdown', e => { e.stopPropagation(); cfgSend(b.dataset.key, b.classList.contains('active') ? '0' : '1'); });
 for (const b of saPanel.querySelectorAll('.sa-act'))
   b.addEventListener('pointerdown', e => { e.stopPropagation(); transport.send(b.dataset.cmd); });
 // On click, not pointerdown: the panel resizes under the finger once the new size applies.
-for (const b of saPanel.querySelectorAll('.sa-scale'))
+// VT & Web Cards: this browser's layout, not the host's (CardPane).
+for (const b of saPanel.querySelectorAll('.sa-cardlay'))
+  b.addEventListener('pointerdown', e => {
+    e.stopPropagation();
+    CardPane.setLayout(b.dataset.lay);
+    for (const x of saPanel.querySelectorAll('.sa-cardlay')) x.classList.toggle('active', x.dataset.lay === CardPane.layout);
+  });
+for (const b of saPanel.querySelectorAll('.sa-scale:not(.sa-cardlay)'))
   b.addEventListener('click', e => { e.stopPropagation(); cfgSend('display.uiScale', b.dataset.scale); });
+// Guidance bar (#479): the vehicle's AutoSteer settings, not display.*. The style buttons
+// pick one of two; On/Off is apart from them.
+for (const b of saPanel.querySelectorAll('.sa-opt[data-val]'))
+  b.addEventListener('pointerdown', e => { e.stopPropagation(); cfgSend(b.dataset.key, b.dataset.val); });
+const saBarOn = document.getElementById('sa-baron'), saCmpp = document.getElementById('sa-cmpp');
+saBarOn.addEventListener('pointerdown', e => { e.stopPropagation(); cfgSend(saBarOn.dataset.key, saBarOn.classList.contains('active') ? '0' : '1'); });
+saCmpp.addEventListener('change', () => { const v = parseInt(saCmpp.value); if (Number.isFinite(v)) cfgSend('autosteer.cmPerPixel', v); });
+// Aerial Imagery (#500): an open field without imagery shows off, and a tap offers to get it
+// for the field's boundary; otherwise the button shows and flips the setting.
+const saImagery = document.getElementById('sa-imagery');
+const fieldLacksImagery = () => !!(scene && scene.hasField) && !scene.imagery;
+saImagery.addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  if (!fieldLacksImagery()) { cfgSend('display.imageryVisible', saImagery.classList.contains('active') ? '0' : '1'); return; }
+  showConfirm(tr('Aerial Imagery'), tr('This field has no aerial imagery. Get it for the field boundary now?'), () => {
+    if (!config.display.imageryVisible) cfgSend('display.imageryVisible', '1');
+    transport.send('boundary.captureImagery');
+  });
+});
 const saExtra = document.getElementById('sa-extracount');
 saExtra.addEventListener('change', () => { const v = parseInt(saExtra.value); if (Number.isFinite(v)) cfgSend('display.extraGuidelinesCount', v); });
 function populateScreenAlerts() {
   if (!config || !config.display) return;
   const d = config.display;
-  for (const b of saPanel.querySelectorAll('.sa-tgl')) b.classList.toggle('active', !!d[b.dataset.key.split('.')[1]]);
+  for (const b of saPanel.querySelectorAll('.sa-tgl[data-key]')) b.classList.toggle('active', !!d[b.dataset.key.split('.')[1]]);
+  saImagery.classList.toggle('active', !!d.imageryVisible && !fieldLacksImagery());
   if (document.activeElement !== saExtra) saExtra.value = d.extraGuidelinesCount;
   document.getElementById('sa-quality').textContent = d.resolutionLabel || '—';
-  for (const b of saPanel.querySelectorAll('.sa-scale')) b.classList.toggle('active', +b.dataset.scale === (d.uiScale || 100));
+  for (const b of saPanel.querySelectorAll('.sa-scale:not(.sa-cardlay)')) b.classList.toggle('active', +b.dataset.scale === (d.uiScale || 100));
+  for (const b of saPanel.querySelectorAll('.sa-cardlay')) b.classList.toggle('active', b.dataset.lay === CardPane.layout);
+  const a = config.autosteer;
+  if (a) {
+    for (const b of saPanel.querySelectorAll('.sa-opt[data-val]'))
+      b.classList.toggle('active', (b.dataset.val === '1') === !!a.steerBarEnabled);
+    saBarOn.classList.toggle('active', !!a.lightbarEnabled);
+    if (document.activeElement !== saCmpp) saCmpp.value = a.cmPerPixel;
+  }
 }
 // Vehicle config panel — full native VehicleConfigDialog surface (Vehicle/GPS/Roll).
 // Generic config controls keyed by data-key="<section>.<field>"; reused by later
@@ -2634,6 +3064,14 @@ function cfgGet(key) {
   const p = key.split('.'); return config[p[0]] && config[p[0]][p[1]];
 }
 function cfgSend(key, val) { transport.send('config.set|' + key + ':' + val); }
+// Save Profile acts on press, but the box still being typed in sends its value only when it loses
+// focus, which comes after the press: the save went out first and missed the last edit. Blur it
+// before saving so its 'change' reaches the host ahead of the save.
+function saveProfile() {
+  const a = document.activeElement;
+  if (a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement) a.blur();
+  transport.send('profile.save');
+}
 // Tabs.
 for (const t of vcPanel.querySelectorAll('.cfg-tab'))
   t.addEventListener('pointerdown', e => {
@@ -2682,7 +3120,67 @@ function wireCfgControls(panel) {
     const ro = panel.querySelector('.cfg-ro[data-for="' + s.dataset.key + '"]');
     s.addEventListener('input', () => { if (ro) ro.textContent = fmtRo(s.value, s.dataset.fmt); });
     s.addEventListener('change', () => cfgSend(s.dataset.key, s.value));
+    wireSliderNudge(s, ro);
   }
+}
+// A slider is hard to set to one exact value with a finger, so each gets − / + buttons (one
+// step a tap, repeating while held; sent once on release) and its value box can be tapped to
+// type the value. Typed values are in the readout's terms (p0: percent) and are clamped and
+// snapped to the slider's range and step.
+function sliderSnap(s, v) {
+  const min = Number(s.min), max = Number(s.max), step = Number(s.step) || 1;
+  const dec = (String(s.step).split('.')[1] || '').length;
+  return Number(Math.min(max, Math.max(min, min + Math.round((v - min) / step) * step)).toFixed(dec));
+}
+function wireSliderNudge(s, ro) {
+  const show = () => { if (ro) ro.textContent = fmtRo(s.value, s.dataset.fmt); };
+  const set = v => { s.value = sliderSnap(s, v); show(); };
+  for (const dir of [-1, 1]) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'as-nudge'; b.textContent = dir < 0 ? '−' : '+';
+    b.title = dir < 0 ? tr('Down one step') : tr('Up one step');
+    let timer = null;
+    const stop = () => {
+      if (timer === null) return;
+      clearTimeout(timer); timer = null; delete s.dataset.nudging;
+      cfgSend(s.dataset.key, s.value);
+    };
+    b.addEventListener('pointerdown', e => {
+      e.preventDefault(); e.stopPropagation();
+      b.setPointerCapture?.(e.pointerId);
+      s.dataset.nudging = '1';                                     // populateCfgControls leaves it alone
+      const nudge = () => set(Number(s.value) + dir * (Number(s.step) || 1));
+      nudge();
+      const repeat = () => { nudge(); timer = setTimeout(repeat, 80); };
+      timer = setTimeout(repeat, 450);
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) b.addEventListener(ev, stop);
+    if (dir < 0) s.before(b); else s.after(b);
+  }
+  if (!ro) return;
+  ro.classList.add('as-valedit');
+  ro.title = tr('Tap to type a value');
+  ro.addEventListener('pointerdown', e => {
+    e.preventDefault(); e.stopPropagation();
+    if (ro.hidden) return;
+    const pct = s.dataset.fmt === 'p0';
+    const input = document.createElement('input');
+    input.className = 'as-valbox num-field';
+    input.value = pct ? Math.round(Number(s.value) * 100) : s.value;
+    makeNumericField(input);
+    ro.hidden = true; ro.after(input); input.focus(); input.select();
+    input.addEventListener('click', () => input.select(), { once: true }); // the tap's release lands here and drops the selection
+    let done = false;
+    const close = commit => {
+      if (done) return;
+      done = true;
+      const v = parseFloat(input.value);
+      if (commit && Number.isFinite(v)) { set(pct ? v / 100 : v); cfgSend(s.dataset.key, s.value); }
+      input.remove(); ro.hidden = false;
+    };
+    input.addEventListener('keydown', ev => { ev.stopPropagation(); if (ev.key === 'Enter') close(true); else if (ev.key === 'Escape') close(false); });
+    input.addEventListener('blur', () => close(true));
+  });
 }
 function populateCfgControls(panel, force) {
   for (const inp of panel.querySelectorAll('.cfg-num')) {
@@ -2701,7 +3199,7 @@ function populateCfgControls(panel, force) {
   for (const b of panel.querySelectorAll('.ln-seg .cfg-act[data-key][data-val]'))
     b.classList.toggle('active', String(cfgGet(b.dataset.key)) === b.dataset.val);
   for (const s of panel.querySelectorAll('.cfg-slider[data-fmt]')) {
-    if (!force && document.activeElement === s) continue;
+    if ((!force && document.activeElement === s) || s.dataset.nudging) continue;
     const val = cfgGet(s.dataset.key);
     if (typeof val === 'number') {
       s.value = val;
@@ -2730,7 +3228,7 @@ vcHitchSel.addEventListener('change', () => cfgSend('vehicle.hitchType', vcHitch
 // Heading fusion = GPS share (0–1), shown like AgOpenGPS: "GPS 30% · IMU 70%" (#112).
 const fusionLabel = w => tr('GPS {gps}% · IMU {imu}%', { gps: Math.round(w * 100), imu: 100 - Math.round(w * 100) });
 vcFw.addEventListener('input', () => { document.getElementById('vc-hfw').textContent = fusionLabel(+vcFw.value); cfgSend('gps.headingFusionWeight', vcFw.value); });
-document.getElementById('vc-save').addEventListener('pointerdown', e => { e.stopPropagation(); transport.send('profile.save'); });
+document.getElementById('vc-save').addEventListener('pointerdown', e => { e.stopPropagation(); saveProfile(); });
 // Zero Now captures the current roll as the offset, like AgOpenGPS Zero Roll and
 // Tools › Roll Correction; it used to clear the offset (that's Remove Offset, #111).
 document.getElementById('vc-rollzero').addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); transport.send('roll.zeroCalibrate'); });
@@ -2777,7 +3275,7 @@ wireTabStrip(tcPanel, 'tc-mac');
 tcHitchSel.addEventListener('change', () => cfgSend('tool.hitchType', tcHitchSel.value));
 tcSingleColor.addEventListener('change', () => cfgSend('tool.singleCoverageColor', tcSingleColor.value.slice(1)));
 document.getElementById('tc-resetpins').addEventListener('pointerdown', e => { e.stopPropagation(); cfgSend('machine.resetPins', '1'); });
-document.getElementById('tc-save').addEventListener('pointerdown', e => { e.stopPropagation(); transport.send('profile.save'); });
+document.getElementById('tc-save').addEventListener('pointerdown', e => { e.stopPropagation(); saveProfile(); });
 // PinFunction enum labels (mirror MachineConfig.PinFunction).
 const PIN_FUNCS = ['None', 'Sec1', 'Sec2', 'Sec3', 'Sec4', 'Sec5', 'Sec6', 'Sec7', 'Sec8', 'Sec9', 'Sec10',
   'Sec11', 'Sec12', 'Sec13', 'Sec14', 'Sec15', 'Sec16', 'HydUp', 'HydDown', 'TramLeft', 'TramRight', 'GeoStop'];
@@ -3030,21 +3528,171 @@ function renderNetworkIo() {
   if (!nioO3.value && document.activeElement !== nioO3) nioO3.value = 5;
   document.getElementById('nio-hostips').textContent = s.hostIps || '—';
   document.getElementById('nio-ntrip-dot').style.background = s.ntripConnected ? '#22c55e' : '#6b7280';
-  document.getElementById('nio-ntrip-status').textContent = !s.ntripEnabled ? tr('Off') : (s.ntripStatus || tr('Not Connected'));
+  document.getElementById('nio-ntrip-status').textContent = ntripHeadline(s);
+  const who = document.getElementById('nio-ntrip-who'), ns0 = s.ntripSession;
+  who.textContent = s.ntripEnabled && ns0 && ns0.state !== 0 ? ntripWho(ns0) : '';
+  who.hidden = !who.textContent;
   document.getElementById('nio-ntrip-bytes').textContent = Math.floor((s.ntripBytes || 0) / 1024).toLocaleString() + ' KB';
   // Where the corrections go: the GPS module's own address, or the subnet broadcast.
   document.getElementById('nio-ntrip-dest').textContent = !s.ntripDestination ? ''
     : s.ntripUnicast ? tr('Corrections go to the GPS module at {ip}', { ip: s.ntripDestination })
     : tr('Corrections are broadcast to {ip}', { ip: s.ntripDestination });
+  const p100 = document.getElementById('nio-pgn100');
+  if (document.activeElement !== p100) p100.checked = !!s.sendCorrectedPosition;
+  renderNtripRx(s);
+  renderNtripSwitch(s);
+  nioSubnetBtn.classList.toggle('disabled', !iHoldControl);
+}
+
+// The NTRIP session (NTRIP plan, Phase 4): a plain headline and what to do about it, the
+// service in use with the switch, the last switch notice, the checks and the mode. state is
+// NtripState (0 stopped, 1 connecting, 2 connected, 3 streaming, 4 waiting, 5 gave up),
+// lastError NtripCategory (1 no network, 2 unreachable, 3 login, 4 mount point, 5 busy,
+// 6 no corrections, 7 stream lost, 8 not understood; -1 none).
+const NT_OPEN = 2, NT_STREAMING = 3, NT_WAITING = 4, NT_GAVE_UP = 5;
+function ntripHeadline(s) {
+  const ns = s.ntripSession;
+  if (!s.ntripEnabled) return tr('Off');
+  if (!ns || ns.state === 0) return s.ntripStatus || tr('Not Connected');
+  if (ns.state === NT_STREAMING) return ns.usingFallback ? tr('Corrections arriving (fallback)') : tr('Corrections arriving');
+  if (ns.state === 1) return tr('Connecting…');
+  if (ns.state === NT_OPEN) return tr('Connected, waiting for corrections');
+  if (ns.lastError < 0) return s.ntripStatus || tr('Not Connected');
+  switch (ns.lastError) {
+    case 3: return tr('Login refused');
+    case 4: return tr('Mount point not found');
+    case 5: return tr('Service is busy');
+    case 2: return tr('Cannot reach the service');
+    case 1: return tr('No network');
+    case 6: return tr('Connected, but no corrections');
+    case 7: return tr('Corrections stopped');
+    default: return tr('Service not understood');
+  }
+}
+function ntripAdvice(s) {
+  const ns = s.ntripSession;
+  if (!s.ntripEnabled || !ns || (ns.state !== NT_WAITING && ns.state !== NT_GAVE_UP)) return '';
+  const again = ns.state === NT_WAITING ? ' ' + tr('Trying again in {n} s.', { n: Math.round(ns.retrySeconds) }) : '';
+  switch (ns.lastError) {
+    case 3: return tr('Check the user name and password.') + ' ' + tr('Some casters also answer like this when the mount point is wrong.') + again;
+    case 4: return tr('Check the mount point. Capitals matter.') + again;
+    case 5: return tr('The service is busy, starting up, or this login is already in use.') + again;
+    case 2: return tr('Check the address and the internet connection.') + again;
+    case 1: return tr('There is no network connection.') + again;
+    case 6: return tr('Some services need the position: check that the GPS has one.') + again;
+    case 7: return tr('The connection dropped.') + again;
+    default: return tr('Check the address, port and mount point.') + again;
+  }
+}
+// What works and what does not, in the order a connection is made.
+function ntripChecks(s) {
+  const ns = s.ntripSession, r = s.ntripRtcm, open = ns.state === NT_OPEN || ns.state === NT_STREAMING, err = ns.lastError;
+  const newest = pred => r ? r.types.filter(x => pred(x.type)).reduce((m, x) => Math.min(m, x.last), Infinity) : Infinity;
+  const obs = newest(rtcmIsObs), base = newest(t => t === 1005 || t === 1006), session = r ? r.sessionSeconds : 0;
+  // Nothing yet is "still waiting" until the stream has run for a while; once there is one, it is late when it is old.
+  const late = (age, soon, old) => Number.isFinite(age) ? age > old : session > soon;
+  const c = (ok, bad, text) => ({ cls: ok ? 'ok' : bad ? 'bad' : 'wait', text });
+  return [
+    c(open, err === 1 || err === 2, open ? tr('Connected to the service') : err === 1 || err === 2 ? tr('Cannot connect to the service') : tr('Connecting to the service')),
+    c(open, err === 3, open ? tr('Logged in') : err === 3 ? tr('Login refused') : tr('Login not checked yet')),
+    c(open, err === 4, open ? tr('Mount point found') : err === 4 ? tr('Mount point not found') : tr('Mount point not checked yet')),
+    c(obs <= 5, open && (err === 6 || err === 7 || late(obs, 10, 10)),
+      obs <= 5 ? tr('Corrections arriving') : open && late(obs, 10, 10) ? tr('No corrections arriving') : tr('Waiting for corrections')),
+    c(base <= 60, open && late(base, 30, 60),
+      base <= 60 ? tr('Base station position received') : open && late(base, 30, 60) ? tr('No base station position') : tr('Waiting for the base station position')),
+    c(Number.isFinite(s.age) && s.age <= 5 && open, open && Number.isFinite(s.age) && s.age > 5,
+      Number.isFinite(s.age) ? tr('Correction age {n} s', { n: s.age.toFixed(0) }) : tr('Correction age unknown')),
+  ];
+}
+// The one switch of the Network IO card, only with a fallback. It always asks first: RTK may be lost.
+function renderNtripSwitch(s) {
+  const ns = s.ntripSession, btn = document.getElementById('nio-svc-switch');
+  btn.hidden = !(s.ntripEnabled && ns && ns.hasFallback);
+  if (btn.hidden) return;
+  btn.textContent = ns.usingFallback ? tr('Switch to main') : tr('Switch to fallback');
+  btn.classList.toggle('disabled', !iHoldControl);
+}
+// The profile and the service in use, as one line: "Home · MOUNT@caster.example:2101".
+const ntripWho = ns => [ns.profile, ns.service].filter(Boolean).join(' · ');
+function renderNtripSession(s) {
+  const ns = s.ntripSession, on = !!s.ntripEnabled && !!ns;
+  const advice = document.getElementById('nio-ntrip-advice');
+  advice.textContent = ntripAdvice(s);
+  advice.hidden = !advice.textContent;
+
+  // Which service is in use (only with a fallback); the switch itself is on the Network IO card.
+  const svcText = document.getElementById('nio-svc-text');
+  const who = on ? ntripWho(ns) : '';
+  svcText.hidden = !(on && (ns.hasFallback || who));
+  if (!svcText.hidden) svcText.textContent = (ns.hasFallback ? (ns.usingFallback ? tr('Using the fallback service') : tr('Using the main service')) + (who ? ': ' : '') : '') + who;
+  const note = document.getElementById('nio-ntrip-notice');
+  const text = ns && ns.mainIsBack && !ns.notice ? tr('The main service answers again.') : (ns ? ns.notice : '');
+  note.hidden = !text;
+  note.textContent = text;
+
+  const box = document.getElementById('nio-checks');
+  const showChecks = on && ns.state !== 0;
+  box.hidden = !showChecks;
+  if (showChecks) {
+    const rows = ntripChecks(s);
+    document.getElementById('nio-checks-sum').textContent = tr('Checks: {ok} of {n} fine', { ok: rows.filter(x => x.cls === 'ok').length, n: rows.length });
+    if (box.open) document.getElementById('nio-checks-rows').innerHTML = rows.map(x =>
+      '<div class="nio-chk-row ' + x.cls + '"><span class="mark">' + (x.cls === 'ok' ? '✓' : x.cls === 'bad' ? '✕' : '…') + '</span><span>' + esc(x.text) + '</span></div>').join('');
+  }
+
+  const mode = ns && ns.profilePerField ? 1 : 0;
+  for (const b of document.querySelectorAll('#nio-mode .cfg-act')) {
+    b.classList.toggle('active', +b.dataset.v === mode);
+    b.classList.toggle('disabled', !iHoldControl);
+  }
+  document.getElementById('nio-mode-hint').textContent = mode
+    ? tr('A loaded field uses its own profile. The fallback service is not used.')
+    : tr('One profile is in use, with its fallback service. Loading a field changes nothing.');
+}
+document.getElementById('nio-checks').addEventListener('toggle', () => { if (statusBar) renderNtripSession(statusBar); });
+document.getElementById('nio-svc-switch').addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  const ns = statusBar && statusBar.ntripSession;
+  if (!iHoldControl || !ns) return;
+  const toMain = ns.usingFallback;
+  showConfirm(toMain ? tr('Switch to the main service') : tr('Switch to the fallback service'),
+    tr('GPS may lose RTK and the position may shift a little.') + ' ' + (toMain ? tr('Switch to the main service?') : tr('Switch to the fallback service?')),
+    () => {
+      // The service may have changed while the question was open (an automatic switch): then there is nothing left to do.
+      const now = statusBar && statusBar.ntripSession;
+      if (now && now.usingFallback === toMain) transport.send('ntrip.switch|' + (toMain ? 'main' : 'fallback'));
+    });
+});
+for (const b of document.querySelectorAll('#nio-mode .cfg-act'))
+  b.addEventListener('pointerdown', e => { e.stopPropagation(); if (iHoldControl) cfgSend('conn.ntripProfilePerField', b.dataset.v); });
+
+
+// NTRIP Settings — chain sub-panel of Network IO: the connection in detail, the mode, the options and the
+// profiles. The Network IO card keeps only the first lines and the two buttons.
+const ntsPanel = document.getElementById('ntripsettings');
+function openNtripSettings() { lnOpen('ntripsettings', 'ln-network', renderNtripSettings); }
+document.getElementById('nio-ntset').addEventListener('pointerdown', e => { e.stopPropagation(); openNtripSettings(); });
+document.getElementById('nts-back').addEventListener('pointerdown', e => { e.stopPropagation(); lnOpen('networkio', 'ln-network', renderNetworkIo); });
+document.getElementById('nts-x').addEventListener('pointerdown', e => { e.stopPropagation(); lnCloseAll(); });
+for (const cb of ntsPanel.querySelectorAll('.nio-chk'))
+  cb.addEventListener('change', () => cfgSend(cb.dataset.key, cb.checked ? '1' : '0'));
+function renderNtripSettings() {
+  const s = statusBar; if (!s) return;
+  document.getElementById('nts-dot').style.background = s.ntripConnected ? '#22c55e' : '#6b7280';
+  document.getElementById('nts-status').textContent = ntripHeadline(s);
+  renderNtripSession(s);
+  renderNtripRtcm(s);
   const bc = document.getElementById('nio-rtcm-bc');
   if (document.activeElement !== bc) bc.checked = !!s.rtcmBroadcast;
   const nen = document.getElementById('nio-ntrip-on');
-  if (document.activeElement !== nen) nen.checked = !!s.ntripEnabled;
-  const p100 = document.getElementById('nio-pgn100');
-  if (document.activeElement !== p100) p100.checked = !!s.sendCorrectedPosition;
-  renderNtripRtcm(s);
-  nioSubnetBtn.classList.toggle('disabled', !iHoldControl);
+  nen.textContent = s.ntripEnabled ? tr('NTRIP active') : tr('NTRIP disabled');
+  nen.style.borderColor = s.ntripEnabled ? '#22c55e' : '';
 }
+// Active connects the default profile (even when its auto-connect is off), Disabled drops the connection.
+document.getElementById('nio-ntrip-on').addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  if (statusBar) cfgSend('conn.ntripEnabled', statusBar.ntripEnabled ? '0' : '1');
+});
 
 // What the caster is sending (RTCM plan, Phase 5): the receiver's fix and correction age,
 // a plain warning when the base position or the observations are missing, and the message
@@ -3084,13 +3732,18 @@ function ntripRtcmWarning(r) {
   if (base > 60) return tr('No base position received for {n} s.', { n: Math.round(base) });
   return '';
 }
-function renderNtripRtcm(s) {
+// The receiver's fix and the age of its corrections: the line of the Network IO card.
+function renderNtripRx(s) {
   const r = s.ntripConnected ? s.ntripRtcm : null;
-  const rx = document.getElementById('nio-ntrip-rx'), warn = document.getElementById('nio-ntrip-warn');
-  const box = document.getElementById('nio-rtcm');
-  box.hidden = !r;
+  const rx = document.getElementById('nio-ntrip-rx');
   rx.textContent = r ? tr('Receiver: {fix}, correction age {age} s', { fix: s.fixText || '—', age: Number.isFinite(s.age) ? s.age.toFixed(0) : '—' }) : '';
   rx.classList.toggle('nio-aged', !!r && s.age > 5);
+}
+function renderNtripRtcm(s) {
+  const r = s.ntripConnected ? s.ntripRtcm : null;
+  const warn = document.getElementById('nio-ntrip-warn');
+  const box = document.getElementById('nio-rtcm');
+  box.hidden = !r;
   const w = r ? ntripRtcmWarning(r) : '';
   warn.hidden = !w;
   warn.textContent = w;
@@ -3176,7 +3829,7 @@ function renderSystemData() {
 // Back reopens the parent fly-out (Network IO); Close → map.
 let ntSelId = null;
 function openNtripProfiles() { lnOpen('ntripprofiles', 'ln-network', renderNtripList); }
-document.getElementById('nt-back').addEventListener('pointerdown', e => { e.stopPropagation(); lnOpen('networkio', 'ln-network', renderNetworkIo); });
+document.getElementById('nt-back').addEventListener('pointerdown', e => { e.stopPropagation(); openNtripSettings(); });
 document.getElementById('nt-x').addEventListener('pointerdown', e => { e.stopPropagation(); lnCloseAll(); });
 document.getElementById('nt-add').addEventListener('pointerdown', e => { e.stopPropagation(); openNtripEditor(null); });
 document.getElementById('nt-edit').addEventListener('pointerdown', e => { e.stopPropagation(); const p = selectedNtProfile(); if (p) openNtripEditor(p); });
@@ -3187,6 +3840,24 @@ document.getElementById('nt-del').addEventListener('pointerdown', e => {
 });
 document.getElementById('nt-default').addEventListener('pointerdown', e => {
   e.stopPropagation(); const p = selectedNtProfile(); if (p) transport.send('ntrip.setDefault|' + p.id);
+});
+let _ntripUseKey = '';
+// The profile the client is connected with: by its name, which the host sends with the session.
+function ntripProfileInUse(p) {
+  const s = statusBar, ns = s && s.ntripSession;
+  return !!(s && s.ntripEnabled && ns && ns.state !== 0 && ns.profile && ns.profile === p.name);
+}
+// Use: connect with the selected profile now. It asks first when a session is running: RTK may be lost.
+document.getElementById('nt-use').addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  const p = selectedNtProfile(), s = statusBar;
+  if (!p || !iHoldControl) return;
+  if (!s || !s.ntripEnabled) { showToast(tr('NTRIP is disabled. Switch it on in NTRIP Settings first.')); return; }
+  if (ntripProfileInUse(p)) return;
+  const go = () => transport.send('ntrip.use|' + p.id);
+  const ns = s.ntripSession;
+  if (ns && ns.state !== 0) showConfirm(tr('Use this profile'), tr('GPS may lose RTK and the position may shift a little.') + ' ' + tr('Connect with {name}?', { name: p.name }), go);
+  else go();
 });
 function selectedNtProfile() { return (ntripProfiles && ntripProfiles.profiles.find(p => p.id === ntSelId)) || null; }
 function renderNtripList() {
@@ -3200,8 +3871,18 @@ function renderNtripList() {
     row.innerHTML = '<div><div class="nt-name"></div><div class="nt-mount"></div></div>'
       + '<div class="nt-caster"></div><div class="nt-def">' + (p.isDefault ? '★' : '') + '</div>';
     row.querySelector('.nt-name').textContent = p.name;
-    row.querySelector('.nt-mount').textContent = p.mountPoint;
-    row.querySelector('.nt-caster').textContent = p.casterHost;
+    const inUse = ntripProfileInUse(p);
+    row.querySelector('.nt-mount').textContent = p.mountPoint + (inUse ? ' · ' + tr('in use') : '');
+    if (inUse) row.querySelector('.nt-name').style.color = '#22c55e';
+    // With a fallback the column names both services; without one it is just the caster.
+    const caster = row.querySelector('.nt-caster');
+    const fbHost = p.fallback && p.fallback.host;
+    for (const [label, host] of fbHost ? [[tr('Main:') + ' ', p.casterHost], [tr('FB:') + ' ', fbHost]] : [['', p.casterHost]]) {
+      const line = document.createElement('div');
+      line.textContent = label + host;
+      line.title = line.textContent;
+      caster.appendChild(line);
+    }
     row.addEventListener('pointerdown', ev => { ev.stopPropagation(); ntSelId = p.id; renderNtripList(); });
     list.appendChild(row);
   }
@@ -3210,7 +3891,7 @@ function renderNtripList() {
 // Edit NTRIP Profile — chain sub-panel of the profiles list (mirrors
 // NtripProfileEditorPanel). Opening REPLACES the list; Back reopens the list; Close →
 // map; Save returns to the list (native NavigateBack). Client-side buffer.
-let nteBuf = null, _nteTestActive = false;
+let nteBuf = null, _nteTestActive = false, _nteTestWhich = '';   // which Test button ran: '' main, 'fb' fallback
 function openNtripEditor(p) {
   nteBuf = p
     ? { id: p.id, associatedFields: (p.associatedFields || []).slice() }
@@ -3222,11 +3903,20 @@ function openNtripEditor(p) {
   document.getElementById('nte-mount').value = p ? p.mountPoint : '';
   document.getElementById('nte-user').value = p ? p.username : '';
   document.getElementById('nte-pass').value = p ? p.password : '';
-  document.getElementById('nte-ver').value = p && p.ntripVersion === 2 ? '2' : '1';
   document.getElementById('nte-auto').checked = p ? !!p.autoConnect : true;
   document.getElementById('nte-default').checked = p ? !!p.isDefault : false;
+  const fb = p && p.fallback;
+  document.getElementById('nte-fb-host').value = fb ? fb.host : '';
+  document.getElementById('nte-fb-port').value = fb ? fb.port : 2101;
+  document.getElementById('nte-fb-mount').value = fb ? fb.mount : '';
+  document.getElementById('nte-fb-user').value = fb ? fb.username : '';
+  document.getElementById('nte-fb-pass').value = fb ? fb.password : '';
+  document.getElementById('nte-fb-auto').checked = fb ? !!fb.autoSwitch : false;
+  document.getElementById('nte-fb-after').value = fb ? fb.after : 2;
   document.getElementById('nte-teststatus').textContent = '';
+  document.getElementById('nte-fb-teststatus').textContent = '';
   _nteTestActive = false;
+  _nteTestWhich = '';
   lnOpen('ntripeditor', 'ln-network', renderNteFields);
 }
 document.getElementById('nte-back').addEventListener('pointerdown', e => { e.stopPropagation(); openNtripProfiles(); });
@@ -3248,6 +3938,65 @@ function renderNteFields() {
     box.appendChild(lbl);
   }
 }
+// Find mount points — the host reads the caster's source table and sends it nearest first; a tap fills the
+// Mount field of the main service or the fallback.
+let _ntmFor = '';
+function findMounts(fb) {
+  const p = fb ? 'nte-fb-' : 'nte-';
+  const host = document.getElementById(p + 'host').value.trim();
+  const port = document.getElementById(p + 'port').value || '2101';
+  const user = document.getElementById(p + 'user').value, pass = document.getElementById(p + 'pass').value;
+  _ntmFor = fb ? 'fallback' : 'main';
+  document.getElementById('ntm-filter').value = '';
+  if (!host) {
+    ntripMounts = { seq: 0, forService: _ntmFor, status: 'error:' + tr('Error: Caster host is required'), items: [] };
+  } else {
+    ntripMounts = { seq: ntripMounts.seq, forService: _ntmFor, status: 'loading', items: [] };
+    // pass is the host's mask for a stored password; the id lets the host use that one (#397)
+    transport.send('ntrip.mountpoints|' + [host, port, user, pass, (nteBuf && nteBuf.id) || '', fb ? '1' : '0'].join('\t'));
+  }
+  renderNtripMounts();
+  openDialog('dlg-ntmounts');
+}
+function renderNtripMounts() {
+  const card = document.getElementById('dlg-ntmounts');
+  if (!card.classList.contains('open') || ntripMounts.forService !== _ntmFor) return;
+  const loading = ntripMounts.status === 'loading';
+  const filter = document.getElementById('ntm-filter').value.trim().toLowerCase();
+  const items = ntripMounts.items.filter(m => !filter || (m.mount + ' ' + m.name + ' ' + m.country).toLowerCase().includes(filter));
+  const MAX_ROWS = 200;   // a big network has over a thousand: the nearest first, the rest through the search
+  const shown = items.slice(0, MAX_ROWS);
+  const partial = ntripMounts.status === 'partial';   // the list is shown all the same
+  const count = items.length > MAX_ROWS ? tr('{n} mount points, showing {m}. Search to narrow it down.', { n: items.length, m: MAX_ROWS })
+    : tr('{n} mount points', { n: items.length });
+  document.getElementById('ntm-status').textContent = loading ? tr('Loading...')
+    : partial ? count + ' ' + tr('Only part of the list arrived.')
+    : ntripMounts.status.startsWith('error:') ? ntripMounts.status.slice(6)   // the caster's own reason, as the host worded it
+    : count;
+  const list = document.getElementById('ntm-list');
+  list.innerHTML = '';
+  for (const m of shown) {
+    const row = document.createElement('button');
+    row.className = 'ntm-row';
+    const km = Number.isFinite(m.km) ? (m.km < 10 ? m.km.toFixed(1) : Math.round(m.km)) + ' km' : '';
+    row.innerHTML = '<span class="ntm-top"><span class="ntm-mount" translate="no"></span><span class="ntm-km" translate="no"></span></span><span class="ntm-sub"></span>';
+    row.querySelector('.ntm-mount').textContent = m.mount;
+    row.querySelector('.ntm-km').textContent = km;
+    row.querySelector('.ntm-sub').textContent = [m.name, m.format, m.systems, m.country, m.needsPosition ? tr('needs your position') : ''].filter(Boolean).join(' · ');
+    row.addEventListener('pointerdown', e => {
+      e.stopPropagation();
+      document.getElementById(_ntmFor === 'fallback' ? 'nte-fb-mount' : 'nte-mount').value = m.mount;
+      closeNtripMounts();
+    });
+    list.appendChild(row);
+  }
+}
+document.getElementById('ntm-filter').addEventListener('input', renderNtripMounts);
+// Closing the list also tells the host to drop it: it is not kept, and a client that connects later is not sent it.
+function closeNtripMounts() { closeDialog(); transport.send('ntrip.mountpoints.clear'); }
+document.getElementById('ntm-close').addEventListener('pointerdown', e => { e.stopPropagation(); closeNtripMounts(); });
+document.getElementById('nte-find').addEventListener('pointerdown', e => { e.stopPropagation(); findMounts(false); });
+document.getElementById('nte-fb-find').addEventListener('pointerdown', e => { e.stopPropagation(); findMounts(true); });
 document.getElementById('nte-test').addEventListener('pointerdown', e => {
   e.stopPropagation();
   const host = document.getElementById('nte-host').value.trim();
@@ -3258,10 +4007,26 @@ document.getElementById('nte-test').addEventListener('pointerdown', e => {
   if (!host) { st.textContent = tr('Error: Caster host is required'); return; }
   if (!mount) { st.textContent = tr('Error: Mount point is required'); return; }
   _nteTestActive = true;
+  _nteTestWhich = '';
+  for (const id of ['nte-teststatus', 'nte-fb-teststatus']) document.getElementById(id).textContent = '';
   st.textContent = tr('Testing connection...');
-  const ver = document.getElementById('nte-ver').value;
-  // pass is the host's mask for a stored password; the id lets the host use that one (#397); fork: version last
-  transport.send('ntrip.test|' + [host, port, mount, user, pass, (nteBuf && nteBuf.id) || '', ver].join('\t'));
+  // pass is the host's mask for a stored password; the id lets the host use that one (#397)
+  transport.send('ntrip.test|' + [host, port, mount, user, pass, (nteBuf && nteBuf.id) || '', '0'].join('\t'));
+});
+document.getElementById('nte-fb-test').addEventListener('pointerdown', e => {
+  e.stopPropagation();
+  const host = document.getElementById('nte-fb-host').value.trim();
+  const port = document.getElementById('nte-fb-port').value || '2101';
+  const mount = document.getElementById('nte-fb-mount').value.trim();
+  const user = document.getElementById('nte-fb-user').value, pass = document.getElementById('nte-fb-pass').value;
+  const st = document.getElementById('nte-fb-teststatus');
+  if (!host) { st.textContent = tr('Error: Caster host is required'); return; }
+  if (!mount) { st.textContent = tr('Error: Mount point is required'); return; }
+  _nteTestActive = true;
+  _nteTestWhich = 'fb';
+  for (const id of ['nte-teststatus', 'nte-fb-teststatus']) document.getElementById(id).textContent = '';
+  st.textContent = tr('Testing connection...');
+  transport.send('ntrip.test|' + [host, port, mount, user, pass, (nteBuf && nteBuf.id) || '', '1'].join('\t'));
 });
 document.getElementById('nte-save').addEventListener('pointerdown', e => {
   e.stopPropagation();
@@ -3277,7 +4042,15 @@ document.getElementById('nte-save').addEventListener('pointerdown', e => {
     document.getElementById('nte-auto').checked ? '1' : '0',
     document.getElementById('nte-default').checked ? '1' : '0',
     nteBuf.associatedFields.join(','),
-    document.getElementById('nte-ver').value,
+    // The fallback service; no host means none (the host removes it).
+    document.getElementById('nte-fb-host').value.trim() ? '1' : '0',
+    document.getElementById('nte-fb-host').value.trim(),
+    document.getElementById('nte-fb-port').value || '2101',
+    document.getElementById('nte-fb-mount').value.trim(),
+    document.getElementById('nte-fb-user').value,
+    document.getElementById('nte-fb-pass').value,
+    document.getElementById('nte-fb-auto').checked ? '1' : '0',
+    document.getElementById('nte-fb-after').value || '2',
   ];
   transport.send('ntrip.save|' + fields.join('\t'));
   openNtripProfiles(); // native SaveNtripProfileCommand ends in NavigateBack → list
@@ -4078,10 +4851,14 @@ function renderSettings() {
   if (profilesDirty) { profilesDirty = false; if (document.getElementById('vehtoolhub').classList.contains('open')) refreshHub(); }
   // Network IO panel: module/NTRIP readouts ride the Status frame → refresh each frame.
   if (nioPanel.classList.contains('open')) renderNetworkIo();
+  if (ntsPanel.classList.contains('open')) renderNtripSettings();
   if (sdPanel.classList.contains('open')) renderSystemData();
+  // The profile list marks the one in use: redrawn only when that changes, not on every frame.
+  const useKey = ntripProfiles ? ntripProfiles.profiles.map(ntripProfileInUse).join() : '';
+  if (useKey !== _ntripUseKey) { _ntripUseKey = useKey; if (document.getElementById('ntripprofiles').classList.contains('open')) renderNtripList(); }
   // NTRIP test result rides the Status frame while a test is in flight.
   if (_nteTestActive && document.getElementById('ntripeditor').classList.contains('open') && statusBar)
-    document.getElementById('nte-teststatus').textContent = statusBar.ntripTestStatus || '';
+    document.getElementById(_nteTestWhich === 'fb' ? 'nte-fb-teststatus' : 'nte-teststatus').textContent = statusBar.ntripTestStatus || '';
   // Re-read the NTRIP list/editor fields when a fresh profiles frame arrives.
   if (ntripDirty) {
     ntripDirty = false;
@@ -4213,7 +4990,7 @@ function renderRole() {
 }
 function updateControlUi() {
   iHoldControl = lastControl.held && lastControl.holderId === myClientId;
-  if (iHoldControl) applyMobileQualityCap(); // a host-wide setting: sent once we may (#397)
+  if (iHoldControl) { applyMobileQualityCap(); reportMaxTexture(); } // host-wide: sent once we may (#397)
   if (typeof renderHostPrompt === 'function') renderHostPrompt(); // who may answer
   if (typeof updateAsGated === 'function') updateAsGated(); // re-gate AutoSteer actions
   if (document.getElementById('recpath').classList.contains('open')) renderRecPath(); // re-gate Play
@@ -4583,40 +5360,108 @@ function xteText(xte) {
 // Lightbar readout text → DOM overlay (the LED strip itself is drawn by lightbarSk).
 // Updated every frame from the latest tick; hidden when guidance is off.
 const lbEl = document.getElementById('lb');
-// Arrow + text as two spans, so the arrow can take the colour of the lit cells; the
-// pass number goes on its own line below.
-const lbArrow = lbEl.appendChild(document.createElement('span'));
-const lbText = lbEl.appendChild(document.createElement('span'));
-const lbPass = lbEl.appendChild(document.createElement('div'));
+// Arrow + text as two spans, so the arrow can take the colour of the lit cells.
+const lbCore = lbEl.appendChild(document.createElement('span'));
+lbCore.className = 'lb-core';
+const lbArrow = lbCore.appendChild(document.createElement('span'));
+const lbText = lbCore.appendChild(document.createElement('span'));
+// Light bar style: AgOpenGPS's small yellow figure, a slow average of the error that shows
+// while it stays under 15 cm. Beside the distance, not under it: the pass HUD is there.
+const lbAvg = lbCore.appendChild(document.createElement('span'));
+lbAvg.className = 'lb-avg';
+// The widest readout (three digits and the average), so the cells keep their place (#479).
+const lbProbe = lbEl.appendChild(document.createElement('div'));
+lbProbe.className = 'lb-probe';
+const lbProbeCore = lbProbe.appendChild(document.createElement('span'));
+const lbProbeAvg = lbProbe.appendChild(document.createElement('span'));
+lbProbeAvg.className = 'lb-avg';
+let lbProbeKey = '', lbProbeHalfW = 0;
+let lbAvgTick = null, lbAvgM = 0.15;
+let lbHalfW = 0; // from the centre to the readout's right end (average included), for the cells
+let lbCy = 70, steerCy = 84; // screen y of the readout row's and the steer bar slot's centres
+let lbSteerH = -1;
+const lbSteer = document.getElementById('lb-steer');
+const LB_TRAM_W = 38; // a tram dot and its gap from the readout, at HUD scale 1
 const LB_LEFT = '#ff7a3d', LB_RIGHT = '#39FF6A'; // as lightbarSk: steer left / steer right, on line
 function updateLightbarText() {
   const cfg = config && config.autosteer;
-  if (!tick || !tick.guidanceActive || !cfg || !cfg.guidanceBarOn) { lbEl.style.display = 'none'; return; }
-  // AgOpenGPS: "Light bar" is on/off, "Steer bar" picks the style. In light-bar style the
-  // distance text shows even with the bar off; in steer-bar style it all goes (#111).
-  if (cfg.steerBarEnabled && !cfg.lightbarEnabled) { lbEl.style.display = 'none'; return; }
-  if (cfg.steerBarEnabled) {
-    // Steer bar: steer-angle error (deg) with dead-zone.
-    let err = tick.steerAngleError || 0;
-    const dz = (tick.op && tick.op.autoSteer) ? 0.5 : 0.2;
-    if (Math.abs(err) < dz) err = 0;
-    lbArrow.textContent = err === 0 ? '' : err > 0 ? '◀ ' : '▶ ';
-    lbArrow.style.color = err > 0 ? LB_LEFT : LB_RIGHT;
-    lbText.textContent = err === 0 ? '> 0 <' : `${Math.abs(err).toFixed(1)}°`;
-    lbPass.textContent = '';
-  } else {
-    // Light bar: cross-track distance.
-    const xte = tick.crossTrackError || 0;
-    const onLine = Math.abs(xte) < 0.05;
-    lbArrow.textContent = (onLine ? '●' : xte > 0 ? '◀' : '▶') + ' '; // arrow = steer direction
-    lbArrow.style.color = !onLine && xte > 0 ? LB_LEFT : LB_RIGHT;
-    // 1-based pass label (human counting): the reference AB line is "Pass 1", one over is
-    // "Pass 2", etc. — magnitude only (the arrow already shows which way to steer).
-    const pass = (tick.op ? tick.op.passNumber : 0) | 0;
-    lbText.textContent = fmtUnit(Math.abs(xte) * 100, 'cm', 0);
-    lbPass.textContent = tick.op && tick.op.contour ? '' : tr('Pass {n}', { n: Math.abs(pass) + 1 }); // no passes on a contour (#110)
+  // AgOpenGPS: On/Off shows or hides the bar, whatever its style; light bar or steer bar
+  // is the style, and both show the distance from the line here (#479).
+  const shown = !!(tick && tick.guidanceActive && cfg && cfg.guidanceBarOn && cfg.lightbarEnabled);
+  document.body.classList.toggle('steerbar', shown && !!cfg.steerBarEnabled);
+  document.body.classList.toggle('lightbar', shown && !cfg.steerBarEnabled);
+  // The steer bar is drawn into #lb-steer's slot under the readout; open it only for that style.
+  const steerH = shown && cfg.steerBarEnabled ? Math.round(24 * hudScale) : 0;
+  if (steerH !== lbSteerH) { lbSteerH = steerH; lbSteer.style.height = steerH + 'px'; }
+  if (!shown) { lbEl.style.display = 'none'; lbAvgTick = null; lbAvgM = 0.15; return; }
+  const xte = tick.crossTrackError || 0;
+  const onLine = Math.abs(xte) < 0.05;
+  lbArrow.textContent = (onLine ? '●' : xte > 0 ? '◀' : '▶') + ' '; // arrow = steer direction
+  lbArrow.style.color = !onLine && xte > 0 ? LB_LEFT : LB_RIGHT;
+  lbText.textContent = fmtUnit(Math.abs(xte) * 100, 'cm', 0);
+  if (cfg.steerBarEnabled) lbAvg.style.display = 'none';
+  else {
+    // Once per tick (AgOpenGPS: once per GPS fix), not per frame.
+    if (tick !== lbAvgTick) { lbAvgTick = tick; lbAvgM = Math.min(lbAvgM * 0.98 + Math.abs(xte) * 0.02, 0.15); }
+    lbAvg.textContent = fmtUnit(lbAvgM * 100, 'cm', 1);
+    lbAvg.style.display = lbAvgM < 0.15 ? 'inline' : 'none';
   }
   lbEl.style.display = 'block';
+  // Screen pixels (the canvas isn't zoomed): the readout's reach and its row's centre, for
+  // the light bar's cells; the steer bar's slot centre. The reach is the widest readout's, not
+  // this one's, so the cells don't jump as the digits or the average come and go; only a
+  // distance past three digits pushes them out.
+  const key = hudK + unitLabel('cm');
+  if (key !== lbProbeKey) {
+    lbProbeKey = key;
+    lbProbeCore.textContent = '▶ ' + fmtUnit(888, 'cm', 0);
+    lbProbeAvg.textContent = fmtUnit(14.9, 'cm', 1);
+    lbProbeHalfW = zoomRect(lbProbeCore).width / 2 + 10 * hudK + zoomRect(lbProbeAvg).width;
+  }
+  const liveHalfW = zoomRect(lbCore).width / 2 + (lbAvg.style.display === 'none' ? 0 : 10 * hudK + zoomRect(lbAvg).width);
+  lbHalfW = Math.max(lbProbeHalfW, liveHalfW);
+  const row = zoomRect(lbEl);
+  lbCy = row.top + row.height / 2;
+  if (steerH) { const st = zoomRect(lbSteer); steerCy = st.top + st.height / 2; }
+}
+
+// Tram lights (#451): AgOpenGPS's two dots, left and right of the light bar. The host sends
+// whether to show them (Tram tab Display, a tram mode on, a tool wider than the wheel track),
+// which wheel is on a tram track, and which side is forced on; a tap toggles the force.
+const tramLightsEl = document.getElementById('tram-lights');
+const tramL = document.getElementById('tram-l'), tramR = document.getElementById('tram-r');
+tramL.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); transport.send('tram.manualLeft'); });
+tramR.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); transport.send('tram.manualRight'); });
+function updateTramLights() {
+  const b = tick && tick.tools ? tick.tools.tramLights | 0 : 0;
+  tramLightsEl.classList.toggle('show', (b & 16) !== 0);
+  tramR.classList.toggle('on', (b & 1) !== 0);
+  tramL.classList.toggle('on', (b & 2) !== 0);
+  tramR.classList.toggle('manual', (b & 4) !== 0);
+  tramL.classList.toggle('manual', (b & 8) !== 0);
+  // Light bar style: the dots sit between the readout and the cells (lightbarSk leaves room).
+  const w = (b & 16) && document.body.classList.contains('lightbar')
+    ? Math.round(2 * (lbHalfW + LB_TRAM_W * hudK) / uiZoom) + 'px' : '';
+  if (tramLightsEl.style.width !== w) tramLightsEl.style.width = w;
+}
+
+// Pass HUD → DOM overlay under the lightbar readout, as AgOpenGPS's DrawTrackInfo: shown
+// with any track, whatever the Light bar / Steer bar settings. The host's label is an arrow
+// for the way you drive (↑ A→B, ↓ B→A) and the pass: the reference line is the edge between
+// two passes (PassGeometry), so each side counts from 1: pass 0 is "1R" (first pass right of
+// A→B), pass −1 is "1L". The side is fixed in the field, whichever way you drive. A nudge
+// follows, with its side as the nudge window shows it: "<12 cm" left, "12 cm>" right.
+const passHud = document.getElementById('pass-hud');
+function updatePassHud() {
+  // No passes on a contour (#110).
+  if (!tick || !tick.guidanceActive || !tick.op || tick.op.contour) { passHud.style.display = 'none'; return; }
+  const pass = tick.op.passNumber | 0;
+  const nudgeM = tick.op.nudgeOffset || 0;
+  const nudge = Math.round(Math.abs(nudgeM) * (isMetric() ? 100 : 39.3701));
+  const nudgeText = nudge === 0 ? '' : nudgeM < 0 ? ` <${nudge} ${unitLabel('cm')}` : ` ${nudge} ${unitLabel('cm')}>`;
+  const label = (tick.lineLabel || (pass >= 0 ? `${pass + 1}R` : `${-pass}L`)) + nudgeText;
+  if (passHud.textContent !== label) passHud.textContent = label;
+  passHud.style.display = 'block';
 }
 
 // Headland-distance HUD → DOM overlay (mirrors the native SkiaMapControl HUD).
@@ -4745,8 +5590,12 @@ SB.bar.addEventListener('pointerdown', e => e.stopPropagation());
 // Start Fullscreen (#110): browsers only allow fullscreen from a user gesture, so in a
 // plain browser go fullscreen on the first tap after the page loads. The desktop
 // launcher window opens fullscreen itself.
+// In the desktop launcher (Photino) the web view ignores the Fullscreen API: the button asks
+// the launcher over its message channel, which answers with the window's state (#498).
+const inLauncher = !!(window.external && typeof window.external.sendMessage === 'function');
 document.addEventListener('click', function startFs() {
   document.removeEventListener('click', startFs, true);
+  if (inLauncher) return;
   if (!(config && config.display && config.display.startFullscreen)) return;
   if (document.fullscreenElement || document.webkitFullscreenElement) return;
   const el = document.documentElement, req = el.requestFullscreen || el.webkitRequestFullscreen;
@@ -4758,18 +5607,8 @@ if (fsBtn) {
   // Use 'click' (not pointerdown): requestFullscreen needs a durable user activation
   // that pointerdown doesn't reliably grant on Android Chrome (entering took 2–3 taps).
   // exitFullscreen needs no activation, so that always worked first tap.
-  // fork (feature/bedienung-1): in the desktop launcher (Photino) the Fullscreen API only fills the
-  // web view; the launcher switches the window itself on a "fullscreen|1/0" message.
-  const photino = () => !!(window.external && typeof window.external.sendMessage === 'function');
-  let winFs = null; // the launcher's state as last asked; starts as App Settings › Start Fullscreen
   fsBtn.addEventListener('click', () => {
-    if (photino()) {
-      if (winFs === null) winFs = !!(config && config.display && config.display.startFullscreen);
-      winFs = !winFs;
-      window.external.sendMessage('fullscreen|' + (winFs ? '1' : '0'));
-      fsBtn.textContent = winFs ? '🗗' : '⛶';
-      return;
-    }
+    if (inLauncher) { window.external.sendMessage('fullscreen|toggle'); return; }
     if (fsEl()) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
     const el = document.documentElement, req = el.requestFullscreen || el.webkitRequestFullscreen;
     if (req) { try { const p = req.call(el); if (p && p.catch) p.catch(() => {}); } catch (_) {} }
@@ -4785,6 +5624,13 @@ if (fsBtn) {
   };
   document.addEventListener('fullscreenchange', sync);
   document.addEventListener('webkitfullscreenchange', sync);
+  if (inLauncher && typeof window.external.receiveMessage === 'function') {
+    // No OS exit pill over a launcher window, so only the icon follows its state.
+    window.external.receiveMessage(m => {
+      if (m === 'fullscreen|1' || m === 'fullscreen|0') fsBtn.textContent = m === 'fullscreen|1' ? '🗗' : '⛶';
+    });
+    window.external.sendMessage('fullscreen|state'); // Start Fullscreen may have opened it so
+  }
 }
 SB.modBtn.addEventListener('pointerdown', e => {
   e.stopPropagation();
@@ -5048,10 +5894,11 @@ function renderBottomNav() {
   applyOnScreenButtons(); // U-Turn / Lateral glyphs follow field-open + display toggles
   const visible = !!(scene && scene.hasField); // native gate: IsFieldOpen
   bottomNav.classList.toggle('open', visible);
-  if (!visible) { bnFlags.classList.remove('open'); bnAb.classList.remove('open'); return; }
+  if (!visible) { bnFlags.classList.remove('open'); bnAb.classList.remove('open'); renderRefNudge(false); return; }
   // AB-line-dependent buttons appear only with an active track.
   const hasTrack = !!(tick && tick.activeTrackName);
   for (const el of bottomNav.querySelectorAll('.bn-abdep')) el.classList.toggle('hide', !hasTrack);
+  renderRefNudge(hasTrack);
   const t = (tick && tick.tools) || {};
   document.getElementById('bn-skipnum').textContent = t.skipRows || 0;
   // Nudge readout (#93): driver-relative offset, cm (metric) / in (imperial), L/R side.
@@ -5554,6 +6401,7 @@ function wireCardDrag(card) {
     raiseCard(card); // the card's own handler doesn't hear it
     if (e.target.closest('button, select')) return;
     e.stopPropagation();
+    if (card.classList.contains('in-pane')) return; // the pane places it
     const r = zoomRect(card);
     // zoomRect and clientX are screen pixels; left/top are in the card's own (zoomed)
     // pixels.
@@ -5571,6 +6419,110 @@ function wireCardDrag(card) {
   hdr.addEventListener('pointercancel', end);
 }
 for (const id of ['chart-steer', 'chart-heading', 'chart-xte']) wireCardDrag(document.getElementById(id));
+
+// ---- Card pane (#456, Plans/CARD_PANE_SPLIT_PLAN.md) ----
+// The VT and web cards float over the map, or (split layout) sit in a pane on the left or right
+// with the map in the rest. In the pane the open cards go two to a tab, in the order they were
+// opened, each sized to its share of the pane; with none open the map has the whole window. The
+// layout and the pane's width are this browser's. A card moved into or out of the pane is moved in
+// the page, which reloads a web page, so that happens only when the layout changes: a tab switch
+// hides and shows cards.
+const CardPane = (() => {
+  const KEY = 'cards.pane', MIN = 1 / 3, MAX = 1 / 2, GAP = 6, DIV = 16; // DIV: the divider strip
+  let layout = 'float', frac = MIN, tab = 0;
+  try { const st = JSON.parse(localStorage.getItem(KEY) || '{}'); if (st.layout === 'left' || st.layout === 'right') layout = st.layout; if (st.frac >= MIN && st.frac <= MAX) frac = st.frac; } catch (_) {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ layout, frac })); } catch (_) {} };
+
+  const pane = document.createElement('div'); pane.id = 'cardpane';
+  const tabsEl = document.createElement('div'); tabsEl.className = 'cp-tabs';
+  const slots = document.createElement('div'); slots.className = 'cp-slots';
+  const divider = document.createElement('div'); divider.className = 'cp-divider';
+  pane.append(tabsEl, slots, divider);
+  document.body.insertBefore(pane, document.getElementById('vt-card-tpl'));
+  // Nothing in the pane reaches the map (the window-level pan, tap and wheel handlers).
+  for (const t of ['pointerdown', 'wheel']) pane.addEventListener(t, e => { if (!e.ctrlKey) e.stopPropagation(); });
+
+  // Every card: { card, fit(w, h) in its own pixels, name(), isOpen() }; order = when opened.
+  let cards = [], order = [];
+  const split = () => layout !== 'float';
+  const home = c => { c.card.classList.remove('in-pane', 'cp-hide'); c.card.style.order = ''; document.body.insertBefore(c.card, document.getElementById('vt-card-tpl')); c.fit(null); };
+  const into = c => { c.card.classList.add('in-pane'); if (c.card.parentNode !== slots) slots.appendChild(c.card); };
+
+  function layoutNow() {
+    order = order.filter(c => cards.includes(c) && c.isOpen());
+    const open = split() ? order : [];
+    pane.classList.toggle('show', open.length > 0);
+    pane.classList.toggle('right', layout === 'right');
+    if (!open.length) { setMapArea(0, 0); return; }
+    const w = Math.round(innerWidth * frac);
+    setMapArea(layout === 'left' ? w : 0, layout === 'right' ? w : 0);
+    pane.style.width = (w / uiZoom) + 'px';
+    const tabs = Math.ceil(open.length / 2);
+    tab = Math.min(tab, tabs - 1);
+    tabsEl.innerHTML = '';
+    tabsEl.style.display = tabs > 1 ? '' : 'none';
+    for (let t = 0; t < tabs; t++) {
+      const b = document.createElement('button');
+      b.className = 'cp-tab' + (t === tab ? ' active' : '');
+      b.textContent = open.slice(t * 2, t * 2 + 2).map(c => c.name()).join(' · ');
+      b.addEventListener('pointerdown', e => { e.preventDefault(); tab = t; layoutNow(); });
+      tabsEl.appendChild(b);
+    }
+    // Each card's share of the pane, in its own (zoomed) pixels.
+    const inTab = open.slice(tab * 2, tab * 2 + 2);
+    const sw = w / uiZoom - DIV - 2 * GAP;
+    const sh = (innerHeight / uiZoom - (tabs > 1 ? tabsEl.offsetHeight : 0) - GAP * (inTab.length + 1)) / inTab.length;
+    for (const c of cards) {
+      const k = inTab.indexOf(c);
+      c.card.classList.toggle('cp-hide', k < 0);
+      if (k >= 0) { c.card.style.order = String(k); c.fit(sw, sh); }
+    }
+  }
+
+  // Width: dragging the divider, a third to a half of the window.
+  let drag = null;
+  divider.addEventListener('pointerdown', e => {
+    e.preventDefault(); drag = { x: e.clientX, w: innerWidth * frac };
+    try { divider.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  divider.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const dx = (e.clientX - drag.x) * (layout === 'left' ? 1 : -1);
+    const f = Math.min(MAX, Math.max(MIN, (drag.w + dx) / innerWidth));
+    if (Math.abs(f - frac) * innerWidth >= 2) { frac = f; layoutNow(); }
+  });
+  const end = () => { if (drag) { drag = null; save(); } };
+  divider.addEventListener('pointerup', end); divider.addEventListener('pointercancel', end);
+  for (const t of ['resize', 'uizoom']) addEventListener(t, () => { if (split()) layoutNow(); });
+
+  return {
+    get layout() { return layout; },
+    setLayout(l) {
+      if (l === layout) return;
+      layout = l; save();
+      for (const c of cards) if (split()) into(c); else home(c);
+      layoutNow();
+    },
+    // A card made: into the pane in the split layout. fit(null) means floating again.
+    track(card, opts) {
+      const c = Object.assign({ card }, opts);
+      cards.push(c);
+      if (split()) into(c);
+      return c;
+    },
+    untrack(c) { cards = cards.filter(x => x !== c); order = order.filter(x => x !== c); if (split()) layoutNow(); },
+    // A card opened (shown at once, on its tab) or closed.
+    shown(c, on) {
+      order = order.filter(x => x !== c);
+      if (on) order.push(c);
+      if (!split()) return;
+      if (on) tab = Math.floor(order.filter(x => x.isOpen()).indexOf(c) / 2);
+      layoutNow();
+    },
+    // A card's name changed (its tab's label).
+    renamed() { if (split()) layoutNow(); },
+  };
+})();
 
 // ---- VT painter ----
 // The virtual terminal's draw list (screens, soft keys, list options) painted in Canvas 2D: no
@@ -5897,6 +6849,17 @@ const Vt = (() => {
     let keyPage = 0, showGateway = false, selecting = null, sizeIx = 1, identTimer = null;
     try { sizeIx = SIZES.indexOf(+localStorage.getItem(sizeKey)); if (sizeIx < 0) sizeIx = 1; } catch (_) {}
     card.style.setProperty('--vt', SIZES[sizeIx] + 'px');
+    // In the card pane the mask is the largest square that fits beside its soft key columns
+    // (a third of the mask wide) under the header.
+    const pc = CardPane.track(card, {
+      name: () => tr('VT {n}', { n: index + 1 }),
+      isOpen: () => card.style.display !== 'none',
+      fit(w, h) {
+        if (w == null) { card.style.setProperty('--vt', SIZES[sizeIx] + 'px'); return; }
+        const hdr = card.querySelector('.chart-hdr').offsetHeight || 30;
+        card.style.setProperty('--vt', Math.max(120, Math.floor(Math.min((w - 12) * 3 / 4, h - hdr - 12))) + 'px');
+      },
+    });
     const send = (cmd, arg) => transport.send('vt.' + cmd + '|' + index + (arg !== undefined ? ',' + arg : ''));
 
     const term = {
@@ -5905,10 +6868,11 @@ const Vt = (() => {
       setOpen(on) {
         card.style.display = on ? '' : 'none';
         navBtn.classList.toggle('active', terms.some(x => x.open()));
+        CardPane.shown(pc, on);
         if (on) this.render();
       },
       reset() { screen = null; edit = null; workingSets = null; alarms = []; },
-      remove() { clearTimeout(term.audioTimer); clearTimeout(identTimer); card.remove(); },
+      remove() { clearTimeout(term.audioTimer); clearTimeout(identTimer); CardPane.untrack(pc); card.remove(); },
       message(m) {
         switch (m.type) {
           case 'screen': screen = m; break;
@@ -6283,6 +7247,189 @@ const Vt = (() => {
   return { message, image, render };
 })();
 
+// ---- Web cards ----
+// Add-ons' own web pages in cards (Plans/ADDON_WEB_CARDS_PLAN.md), apart from the VT cards. The
+// bookmarks (name + URL) are the host's, the same on every browser; which cards are open, their
+// page, size and place are this browser's (localStorage). {host} in a URL is the AgOpenWeb host
+// as this browser reaches it. The page loads from the add-on itself, on its own origin. A browser
+// without control sees the page under a cover that takes the taps (#397).
+const WebCards = (() => {
+  const tpl = document.getElementById('web-card-tpl'), navBtn = document.getElementById('ln-web');
+  const SIZES = [[480, 320], [640, 420], [800, 520], [1000, 640]], MAX = 4, KEY = 'web.cards';
+  let bookmarks = [], cards = [], shown = false;
+
+  const resolve = url => url.split('{host}').join(location.hostname);
+  function save() {
+    try {
+      localStorage.setItem(KEY, JSON.stringify({ shown, cards: cards.map(c => c.state) }));
+    } catch (_) {}
+  }
+
+  function makeCard(state) {
+    const card = tpl.content.firstElementChild.cloneNode(true);
+    const n = cards.length;
+    card.style.top = state.y != null ? state.y + 'px' : 'calc(' + (70 + n * 36) + 'px + var(--sat))';
+    card.style.left = state.x != null ? state.x + 'px' : 'calc(' + (80 + n * 36) + 'px + var(--sal))';
+    tpl.parentNode.insertBefore(card, tpl);
+    wireCardDrag(card);
+    raiseCard(card);
+    const q = s => card.querySelector(s);
+    const pick = q('.web-pick'), frame = q('iframe'), cover = q('.web-cover'), msg = q('.web-msg'), editEl = q('.web-edit');
+    const c = { card, state, editing: false, editIx: null };
+    const applySize = () => {
+      const [w, h] = SIZES[state.size] || SIZES[1];
+      card.style.setProperty('--ww', w + 'px'); card.style.setProperty('--wh', h + 'px');
+    };
+    applySize();
+    // In the card pane the page fills the card's share of it.
+    c.pc = CardPane.track(card, {
+      name: () => (state.url && pick.selectedOptions[0] ? pick.selectedOptions[0].textContent : tr('Web')),
+      isOpen: () => cards.includes(c),
+      fit(w, h) {
+        if (w == null) { applySize(); return; }
+        const hdr = card.querySelector('.chart-hdr').offsetHeight || 30;
+        const hint = card.querySelector('.web-hint').offsetHeight;
+        card.style.setProperty('--ww', Math.floor(w - 2) + 'px'); card.style.setProperty('--wh', Math.floor(h - hdr - hint - 2) + 'px');
+      },
+    });
+
+    c.render = () => {
+      // The picker: the bookmarks, the card's page chosen.
+      const opts = [['', tr('Choose a page')]].concat(bookmarks.map(b => [b.url, b.name]));
+      const sig = JSON.stringify(opts);
+      if (pick.dataset.sig !== sig) {
+        pick.dataset.sig = sig; pick.innerHTML = '';
+        for (const [v, t] of opts) { const o = document.createElement('option'); o.value = v; o.textContent = t; pick.appendChild(o); }
+      }
+      pick.value = bookmarks.some(b => b.url === state.url) ? state.url : '';
+      const src = state.url ? resolve(state.url) : '';
+      if (frame.dataset.src !== src) { frame.dataset.src = src; frame.src = src || 'about:blank'; }
+      msg.textContent = !bookmarks.length ? tr('No pages yet. Add one with ⚙.') : tr('Choose a page above.');
+      msg.style.display = state.url ? 'none' : '';
+      cover.classList.toggle('show', !iHoldControl);
+      q('.web-add').style.display = cards.length < MAX ? '' : 'none';
+      q('.web-ext').style.display = state.url ? '' : 'none';
+      q('.web-hint').hidden = !state.url;
+      if (c.editing && !iHoldControl) c.editing = false;
+      editEl.classList.toggle('show', c.editing);
+      if (c.editing) renderEdit(c, editEl);
+    };
+
+    pick.addEventListener('change', () => { state.url = pick.value; save(); c.render(); CardPane.renamed(); });
+    // Another card, a little below and right of this one, so both headers can be reached.
+    q('.web-add').addEventListener('pointerdown', e => {
+      e.preventDefault();
+      const r = zoomRect(card);
+      add({ url: '', size: state.size, x: r.left / uiZoom + 36, y: r.top / uiZoom + 36 });
+    });
+    q('.web-ext').addEventListener('pointerdown', e => { e.preventDefault(); if (state.url) window.open(resolve(state.url), '_blank'); });
+    q('.web-size').addEventListener('pointerdown', e => {
+      e.preventDefault(); state.size = ((state.size | 0) + 1) % SIZES.length; applySize(); save();
+    });
+    q('.web-gear').addEventListener('pointerdown', e => {
+      e.preventDefault();
+      if (!iHoldControl) return; // the bookmarks change for every browser
+      c.editing = !c.editing; c.editIx = null; c.render();
+    });
+    q('.web-x').addEventListener('pointerdown', e => {
+      e.preventDefault();
+      card.remove(); cards = cards.filter(x => x !== c);
+      CardPane.untrack(c.pc);
+      if (!cards.length) shown = false;
+      save(); render();
+    });
+    // Where the card was dragged to (wireCardDrag sets left/top in the card's own pixels).
+    q('.chart-hdr').addEventListener('pointerup', () => {
+      const x = parseFloat(card.style.left), y = parseFloat(card.style.top);
+      if (Number.isFinite(x) && Number.isFinite(y) && (x !== state.x || y !== state.y)) { state.x = x; state.y = y; save(); }
+    });
+    return c;
+  }
+
+  // The bookmark editor over the card's page: the list, and a form for a new or changed one.
+  function renderEdit(c, el) {
+    el.innerHTML = '';
+    const btn = (text, fn) => {
+      const b = document.createElement('button'); b.textContent = text;
+      b.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); fn(); });
+      return b;
+    };
+    bookmarks.forEach((b, i) => {
+      const row = document.createElement('div'); row.className = 'web-row';
+      const t = document.createElement('span'); t.textContent = b.name + ' ';
+      const u = document.createElement('small'); u.textContent = b.url; t.appendChild(u);
+      row.append(t,
+        btn(tr('Edit'), () => { c.editIx = i; c.render(); }),
+        btn(tr('Delete'), () => showConfirm(tr('Delete Bookmark'), tr('Delete "{name}"?', { name: b.name }),
+          () => transport.send('webcard.delete|' + i))));
+      el.appendChild(row);
+    });
+    const editing = c.editIx != null ? bookmarks[c.editIx] : null;
+    const name = document.createElement('input'); name.placeholder = tr('Name'); name.maxLength = 40;
+    const url = document.createElement('input'); url.placeholder = 'http://{host}/'; url.maxLength = 500;
+    url.autocapitalize = 'off'; url.spellcheck = false; url.setAttribute('translate', 'no');
+    if (editing) { name.value = editing.name; url.value = editing.url; }
+    const sub = document.createElement('div'); sub.className = 'web-sub';
+    sub.textContent = tr('{host} is this AgOpenWeb\'s own address, for an add-on on the same computer.');
+    const row = document.createElement('div'); row.className = 'web-row';
+    row.append(
+      btn(editing ? tr('Save') : tr('Add'), () => {
+        if (!name.value.trim() || !url.value.trim()) return;
+        transport.send('webcard.save|' + (editing ? c.editIx : -1) + '\t' + name.value.trim().replace(/\t/g, ' ') + '\t' + url.value.trim());
+        c.editIx = null; name.value = ''; url.value = '';
+        document.activeElement?.blur(); // the list redraws when the host sends it back
+      }),
+      btn(editing ? tr('Cancel') : tr('Done'), () => { if (editing) c.editIx = null; else c.editing = false; c.render(); }));
+    el.append(name, url, sub, row);
+  }
+
+  function add(state) {
+    if (cards.length >= MAX) return;
+    const c = makeCard(state);
+    cards.push(c); shown = true;
+    save(); render();
+    CardPane.shown(c.pc, true);
+  }
+
+  function render() {
+    navBtn.classList.toggle('active', shown && cards.length > 0);
+    for (const c of cards) c.render();
+  }
+
+  function setBookmarks(list) {
+    bookmarks = list;
+    // An editor open on a bookmark that moved or went: back to the list.
+    for (const c of cards) if (c.editIx != null && c.editIx >= list.length) c.editIx = null;
+    for (const c of cards) if (!c.editing || document.activeElement?.closest('.web-edit') !== c.card.querySelector('.web-edit')) c.render();
+    CardPane.renamed(); // the tabs show the pages' names
+  }
+
+  // The nav button: hides every web card when any is open, else brings back the last ones.
+  navBtn.addEventListener('pointerdown', e => {
+    e.preventDefault(); e.stopPropagation();
+    if (shown && cards.length) {
+      shown = false;
+      save(); // kept for the next tap
+      for (const c of cards) { c.card.remove(); CardPane.untrack(c.pc); }
+      cards = [];
+      render();
+      return;
+    }
+    let last = [];
+    try { last = (JSON.parse(localStorage.getItem(KEY) || '{}').cards) || []; } catch (_) {}
+    if (!last.length) last = [{ url: '', size: 1 }];
+    for (const s of last.slice(0, MAX)) add(s);
+  });
+
+  // Cards that were open when this browser last left.
+  try {
+    const st = JSON.parse(localStorage.getItem(KEY) || '{}');
+    if (st.shown) for (const s of (st.cards || []).slice(0, MAX)) add(s);
+  } catch (_) {}
+
+  return { setBookmarks, render };
+})();
+
 // Clock — browser-local 24h HH:MM:SS.
 const clockEl = document.getElementById('clock');
 function tickClock() {
@@ -6292,9 +7439,9 @@ function tickClock() {
 }
 setInterval(tickClock, 1000); tickClock();
 
-// Reference grid + origin axes (procedural, client-side — no wire). Spacing is a
-// tool-width multiple on a 1-2-5 series keyed to zoom, matching the native grid
-// (#417). Axes through the field origin (local 0,0): X (N=0) red, Y (E=0) green.
+// Reference grid (procedural, client-side — no wire). Spacing is a tool-width multiple on a
+// 1-2-5 series keyed to zoom, matching the native grid (#417). One line style, 1 px wide at any
+// zoom, no major lines and no coloured axes, as AgOpenGPS (#496).
 // Matches native NiceStep125 exactly: ≤1 → 1, then 2, 5, 10, 20 … (no 1.5 step).
 function niceStep125(x) {
   if (x <= 1) return 1;
@@ -6492,40 +7639,26 @@ function drawBoundaryRecordingSk(canvas) {
     canvas.drawCircle(xy[0], xy[1], rad, SKP.flagFill);
   }
 }
-// Live boundary draw-on-map preview (Phase MT) — the polygon vertices tapped on the
-// satellite imagery so far. Closed white outline + outlined dots; client-side only.
-// Extra guidelines (Phase MT parity) — the adjacent passes ±tool-width × i from the
-// followed line, when Display.ExtraGuidelines is on. Mirrors native DrawExtraGuidelinesSk:
-// offset the active/display line by ±toolW·i and stroke faint green (over a shadow), with
-// a zoom gate so the lines don't collapse into a band.
-function offsetLine(pts, offset) {
-  const out = new Array(pts.length);
-  for (let i = 0; i < pts.length; i++) {
-    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
-    const dx = b.e - a.e, dy = b.n - a.n, len = Math.hypot(dx, dy);
-    if (len < 1e-6) { out[i] = pts[i]; continue; }
-    out[i] = { e: pts[i].e + (-dy / len) * offset, n: pts[i].n + (dx / len) * offset };
-  }
-  return out;
-}
+// Extra guidelines (Phase MT parity) — the adjacent passes either side of the followed line,
+// when Display.ExtraGuidelines is on, faint green over a shadow, with a zoom gate so the lines
+// don't collapse into a band. The host builds them from the reference like the pass itself
+// (#450): a curve keeps its shape at corners, and the spacing is width − overlap with the tool
+// offset on alternate sides. An AB line's come as two points each and are drawn across the field.
 function drawExtraGuidelinesSk(canvas) {
   const d = config && config.display;
   if (!d || !d.extraGuidelines) return;
-  const count = d.extraGuidelinesCount || 0;
-  if (count < 1) return;
-  const line = scene && scene.guidanceLine; // the followed pass (native offsets ActiveTrack)
+  const line = scene && scene.guidanceLine; // the followed pass
   if (!line || line.length < 2) return;
   const toolW = toolWidthM();
   if (toolW < 0.1 || toolW * pxPerM < 3) return; // zoom gate: skip when passes < ~3 px apart
-  const baseLine = extendAbLine(line);
-  for (let i = 1; i <= count; i++) {
-    for (const off of [toolW * i, -toolW * i]) {
-      const ol = offsetLine(baseLine, off);
-      strokePtsSk(canvas, ol, false, SKP.extraGuideShadow);
-      strokePtsSk(canvas, ol, false, SKP.extraGuide);
-    }
+  for (const gl of scene.guideLines || []) {
+    const pts = extendAbLine(gl);
+    strokePtsSk(canvas, pts, false, SKP.extraGuideShadow);
+    strokePtsSk(canvas, pts, false, SKP.extraGuide);
   }
 }
+// Live boundary draw-on-map preview (Phase MT) — the polygon vertices tapped on the
+// satellite imagery so far. Closed white outline + outlined dots; client-side only.
 function drawSatBoundarySk(canvas) {
   if (!satBnd || !satPts.length) return;
   if (satPts.length >= 2) strokePtsSk(canvas, satPts, satPts.length >= 3, SKP.boundary);
@@ -6552,6 +7685,61 @@ function drawAbDrawPreviewSk(canvas) {
     canvas.drawCircle(xy[0], xy[1], rad, SKP.flagFill);
     canvas.drawCircle(xy[0], xy[1], rad, SKP.flagOutline);
   }
+}
+// AgOpenGPS's shadow on the current line (CABLine.DrawABLines): the tool's width along the pass
+// shown, so you see where the tool will land. The host sends the pass's centre (the tool offset
+// already in it); on a curve it follows the pass, corners rounded as the tractor drives them. One
+// path of quads along it, skipping any behind the camera, so a tilted view draws no ghost.
+function drawToolBandSk(canvas) {
+  const c = scene && scene.toolPass;
+  const w = toolWidthM();
+  if (!c || c.length < 2 || w < 0.1 || !(tick && tick.guidanceActive)) return;
+  let pts = extendAbLine(c);
+  if (pts.length === 2) {                  // a straight line: pieces, so the far ones can be skipped
+    const [a, b] = pts, len = Math.hypot(b.e - a.e, b.n - a.n), k = Math.max(1, Math.ceil(len / 20));
+    pts = Array.from({ length: k + 1 }, (_, i) => ({ e: a.e + (b.e - a.e) * i / k, n: a.n + (b.n - a.n) * i / k }));
+  }
+  const n = pts.length, half = w / 2, L = new Array(n), R = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+    const dx = b.e - a.e, dy = b.n - a.n, len = Math.hypot(dx, dy) || 1;
+    const re = dy / len, rn = -dx / len;   // right of the way the line runs
+    L[i] = { e: pts[i].e - re * half, n: pts[i].n - rn * half };
+    R[i] = { e: pts[i].e + re * half, n: pts[i].n + rn * half };
+  }
+  const cmds = [];
+  for (let i = 0; i + 1 < n; i++) {
+    const q = [L[i], L[i + 1], R[i + 1], R[i]];
+    if (q.some(p => pw(p.e, p.n) < 1.0)) continue; // behind the camera
+    q.forEach((p, k) => { const xy = w2s(p.e, p.n); cmds.push(k ? CK.LINE_VERB : CK.MOVE_VERB, xy[0], xy[1]); });
+    cmds.push(CK.CLOSE_VERB);
+  }
+  if (cmds.length) {
+    const path = CK.Path.MakeFromCmds(cmds);
+    if (path) { canvas.drawPath(path, SKP.toolBand); path.delete(); }
+  }
+  strokePtsSk(canvas, L, false, SKP.toolBandEdge);
+  strokePtsSk(canvas, R, false, SKP.toolBandEdge);
+}
+// The active line's A and B, as AgOpenGPS marks them: a red A and a cyan B at its ends (labels
+// in renderAbDotLabels), so you see which way A→B runs. Not while a line is being made.
+const ACTIVE_A_COLOR = 'rgb(242,0,0)', ACTIVE_B_COLOR = 'rgb(0,230,242)'; // CABLine pointARed / pointBCyan
+function activeAbPoints() {
+  if (drawPts.length || abFlow || !scene || !scene.tracks || !scene.tracks.length) return null;
+  const p = scene.tracks[0].points;
+  return p && p.length >= 2 ? [p[0], p[p.length - 1]] : null;
+}
+function drawActiveAbPointsSk(canvas) {
+  const ab = activeAbPoints();
+  if (!ab) return;
+  const rad = Math.max(4, 0.4 * pxPerM);
+  ab.forEach((p, i) => {
+    if (pw(p.e, p.n) < 1.0) return;
+    const xy = w2s(p.e, p.n);
+    SKP.flagFill.setColor(ckColor(i ? ACTIVE_B_COLOR : ACTIVE_A_COLOR));
+    canvas.drawCircle(xy[0], xy[1], rad, SKP.flagFill);
+    canvas.drawCircle(xy[0], xy[1], rad, SKP.flagOutline);
+  });
 }
 // Tram lines (wheel tracks) generated from the tram systems. Drawn when the tram display is
 // on (bottom-nav tram mode > 0) or while the Field Builder Tram tab is open (so you see the
@@ -6600,7 +7788,7 @@ function drawHeadlandDrawSk(canvas) {
 // finish/cancel. Cyan line through the points + an outlined dot at each.
 function drawDrawingSk(canvas) {
   if (!drawMode || !drawPts.length) return;
-  if (drawPts.length >= 2) strokePtsSk(canvas, drawPts, false, SKP.track);
+  if (drawPts.length >= 2) strokePtsSk(canvas, abFlow === 'curve' ? drawnCurvePreview() : drawPts, false, SKP.track);
   const rad = Math.max(4, 0.5 * pxPerM);
   SKP.flagFill.setColor(ckColor('#40E0FF'));
   for (const p of drawPts) {
@@ -6634,29 +7822,22 @@ function drawGridSk(canvas) {
   const toolW = toolWidthM() || 1; // no tool width: plain metres
   // Spacing = tool-width × NiceStep125(viewSpan / (toolW·30)) — same as native.
   const spacing = toolW * niceStep125(Math.max(vw, vh) / pxPerM / (toolW * 30));
-  const major = k => k % 10 === 0 ? SKP.gridMajor : SKP.gridMinor;
-  const gm = 6; // gridMult = BaseStrokeMult 3 × GridExtraStrokeMult 2
 
   // Draw in WORLD coords under the perspective matrix so Skia GPU-clips at the near
   // plane. (Per-vertex screen projection garbles any line crossing behind a tilted
-  // camera.) Stroke widths in world metres (native: 0.3 px floor + 0.05 m floor).
-  const wpp = 1 / pxPerM;
-  SKP.gridMinor.setStrokeWidth(Math.max(0.3 * wpp, 0.05) * gm);
-  SKP.gridMajor.setStrokeWidth(Math.max(0.6 * wpp, 0.1) * gm);
-  SKP.axisX.setStrokeWidth(Math.max(0.9 * wpp, 0.15) * gm);
-  SKP.axisY.setStrokeWidth(Math.max(0.9 * wpp, 0.15) * gm);
+  // camera.) Every line is 1 CSS px wide at any zoom, as AgOpenGPS's 1 px grid: the width is one
+  // pixel in world metres (1 / pxPerM), with no metre floor, so zooming in doesn't thicken it (#496).
+  SKP.gridMinor.setStrokeWidth(1 / pxPerM);
   canvas.save();
   canvas.concat(perspM);
-  const line = (e1, n1, e2, n2, paint) => {
+  const line = (e1, n1, e2, n2) => {
     const c = clipNear(e1, n1, e2, n2); // returns WORLD coords
-    if (c) canvas.drawLine(c[0] - camE, c[1] - camN, c[2] - camE, c[3] - camN, paint); // camera-relative
+    if (c) canvas.drawLine(c[0] - camE, c[1] - camN, c[2] - camE, c[3] - camN, SKP.gridMinor); // camera-relative
   };
   for (let k = Math.ceil(minE / spacing); k * spacing <= maxE; k++)
-    line(k * spacing, minN, k * spacing, maxN, major(k));
+    line(k * spacing, minN, k * spacing, maxN);
   for (let k = Math.ceil(minN / spacing); k * spacing <= maxN; k++)
-    line(minE, k * spacing, maxE, k * spacing, major(k));
-  if (0 >= minE && 0 <= maxE) line(0, minN, 0, maxN, SKP.axisY);
-  if (0 >= minN && 0 <= maxN) line(minE, 0, maxE, 0, SKP.axisX);
+    line(minE, k * spacing, maxE, k * spacing);
   canvas.restore();
 }
 // Implement hitch line: yellow line from the vehicle hitch pivot to the tool, drawn
@@ -6741,6 +7922,7 @@ function updateLineWidths() {
   SKP.boundaryInner.setStrokeWidth(wb(3.0)); // boundaryInner 1 × 3
   SKP.headland.setStrokeWidth(w(3.0));   // headland 1 × 3
   SKP.guidance.setStrokeWidth(w(1.5));   // trackActive 0.5 × 3
+  SKP.guidanceOutline.setStrokeWidth(w(1.5) * 3); // AgOpenGPS draws the current line over black, 3 × its width
   SKP.reference.setStrokeWidth(w(0.9));  // trackBaseDash 0.3 × 3
   SKP.next.setStrokeWidth(w(1.2));       // trackNext 0.4 × 3
   SKP.uturn.setStrokeWidth(w(3.0));      // youTurn 1 × 3
@@ -6923,6 +8105,7 @@ function drawGroundTextureSk(canvas) {
 let skImagery = null, skImageryVer = null, skImageryMult = -1;
 function drawImagerySk(canvas) {
   if (!imageryImg || !imageryRect) return;
+  if (config && config.display && config.display.imageryVisible === false) return; // Screen & Alerts › Aerial Imagery (#500)
   // Quality button: scale the imagery LOD by DisplayResolutionMultiplier so the background
   // degrades with quality like native's Apple composite path (which bakes imagery into the
   // multiplier-sized coverage bitmap). Ultra = full res; lower quality = downsampled (also a
@@ -7105,11 +8288,7 @@ function makeCovGrid(init) {
   let canvas = null, cctx = null, covPaint = null;
   if (surface) {
     surface.getCanvas().clear(CK.TRANSPARENT);
-    covPaint = new CK.Paint(); covPaint.setStyle(CK.PaintStyle.Fill); covPaint.setAntiAlias(false);
-    // Src (replace), not SrcOver: cells carry a coverage-fraction alpha (edge cells < 1), and a
-    // cell is re-emitted with rising alpha as it fills — replace sets the exact value each time;
-    // SrcOver would blend re-draws and creep edges toward opaque.
-    covPaint.setBlendMode(CK.BlendMode.Src);
+    covPaint = makeCovPaint();
   } else {
     canvas = document.createElement('canvas'); canvas.width = w; canvas.height = h; cctx = canvas.getContext('2d');
   }
@@ -7118,6 +8297,32 @@ function makeCovGrid(init) {
     width: w, height: h, surface, covPaint, pending: [],
     canvas, cctx, dirty: true, skImg: null, lastBuild: 0,
   };
+}
+function makeCovPaint() {
+  const p = new CK.Paint(); p.setStyle(CK.PaintStyle.Fill); p.setAntiAlias(false);
+  // Src (replace), not SrcOver: cells carry a coverage-fraction alpha (edge cells < 1), and a
+  // cell is re-emitted with rising alpha as it fills — replace sets the exact value each time;
+  // SrcOver would blend re-draws and creep edges toward opaque.
+  p.setBlendMode(CK.BlendMode.Src);
+  return p;
+}
+// A page that loads with a job open gets its coverage before CanvasKit is ready, so the grid
+// is built on the 2D fallback and would stay there. Once the GPU context exists, copy it onto
+// a render target (once) and carry on with the GPU path. Both paths flip y the same way
+// (row 0 = highest northing), so the copy lines up as is.
+function upgradeCovToGpu() {
+  if (!cov || cov.surface || !cov.canvas || !CK || !grCtx) return;
+  let surface = null;
+  try { surface = CK.MakeRenderTarget(grCtx, cov.width, cov.height); } catch (e) { surface = null; }
+  if (!surface) return; // bigger than a texture: stays on the 2D path
+  const sk = surface.getCanvas();
+  sk.clear(CK.TRANSPARENT);
+  const img = CK.MakeImageFromCanvasImageSource(cov.canvas);
+  if (img) { sk.drawImageOptions(img, 0, 0, CK.FilterMode.Nearest, CK.MipmapMode.None, null); img.delete(); }
+  surface.flush();
+  if (cov.skImg) cov.skImg.delete();
+  cov.surface = surface; cov.covPaint = makeCovPaint();
+  cov.canvas = null; cov.cctx = null; cov.skImg = null; cov.dirty = true;
 }
 
 // Re-anchor existing coverage into a grown grid (bounds expansion, SAME cell size). The old
@@ -7319,43 +8524,77 @@ function toolFootprintSk(canvas) {
 // bundled), so here we draw only the LEDs. Drawn in CSS px
 // (under renderSkia's scale(dpr)), so it must run before canvas.restore().
 function lightbarSk(canvas) {
-  // GuidanceBarOn is the master; SteerBarEnabled picks the mode (steer-angle error vs
-  // cross-track). Mirrors the native LightBarPanel.
+  // The Light bar / Steer bar style picks what's drawn (AgOpenGPS isLightBarNotSteerBar);
+  // On/Off hides either (isLightbarOn, #479). GuidanceBarOn has no control and stays on.
   const cfg = config && config.autosteer;
   if (!tick || !tick.guidanceActive || !cfg || !cfg.guidanceBarOn) return;
-  if (!cfg.lightbarEnabled) return; // the Light bar toggle (AgOpenGPS isLightbarOn, #111)
-  const SEG = 15, W = 18, H = 16, GAP = 4;
-  const mid = (SEG - 1) / 2;
-  const steerMode = !!cfg.steerBarEnabled;
-  let val, PER, onThresh;
-  if (steerMode) {
-    val = tick.steerAngleError || 0;                          // actual − commanded (deg)
-    const dz = (tick.op && tick.op.autoSteer) ? 0.5 : 0.2;    // AgOpen dead-zone
-    if (Math.abs(val) < dz) val = 0;
-    PER = 12 / mid; onThresh = dz;                            // ±12° full deflection
-  } else {
-    // AutoSteer › cm per pixel (AgOpenGPS lightbarCmPerPixel): cm of XTE per lit cell (#110).
-    const cpp = Math.max(1, (cfg.cmPerPixel | 0) || 5);
-    val = tick.crossTrackError || 0; PER = cpp / 100; onThresh = 0.05; // + = right of line
-  }
-  const totalW = SEG * (W + GAP) - GAP;
-  const x0 = (vw - totalW) / 2, top = 54; // below the top status bar
-  const lit = Math.min(Math.round(Math.abs(val) / PER), mid);
-  const onLine = Math.abs(val) < onThresh;
+  if (!cfg.lightbarEnabled) return;
+  if (cfg.steerBarEnabled) { steerBarSk(canvas, steerCy); return; } // in #lb-steer, under the readout
+  // As AgOpenGPS: the cells either side of the readout, on its row (body.lightbar #lb), lit
+  // outwards from it on the side to steer. No centre cell: the readout's ● is on the line.
+  const SIDE = 7, W = 18, H = 16, GAP = 4;
+  // AutoSteer › cm per pixel (AgOpenGPS lightbarCmPerPixel): cm of XTE per lit cell (#110).
+  const cpp = Math.max(1, (cfg.cmPerPixel | 0) || 5);
+  const val = tick.crossTrackError || 0, PER = cpp / 100; // + = right of line
+  const lit = Math.min(Math.round(Math.abs(val) / PER), SIDE);
   const steerLeft = val > 0; // lights point the way to STEER (native convention)
   const litCol = steerLeft ? '#ff7a3d' : '#39FF6A';
+  // Scaled with the HUD (hudK), as the readout beside it, but never wider than the screen allows.
+  // Clear of the readout and, when shown, the tram dots beside it.
+  const tram = tramLightsEl.classList.contains('show') ? LB_TRAM_W * hudK : 0;
+  const inner0 = (k) => Math.max(40 * k, lbHalfW + tram + 10 * k);
+  let k = hudK;
+  while (k > 0.5 && inner0(k) + SIDE * (W + GAP) * k > 0.47 * vw) k -= 0.05;
+  const inner = inner0(k), w = W * k, h = H * k, g = GAP * k, top = lbCy - h / 2;
   const p = SKP.lbFill;
-  for (let i = 0; i < SEG; i++) {
-    const idx = i - mid;
-    const x = x0 + i * (W + GAP);
-    let on = false, col = '#1c2230';
-    if (idx === 0) { on = onLine; col = on ? '#39FF6A' : '#2a3550'; }
-    else if (steerLeft ? (idx < 0 && -idx <= lit) : (idx > 0 && idx <= lit)) { on = true; col = litCol; }
-    p.setColor(ckColor(on ? col : '#1c2230'));
-    canvas.drawRect(CK.XYWHRect(x, top, W, H), p);
+  for (let i = 1; i <= SIDE; i++) {
+    const off = inner + (i - 1) * (w + g);
+    for (const left of [true, false]) {
+      const on = left === steerLeft && i <= lit;
+      p.setColor(ckColor(on ? litCol : '#1c2230'));
+      canvas.drawRect(CK.XYWHRect(left ? vw / 2 - off - w : vw / 2 + off, top, w, h), p);
+    }
   }
-  // No arrow here: the readout under the strip (updateLightbarText) carries it, and one
-  // drawn here sat on top of that text (#219).
+}
+// Steer bar (AgOpenGPS DrawSteerBarText): the steer angle error (actual − commanded) as a
+// yellow bar from the centre, its length the error (up to 12°), lying on the side away from
+// the turn; an olive arrow at the centre and a green one at the bar's end point the way to
+// turn the wheel. Nothing inside the dead zone (0.2°, 0.5° under AutoSteer); smaller and at
+// half strength under AutoSteer.
+function steerBarSk(canvas, cy) {
+  const auto = !!(tick.op && tick.op.autoSteer);
+  const err = tick.steerAngleError || 0;
+  if (Math.abs(err) < (auto ? 0.5 : 0.2)) return;
+  const k = hudK;                                // HUD scale × UI zoom, as the light bar
+  const spacing = Math.max(28, vw / 50);
+  const cx = vw / 2;
+  const turn = err > 0 ? -1 : 1;                 // + error: turn left (as the light bar)
+  const endX = cx - turn * (Math.min(Math.abs(err), 12) * spacing + 35 * k);
+  // AgOpenGPS's shapes, sized to the light bar's strip so the readout under it stays clear.
+  const half = (auto ? 7 : 10) * k;                    // arrow half-height
+  const point = half + 14 * k;                       // arrow length (AgOpenGPS offset + pointy)
+  const a = auto ? 0.5 : 1;
+  const f = SKP.sbFill, l = SKP.sbLine;
+  // The bar: black under yellow.
+  l.setStrokeCap(CK.StrokeCap.Butt);
+  for (const [w, col] of [[(auto ? 5 : 9) * k, `rgba(0,0,0,${a})`], [(auto ? 3 : 6) * k, `rgba(242,251,102,${a})`]]) {
+    l.setStrokeWidth(w); l.setColor(ckColor(col));
+    canvas.drawLine(cx, cy, endX, cy, l);
+  }
+  l.setStrokeWidth(2); l.setColor(ckColor(`rgba(0,0,0,${a})`));
+  for (const [x, col] of [[endX, `rgba(0,252,0,${a})`], [cx, `rgba(201,201,0,${a})`]]) {
+    const path = CK.Path.MakeFromCmds([
+      CK.MOVE_VERB, x, cy - half,
+      CK.LINE_VERB, x + turn * point, cy,
+      CK.LINE_VERB, x, cy + half,
+      CK.CLOSE_VERB,
+    ]);
+    if (!path) continue;
+    f.setColor(ckColor(col));
+    canvas.drawPath(path, f);
+    canvas.drawPath(path, l);
+    path.delete();
+  }
 }
 function renderSkia(canvas, rp) {
   canvas.clear(ckColor(mapIsDay ? MAP_CLEAR.day : MAP_CLEAR.night));
@@ -7386,13 +8625,19 @@ function renderSkia(canvas, rp) {
     // (PassGeometry), so pass 0 lies half a width from it; only a track driven on the line
     // itself (boundary-follow) puts the magenta guidance on top of it, and then just the one
     // line shows. Matches the host's baseTrack = (display track is the reference) ? null : track.
+    drawToolBandSk(canvas); // where the tool will land, under the lines
     const _onRef = scene.guidanceLine && scene.tracks.some(t => onPolyline(scene.guidanceLine, t.points));
     if (!_onRef) for (const tr of scene.tracks)
       strokePtsSk(canvas, extendAbLine(tr.points), false, SKP.reference);
     // Magenta current pass, extended across the field. The host's DisplayLine is only ~track
     // length (a 2-point offset AB); extendAbLine spans it full-field, so an offset pass isn't a
     // short stub. Curves are >2 points and already host-extended, so they pass through unchanged.
-    if (scene.guidanceLine) strokePtsSk(canvas, extendAbLine(scene.guidanceLine), false, SKP.guidance);
+    if (scene.guidanceLine) {
+      const gl = extendAbLine(scene.guidanceLine);
+      strokePtsSk(canvas, gl, false, SKP.guidanceOutline);
+      strokePtsSk(canvas, gl, false, SKP.guidance);
+    }
+    drawActiveAbPointsSk(canvas);
     drawFlagsSk(canvas, scene.flags);
   }
   drawRecordingMarkersSk(canvas); // live recorded-path dots (independent of the Scene)
@@ -7400,6 +8645,7 @@ function renderSkia(canvas, rp) {
   drawSatBoundarySk(canvas); // live boundary-on-satellite polygon being drawn
   drawAbDrawPreviewSk(canvas); // #40 — A/B (orange/blue) dots for the AB/curve being drawn
   drawCurveMarksSk(canvas); // record-curve path dots (Set Point A → B)
+  drawBoundaryCurvePreviewSk(canvas); // Bnd. Curve: the chosen way round (#450)
   drawDrawingSk(canvas); // live draw-on-map AB/curve preview (Phase MT)
   drawHeadlandDrawSk(canvas); // live headland draw preview (Field Builder stage 2)
   drawHeadlandSegEditLinesSk(canvas); // headland-editor offset lines (yellow/red) while editing
@@ -7415,7 +8661,30 @@ function renderSkia(canvas, rp) {
 // The single render loop. Window rAF (not surface.requestAnimationFrame) so it
 // survives surface recreation on resize and runs even before CanvasKit finishes
 // loading (DOM overlays update regardless; the GL map draws once skSurface exists).
-function skFrame() {
+// Frame cap (#408): the picture changes with the 10 Hz pose and its extrapolation at field
+// speeds, so the map is drawn at 30 fps; drawing at the display's rate (60-120 Hz) only heats
+// the tablet. While the operator handles it (a press, a drag or pinch, the wheel, a key) and
+// shortly after, every frame is drawn, so panning and zooming stay smooth.
+const FRAME_CAP_FPS = 30, FULL_RATE_AFTER_INPUT_MS = 300;
+let _frameLast = 0, _fullRateUntil = 0;
+function noteInput(e) {
+  if (e.type === 'pointermove' && !e.buttons) return; // a hover is not handling the map
+  _fullRateUntil = performance.now() + FULL_RATE_AFTER_INPUT_MS;
+}
+for (const t of ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown'])
+  addEventListener(t, noteInput, { capture: true, passive: true });
+function skFrame(ts) {
+  // rAF runs at the display's rate; a frame that comes too soon is skipped whole (map and DOM
+  // overlays). _frameLast advances by the interval, so the average holds on any refresh rate
+  // (30 on a 144 Hz screen); the 2 ms tolerance absorbs rAF jitter.
+  if (typeof ts === 'number') {
+    if (ts < _fullRateUntil) _frameLast = ts;
+    else {
+      const interval = 1000 / FRAME_CAP_FPS, since = ts - _frameLast;
+      if (since < interval - 2) { requestAnimationFrame(skFrame); return; }
+      _frameLast = since > interval * 2 ? ts : _frameLast + interval;
+    }
+  }
   // Client render rate over a ~500 ms window (shown on the GPS-detail card).
   const _now = performance.now();
   if (_fpsT0 === 0) _fpsT0 = _now;
@@ -7429,6 +8698,8 @@ function skFrame() {
   }
   // DOM overlays (independent of the GL surface).
   updateLightbarText();
+  updateTramLights();
+  updatePassHud();
   updateHeadlandHud();
   renderStatusBar();
   renderSimBar();
@@ -10181,7 +11452,7 @@ const TabletHostText = (() => {
 // Look only: switched per device under Setup → Info (aow.ui.brand = on | off, default on);
 // off = the AgOpenWeb look. Warning, stop and steer-direction colours never change.
 const BRAND = {
-  name: '[PRODUKTNAME]',
+  name: 'LM Steering Solutions',
   claim: tr('GPS steering aid for tractor and tool'),
   // Colour world B "Pflaume": accent per theme, [colour, text on it, r,g,b]
   night: ['#c995e0', '#1d0b26', '201,149,224'],
@@ -11828,6 +13099,7 @@ const TabletLegal = (() => {
   for (const n of [scrim, box]) n.addEventListener('pointerdown', e => e.stopPropagation());
   function show() {
     box.innerHTML = '';
+    box.appendChild(el('div', 'lg-n', BRAND.name)); // product name, never translated (box is translate=no)
     box.appendChild(el('div', 'lg-t', T(tr('Please read before use'))));
     const ol = el('ol', 'lg-l'); for (const t of TEXT) ol.appendChild(el('li', '', T(t))); box.appendChild(ol);
     const ok = el('button', 'tp-btn pri big', T(tr('Read and understood')));

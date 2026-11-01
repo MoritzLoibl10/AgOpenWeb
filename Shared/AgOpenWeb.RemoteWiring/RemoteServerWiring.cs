@@ -16,7 +16,7 @@ public static partial class RemoteServerWiring
     // hooks, and every state projector to a live MainViewModel. Shared by every
     // head (WebBackend) and the headless host (HeadlessHost). All of them inject the
     // single-thread HostLoopDispatcher as IUiDispatcher, resolved below.
-    // See Plans/WEBUI_MIGRATION_PLAN.md Phase 10.
+    // See Plans/Completed/WEBUI_MIGRATION_PLAN.md Phase 10.
     public static void Wire(
         AgOpenWeb.RemoteServer.RemoteServerHost server,
         AgOpenWeb.ViewModels.MainViewModel vm,
@@ -48,6 +48,32 @@ public static partial class RemoteServerWiring
                     var vt = services.GetService<IVirtualTerminalService>();
                     if (vt is not null) VirtualTerminalRemote.Start(server, vt);
 
+                    // Capture + save the aerial imagery covering a boundary in a
+                    // CRASH-ISOLATED child process — SkiaSharp can hard-crash on a
+                    // headless board and must never take the host down. On success,
+                    // apply the background back on the UI thread. A drawn boundary gets
+                    // it at once; any other gets it on request (#500).
+                    void CaptureBoundaryImagery(System.Collections.Generic.IReadOnlyList<(double E, double N)> pts)
+                    {
+                        if (vm.GetBoundaryImageryBounds(pts) is not { } bb) return;
+                        _ = System.Threading.Tasks.Task.Run(async () =>
+                        {
+                            var outPath = System.IO.Path.Combine(
+                                System.IO.Path.GetTempPath(), "AgOpenWeb_SatCap",
+                                "BackPic_" + System.Guid.NewGuid().ToString("N") + ".png");
+                            var ok = await imageryCapture.TryCaptureAsync(
+                                bb.mercMinX, bb.mercMaxX, bb.mercMinY, bb.mercMaxY, outPath);
+                            dispatcher.Post(() =>
+                            {
+                                if (!ok) { server.ShowToast("No aerial imagery: no internet?"); return; }
+                                vm.ApplyCapturedBackground(outPath,
+                                    bb.nwLat, bb.nwLon, bb.seLat, bb.seLon,
+                                    bb.mercMinX, bb.mercMaxX, bb.mercMinY, bb.mercMaxY);
+                                server.ShowToast("Aerial imagery saved");
+                            });
+                        });
+                    }
+
                     server.CommandHandler = (cmd, arg) =>
                         dispatcher.Post(() =>
                         {
@@ -55,8 +81,8 @@ public static partial class RemoteServerWiring
                             var num = System.Globalization.NumberStyles.Float;
                             // Starting a line or path turns contour off first, like AgOpenGPS's
                             // track / AB+ / draw / record / path Go buttons (#110).
-                            if (vm.IsContourModeOn && cmd is "track.activate" or "track.aPlus" or "track.latLonHeading" or "track.latLonAB" or "track.drawStraight"
-                                    or "track.drawCurve" or "track.recordCurve" or "track.driveAB" or "recpath.play")
+                            if (vm.IsContourModeOn && cmd is "track.activate" or "track.aPlus" or "track.latLonHeading" or "track.latLonAB" or "track.latLonPivot" or "track.drawStraight"
+                                    or "track.drawCurve" or "track.recordCurve" or "track.recordPivot" or "track.driveAB" or "recpath.play")
                                 vm.ToggleContourModeCommand?.Execute(null);
 
                             // Sim ids that set a property or carry an arg (all Tier-1,
@@ -180,6 +206,11 @@ public static partial class RemoteServerWiring
                                     if (double.TryParse(arg, num, inv, out var capMult)) // (2.5 = Medium)
                                         vm.CapDisplayResolution(capMult); // only coarsens; idempotent
                                     return;
+                                case "display.maxTexture": // arg = the web view's largest texture side (px)
+                                    if (int.TryParse(arg, System.Globalization.NumberStyles.Integer, inv, out var maxTex))
+                                        services.GetRequiredService<AgOpenWeb.Services.Interfaces.ICoverageMapService>()
+                                            .LimitDisplaySide(maxTex); // only tightens; regrids an open field
+                                    return;
                                 case "view.save": // web camera tilt+zoom (+ follow mode, #176) persisted host-side (issue #35).
                                 {                 // arg = "pitch|zoom[|mode]" (pitch radians, zoom px/m, client mode). Tier-1.
                                     var vparts = arg.Split('|');
@@ -272,6 +303,7 @@ public static partial class RemoteServerWiring
                                     return;
                                 case "track.latLonHeading": // Quick AB. arg = "lat,lon,heading" (#335)
                                 case "track.latLonAB":      // Quick AB. arg = "latA,lonA,latB,lonB" (#335)
+                                case "track.latLonPivot":   // Quick AB. arg = "lat,lon" of a water pivot's centre
                                 {
                                     var llParts = arg.Split(',');
                                     var ll = new double[llParts.Length];
@@ -281,6 +313,8 @@ public static partial class RemoteServerWiring
                                         vm.CreateLatLonHeadingLine(ll[0], ll[1], ll[2]);
                                     else if (cmd == "track.latLonAB" && ll.Length == 4)
                                         vm.CreateLatLonABLine(ll[0], ll[1], ll[2], ll[3]);
+                                    else if (cmd == "track.latLonPivot" && ll.Length == 2)
+                                        vm.CreateLatLonPivot(ll[0], ll[1]);
                                     return;
                                 }
                                 case "track.select": // Tracks manager / Field Builder — tap a row:
@@ -389,6 +423,20 @@ public static partial class RemoteServerWiring
                                         vm.RemoteSetTramField(tsi, arg[(t1 + 1)..t2], arg[(t2 + 1)..]);
                                     return;
                                 }
+                                case "webcard.save":   // Web card bookmarks: "index\tname\turl", index −1 adds.
+                                case "webcard.delete": // "index".
+                                {
+                                    var st = services.GetRequiredService<ISettingsService>();
+                                    var wp = arg.Split('\t');
+                                    var edited = !int.TryParse(wp[0], out var wi) ? null
+                                        : cmd == "webcard.delete" ? AgOpenWeb.Models.WebCardBookmarks.Delete(st.Settings.WebCards, wi)
+                                        : wp.Length == 3 ? AgOpenWeb.Models.WebCardBookmarks.Save(st.Settings.WebCards, wi, wp[1], wp[2])
+                                        : null;
+                                    if (edited is null) { server.ShowToast("Bookmark not saved: a name and an http:// or https:// address"); return; }
+                                    st.Settings.WebCards = edited; // replaced whole: the broadcaster reads it
+                                    st.Save();
+                                    return;
+                                }
                                 case "boundary.importKmlFile": // Import-KML picker. arg = KML file name.
                                     vm.RemoteImportKmlBoundary(arg);
                                     return;
@@ -404,26 +452,14 @@ public static partial class RemoteServerWiring
                                             bmp.Add((pe, pn));
                                     }
                                     vm.RemoteCreateBoundaryFromMapPoints(bmp);
-                                    // Capture + save the aerial imagery covering the boundary in a
-                                    // CRASH-ISOLATED child process — SkiaSharp can hard-crash on a
-                                    // headless board and must never take the host down. On success,
-                                    // apply the background back on the UI thread.
-                                    if (vm.GetBoundaryImageryBounds(bmp) is { } bb)
-                                        _ = System.Threading.Tasks.Task.Run(async () =>
-                                        {
-                                            var outPath = System.IO.Path.Combine(
-                                                System.IO.Path.GetTempPath(), "AgOpenWeb_SatCap",
-                                                "BackPic_" + System.Guid.NewGuid().ToString("N") + ".png");
-                                            var ok = await imageryCapture.TryCaptureAsync(
-                                                bb.mercMinX, bb.mercMaxX, bb.mercMinY, bb.mercMaxY, outPath);
-                                            if (ok)
-                                                dispatcher.Post(() =>
-                                                    vm.ApplyCapturedBackground(outPath,
-                                                        bb.nwLat, bb.nwLon, bb.seLat, bb.seLon,
-                                                        bb.mercMinX, bb.mercMaxX, bb.mercMinY, bb.mercMaxY));
-                                        });
+                                    CaptureBoundaryImagery(bmp);
                                     return;
                                 }
+                                case "boundary.captureImagery": // Boundary menu: the aerial for the
+                                    if (vm.OuterBoundaryPoints() is { } obp) // field's boundary, however
+                                        CaptureBoundaryImagery(obp);         // it was made (#500).
+                                    else server.ShowToast("The field has no boundary");
+                                    return;
                                 case "track.drawPoint": // Phase MT — map-tap AB/curve point.
                                 {                       // arg = "e,n" (m, from s2w). Routes to the
                                     var tp = arg.Split(','); // native SetABPointCommand (DrawAB =
@@ -438,14 +474,20 @@ public static partial class RemoteServerWiring
                                     return;
                                 }
                                 case "track.boundaryCurveSeg": // "Bnd. Curve": tap A + B on the boundary.
-                                {                              // arg = "aE,aN,bE,bN" (m, from s2w). Tier-1.
-                                    var bc = arg.Split(',');
+                                {                              // arg = "aE,aN,bE,bN[,viaE,viaN]" (m, from s2w):
+                                    var bc = arg.Split(',');   // via = a point on the way round picked (#450)
                                     if (bc.Length >= 4
                                         && double.TryParse(bc[0], num, inv, out var caE)
                                         && double.TryParse(bc[1], num, inv, out var caN)
                                         && double.TryParse(bc[2], num, inv, out var cbE)
                                         && double.TryParse(bc[3], num, inv, out var cbN))
-                                        vm.RemoteCreateBoundaryCurveSegment(caE, caN, cbE, cbN);
+                                    {
+                                        Models.Base.Vec2? via = bc.Length >= 6
+                                            && double.TryParse(bc[4], num, inv, out var cvE)
+                                            && double.TryParse(bc[5], num, inv, out var cvN)
+                                            ? new Models.Base.Vec2(cvE, cvN) : null;
+                                        vm.RemoteCreateBoundaryCurveSegment(caE, caN, cbE, cbN, via);
+                                    }
                                     return;
                                 }
                                 case "flag.placeAt": // Phase MT map-tap. arg = "easting,northing"
@@ -608,11 +650,11 @@ public static partial class RemoteServerWiring
                                 // directly (mirrors the vehicle/tool ApplyProfileCommand path);
                                 // confirmations happen client-side. Tier-1 (config files). ---
                                 case "ntrip.save": case "ntrip.delete": case "ntrip.setDefault":
-                                case "ntrip.test":
+                                case "ntrip.test": case "ntrip.switch": case "ntrip.mountpoints": case "ntrip.mountpoints.clear": case "ntrip.use":
                                     ApplyNtripCommand(
                                         services.GetRequiredService<INtripProfileService>(),
                                         services.GetRequiredService<AgOpenWeb.Models.State.ApplicationState>(),
-                                        dispatcher, cmd, arg, vm);
+                                        dispatcher, cmd, arg, vm, services.GetService<IGpsService>());
                                     return;
                                 // --- Field Operations (Phase 9). Lifecycle routes through the real
                                 // StartWorkSessionDialogViewModel (host-driven) so field/job open/
@@ -693,6 +735,8 @@ public static partial class RemoteServerWiring
                                 "headland.toggle" => vm.ToggleHeadlandCommand,
                                 "headland.sectionToggle" => vm.ToggleSectionInHeadlandCommand,
                                 "tram.cycle" => vm.ToggleTramDisplayCommand,
+                                "tram.manualLeft" => vm.ToggleTramLeftManualCommand,  // tram lights (#451)
+                                "tram.manualRight" => vm.ToggleTramRightManualCommand,
                                 "tool.resetHeading" => vm.ResetToolHeadingCommand,
                                 "map.cycleColor" => vm.ChangeMappingColorCommand,
                                 "flag.placeHere" => vm.PlaceFlagHereCommand,
@@ -706,6 +750,13 @@ public static partial class RemoteServerWiring
                                 "track.halfNudgeLeft" => vm.HalfToolNudgeLeftCommand,
                                 "track.halfNudgeRight" => vm.HalfToolNudgeRightCommand,
                                 "track.resetNudge" => vm.ResetNudgeCommand,
+                                "track.refNudgeLeft" => vm.RefNudgeLeftCommand,    // Ref Nudge panel (#489)
+                                "track.refNudgeRight" => vm.RefNudgeRightCommand,
+                                "track.refHalfNudgeLeft" => vm.RefHalfNudgeLeftCommand,
+                                "track.refHalfNudgeRight" => vm.RefHalfNudgeRightCommand,
+                                "track.refNudgeBegin" => vm.RefNudgeBeginCommand,
+                                "track.refNudgeSave" => vm.RefNudgeSaveCommand,
+                                "track.refNudgeUndo" => vm.RefNudgeUndoCommand,
                                 "track.extendA" => vm.ExtendTrackACommand,
                                 "track.extendB" => vm.ExtendTrackBCommand,
                                 "track.shrinkA" => vm.ShrinkTrackACommand,
@@ -733,6 +784,7 @@ public static partial class RemoteServerWiring
                                 // DriveAB/Curve modes → uses live GPS).
                                 "track.driveAB" => vm.StartDriveABCommand,
                                 "track.recordCurve" => vm.StartCurveRecordingCommand,
+                                "track.recordPivot" => vm.StartPivotRecordingCommand,
                                 "track.finishCurve" => vm.FinishCurveRecordingCommand,
                                 "track.setABGps" => vm.SetABPointCommand,
                                 // Tracks manager toolbar (act on the active/selected track).
@@ -781,6 +833,9 @@ public static partial class RemoteServerWiring
                     // release, disconnect, or deadman — the machine must not keep
                     // actuating with no interface: disengage autosteer and turn sections
                     // off. (Headless target → control state lives in the browser.)
+                    // ControlAuthority raises Revoked just before Changed, on the same thread,
+                    // so the failsafe's reason is here when the release below runs.
+                    string? controlLostReason = null;
                     server.AuthorityChangedHandler = (held, name) =>
                     {
                         vt?.AbortKeys(); // a VT key held by the last holder ends here
@@ -789,11 +844,13 @@ public static partial class RemoteServerWiring
                             System.Diagnostics.Debug.WriteLine($"[remote] control taken by {name}");
                             return;
                         }
+                        string offReason = "browser control ended: " + (controlLostReason ?? "released");
+                        controlLostReason = null;
                         dispatcher.Post(() =>
                         {
                             if (vm.IsAutoSteerEngaged
-                                && vm.ToggleAutoSteerCommand?.CanExecute(null) == true)
-                                vm.ToggleAutoSteerCommand.Execute(null);
+                                && vm.ToggleAutoSteerCommand?.CanExecute(offReason) == true)
+                                vm.ToggleAutoSteerCommand.Execute(offReason);
                             if (vm.IsManualSectionMode
                                 && vm.ToggleManualModeCommand?.CanExecute(null) == true)
                                 vm.ToggleManualModeCommand.Execute(null);
@@ -806,7 +863,10 @@ public static partial class RemoteServerWiring
                     // Involuntary loss (disconnect / deadman) — log the reason; the
                     // disengage runs in AuthorityChangedHandler (covers release too).
                     server.FailsafeHandler = reason =>
+                    {
+                        controlLostReason = reason;
                         System.Diagnostics.Debug.WriteLine($"[remote] actuation failsafe: {reason}");
+                    };
 
                     // Steer Wizard projector: while the remote wizard is open, project the
                     // live SteerWizardViewModel to a WizardDto each broadcast tick. Read off
@@ -835,6 +895,7 @@ public static partial class RemoteServerWiring
 
                     // Refusals and failures (#109): shown as a short notification on the web.
                     vm.FailureReported += msg => server.ShowToast(msg);
+                    vm.NtripNoticeReported += msg => server.ShowToast(msg);
 
                     // AiO board messages (PGN 221), when "AiO Board Msgs" is on (#110).
                     if (services.GetService<IAutoSteerService>() is { } hwSteer)
