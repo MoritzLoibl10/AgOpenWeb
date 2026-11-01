@@ -2721,7 +2721,16 @@ const TabletHostText = (() => {
     tr('Select a boundary to delete'),
     tr('Steer module stopped steering (kickout, switch or button)'),
     tr('This track has no ends to adjust'),
-    tr('Too few points to smooth (need at least 5)')]);
+    tr('Too few points to smooth (need at least 5)'),
+    // Why the app turned the steering off (upstream #442) and other plain host toasts.
+    tr('AutoSteer disengaged - outside boundary'), tr('AutoSteer disengaged - RTK fix lost'),
+    tr('AutoSteer disengaged'), tr('Guidance stopped: track changed'), tr('No aerial imagery: no internet?')]);
+  // Toasts with a value inside: the value stays as the host wrote it.
+  const TOAST_RX = [
+    [/^AutoSteer disengaged - above maximum steering speed \((.+)\)$/s, s => tr('AutoSteer disengaged - above maximum steering speed ({s})', { s })],
+    [/^AutoSteer disengaged - below minimum steering speed \((.+)\)$/s, s => tr('AutoSteer disengaged - below minimum steering speed ({s})', { s })],
+  ];
+  const toastDe = msg => { for (const [rx, f] of TOAST_RX) { const m = rx.exec(msg); if (m) return I18n.text(f(m[1])); } return msg; };
   // Host-paket D (#11): the host's failure texts with values, sent as a key with {name}
   // placeholders and the values; the sentence is translated, the values (error messages, file
   // names, counts) stay as they are. Listed so the extractor finds the keys.
@@ -2737,7 +2746,7 @@ const TabletHostText = (() => {
     let a = null; try { a = JSON.parse(args); } catch (_) { /* no values */ }
     return KEYED.has(key) && a && typeof a === 'object' ? tr(key, a) : msg;
   }
-  showToast = (orig => function (msg, ms) { return orig(typeof msg === 'string' && tuiIsDe() && TOASTS.has(msg) ? I18n.text(msg) : msg, ms); })(showToast);
+  showToast = (orig => function (msg, ms) { return orig(typeof msg !== 'string' || !tuiIsDe() ? msg : TOASTS.has(msg) ? I18n.text(msg) : toastDe(msg), ms); })(showToast);
   function de(s) {
     if (!tuiIsDe()) return s;
     for (const [re, f] of PAT) { const m = s.match(re); if (m) return f(m[1]); }
