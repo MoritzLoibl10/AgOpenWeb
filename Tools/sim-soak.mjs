@@ -5,8 +5,8 @@
 // Long simulator run of the whole app (fork): starts its own host on an empty data folder, drives
 // the simulator through realistic work for --minutes and writes down what goes wrong: console
 // errors and warnings, page errors, AutoSteer switching off without our command (with the
-// reason: control lost to the deadman, boundary, ...), displays that stop updating, toasts, memory
-// of the page and the host. The "ignition off" case kills the host in the middle of a job and
+// reason: control lost to the deadman, boundary, ...), displays that stop updating, gaps between
+// ticks (the page's main thread busy), toasts, memory of the page and the host. The "ignition off" case kills the host in the middle of a job and
 // starts it again. Results as JSON (--out) and a short summary on stdout.
 //
 //   node Tools/sim-soak.mjs [--minutes 30] [--exe <AgOpenWeb.Desktop>] [--data <dir>] [--out soak.json]
@@ -35,7 +35,7 @@ const t0 = Date.now();
 const ts = () => ((Date.now() - t0) / 1000).toFixed(0).padStart(5) + 's';
 
 const R = { started: new Date().toISOString(), minutes: MINUTES, data: DATA, size: `${W}x${H}`, lang: LANG,
-  steps: [], console: [], pageErrors: [], steerOff: [], stale: [], toasts: [], memory: [], hostExits: [], notes: [] };
+  steps: [], tickGaps: [], console: [], pageErrors: [], steerOff: [], stale: [], toasts: [], memory: [], hostExits: [], notes: [] };
 const log = (k, m) => { const line = `${ts()} ${k} ${m}`; console.log(line); };
 const step = async (name, fn) => {
   const s = Date.now();
@@ -75,10 +75,17 @@ page.on('pageerror', e => { R.pageErrors.push({ at: ts(), text: String(e).slice(
 // Watcher in the page: AutoSteer on → off, control, connection, stale ticks, toasts.
 const WATCH = () => {
   if (window.__soak) return;
-  const S = window.__soak = { ev: [], ourOffAt: 0 };
+  const S = window.__soak = { ev: [], ourOffAt: 0, gaps: { n: 0, over1s: 0, over15s: 0, max: 0, sum: 0 } };
   const P = (k, m) => S.ev.push([Date.now(), k, m]);
   const orig = window.showToast; window.showToast = function (m) { P('toast', String(m)); return orig.apply(this, arguments); };
-  let as = null, ctl = null, conn = null, staleSince = 0;
+  let as = null, ctl = null, conn = null, staleSince = 0, lastT = 0;
+  // Time between two ticks as the page sees them (10 Hz from the host): long gaps mean the
+  // page's main thread was busy (upstream issue 6 in docs/Upstream-Issues.md).
+  setInterval(() => {
+    if (!lastTick || lastTick.t === lastT) return;
+    if (lastT) { const g = lastTick.t - lastT, G = S.gaps; G.n++; G.sum += g; if (g > G.max) G.max = g; if (g > 1000) G.over1s++; if (g > 1500) G.over15s++; }
+    lastT = lastTick.t;
+  }, 20);
   setInterval(() => {
     const now = performance.now();
     const a = !!(tick && tick.op && tick.op.autoSteer);
@@ -125,7 +132,9 @@ async function engage() { const s = await st(); if (!s.as && s.avail) await send
 async function disengage() { await ourOff(); await send('autosteer.off'); await sleep(300); }
 async function sample(label) {
   const pm = await ev(() => (performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null)).catch(() => null);
-  const m = { at: ts(), label, pageHeapMb: pm, hostRssMb: hostRssMb() };
+  const g = await ev(() => { const G = window.__soak && window.__soak.gaps; if (!G) return null; const r = { ticks: G.n, avgMs: G.n ? Math.round(G.sum / G.n) : null, maxMs: Math.round(G.max), over1s: G.over1s, over15s: G.over15s }; window.__soak.gaps = { n: 0, over1s: 0, over15s: 0, max: 0, sum: 0 }; return r; }).catch(() => null);
+  if (g) R.tickGaps.push({ at: ts(), label, ...g });
+  const m = { at: ts(), label, pageHeapMb: pm, hostRssMb: hostRssMb(), tickGaps: g };
   R.memory.push(m); log('MEM', JSON.stringify(m));
 }
 const drive = async (secs, label) => { const end = Date.now() + secs * 1000; while (Date.now() < end) { await sleep(5000); await drain(); } if (label) log('DRIVE', label); };
@@ -239,6 +248,8 @@ R.summary = {
   hostUnexpectedExits: R.hostExits.filter(h => !h.expected).length,
   memory: { first: R.memory[0], last: R.memory[R.memory.length - 1] },
   webglNotes: R.notes.length,
+  tickGaps: { maxMs: Math.max(0, ...R.tickGaps.map(g => g.maxMs || 0)), over1s: R.tickGaps.reduce((a, g) => a + (g.over1s || 0), 0),
+    over15s: R.tickGaps.reduce((a, g) => a + (g.over15s || 0), 0), ticks: R.tickGaps.reduce((a, g) => a + (g.ticks || 0), 0) },
 };
 writeFileSync(OUT, JSON.stringify(R, null, 1));
 console.log('SUMMARY ' + JSON.stringify(R.summary));
