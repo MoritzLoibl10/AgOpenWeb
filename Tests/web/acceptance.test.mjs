@@ -2,7 +2,7 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// AcceptCore (wwwroot/app.js, acceptance:begin/end): the measurements of the acceptance record.
+// AcceptCore (wwwroot/js/tablet.js, acceptance:begin/end): the measurements of the acceptance record.
 // Runs count only host ticks where the host steers on the line; the statistics; the fitter's
 // limits (none means not checked); the steering-off detection; the CSV.
 // Run: node --test Tests/web/acceptance.test.mjs
@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/app.js', import.meta.url), 'utf8');
+const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/js/tablet.js', import.meta.url), 'utf8');
 const fill = (k, p) => p ? k.replace(/\{(\w+)\}/g, (m, n) => (n in p ? String(p[n]) : m)) : k;
 const A = new Function('tr', 'I18n', app.slice(app.indexOf('// acceptance:begin'), app.indexOf('// acceptance:end')) + '\nreturn AcceptCore;')(fill, { text: k => k });
 

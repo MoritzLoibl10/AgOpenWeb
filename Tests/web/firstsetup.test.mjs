@@ -2,7 +2,7 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// TabletFirstSetup (wwwroot/app.js, firstsetup:begin/end): the guide opens by itself once, on the
+// TabletFirstSetup (wwwroot/js/tablet.js, firstsetup:begin/end): the guide opens by itself once, on the
 // device that has control, only while no vehicle profile exists; not when the guidance computer
 // or this browser already has it as shown or done, not in a demo, not in an automated browser.
 // Run: node --test Tests/web/firstsetup.test.mjs

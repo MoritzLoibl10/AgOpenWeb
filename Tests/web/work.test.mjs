@@ -2,7 +2,7 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// TabletWork (wwwroot/app.js, work:begin/end): "Start work" walks field → track → direction →
+// TabletWork (wwwroot/js/tablet.js, work:begin/end): "Start work" walks field → track → direction →
 // ready light, moves on by itself when the host's state is there, never finishes on a light that
 // isn't green, and never switches steering on.
 // Run: node --test Tests/web/work.test.mjs
