@@ -257,6 +257,14 @@ einschalten. Messung: `Tools/sim-soak.mjs` (Fork) bzw. das Skript unten. Der For
 Lenkung, am Totmann und am Zeichnen der Abdeckung nichts; er schickt `autosteer.off` nur beim
 Beenden des Vorführmodus (im Versuch nicht aktiv).
 
+**Nachgemessen 01.11.2026** (nach dem Upstream-Abgleich bis f8ee280a): upstream hat inzwischen das
+Abdeckungsraster an die größte Textur des Geräts angepasst (3dcd3eb7: bei 4096 px wird aus 5000²
+etwa 3334²) und die Karte auf 30 fps begrenzt (#408); `drawCoverageSk` mit dem Schnappschuss je Bild
+ist unverändert. Hier (SwiftShader meldet 8192 px, das Raster bleibt 5000²): ohne Grenze mit
+Teilbreiten weiter Tick-Lücken 0,8–1,5 s; `sim-soak` 15 min (Schlag 240 × 480 m mit Grenze): größte
+Lücke 0,88 s, keine über 1 s, kein Totmann. Der Entwurf bleibt gültig; auf Tablets mit 4096 px-Grenze
+ist weniger zu erwarten.
+
 **Titel:**
 
 ~~~~text
