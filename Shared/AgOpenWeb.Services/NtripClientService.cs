@@ -665,7 +665,9 @@ public class NtripClientService : INtripClientService, IDisposable
     /// wrong place or the connection dropped (#443), so no GGA goes out until one is known.
     /// Any fix counts, single and DGPS too: IsValid means good enough to steer by (RTK by
     /// default), and a receiver in single that waited for it would never get the corrections
-    /// to reach RTK. AgIO sends the receiver's position whatever its quality.
+    /// to reach RTK. AgIO sends the receiver's position whatever its quality. The last fix stands
+    /// in for at most <see cref="MaxLastFixAgeSeconds"/>: the vehicle may be far away by then, and
+    /// the caster would build its virtual base there; after that the fallback as before a fix.
     /// </summary>
     internal string? NextGgaSentence(NtripConfiguration config)
     {
@@ -676,17 +678,21 @@ public class NtripClientService : INtripClientService, IDisposable
         if (gpsData != null && HasFix(gpsData))
         {
             var p = gpsData.CurrentPosition;
-            _lastGgaFix = (p.Latitude, p.Longitude, p.Altitude);
+            _lastGgaFix = (p.Latitude, p.Longitude, p.Altitude, Clock.Current.GetTimestamp());
             return GenerateGgaSentence(p.Latitude, p.Longitude, p.Altitude, gpsData.FixQuality, gpsData.SatellitesInUse);
         }
-        if (_lastGgaFix is { } last)
+        if (_lastGgaFix is { } last
+            && Clock.Current.ElapsedSeconds(last.Stamp, Clock.Current.GetTimestamp()) <= MaxLastFixAgeSeconds)
             return GenerateGgaSentence(last.Latitude, last.Longitude, last.Altitude, 1, 8);
         if (config.FallbackPositionProvider?.Invoke() is { } fallback)
             return GenerateGgaSentence(fallback.Latitude, fallback.Longitude, 0, 1, 8);
         return null;
     }
 
-    private (double Latitude, double Longitude, double Altitude)? _lastGgaFix;
+    private (double Latitude, double Longitude, double Altitude, long Stamp)? _lastGgaFix;
+
+    /// <summary>How long the last fix stands in for a lost one, seconds.</summary>
+    internal const double MaxLastFixAgeSeconds = 300;
 
     /// <summary>The receiver reports a fix of any quality, at a position (not 0,0).</summary>
     private static bool HasFix(GpsData gpsData) =>
