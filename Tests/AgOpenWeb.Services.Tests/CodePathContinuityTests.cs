@@ -20,8 +20,9 @@ namespace AgOpenWeb.Services.Tests;
 /// What is pinned, and where the one way lives:
 /// <list type="bullet">
 /// <item>Project dependencies flow Models → Services → ViewModels / RemoteServer → RemoteWiring.</item>
-/// <item>The web client is <c>index.html</c> + <c>app.js</c> + <c>transport.js</c> + <c>i18n.js</c>:
-/// classic scripts, no modules, no workers, no extra script or stylesheet files.</item>
+/// <item>The web client is <c>index.html</c>, <c>transport.js</c>, <c>i18n.js</c> and its own scripts
+/// (<c>js/</c>) and styles (<c>css/</c>): classic scripts, every one loaded by
+/// <c>index.html</c>, no modules, no workers (Docs/WEB_CLIENT.md).</item>
 /// <item>Client → host is an <c>id|arg</c> text frame routed in <c>RemoteServerWiring</c>;
 /// host → client is a binary frame from <c>WireCodec</c>. The hub never sends text.</item>
 /// <item>Every command id the client sends has a handler on the host.</item>
@@ -29,6 +30,12 @@ namespace AgOpenWeb.Services.Tests;
 /// formats). A new file name is a format decision, made here on purpose.</item>
 /// <item>JSON is <c>System.Text.Json</c>; <c>Newtonsoft.Json</c> stays inside the AgShare client.</item>
 /// <item>The host-side wiring runs on the host loop; it creates no timers or threads of its own.</item>
+/// <item>A browser without control is an observer: every command needs control except the
+/// host's <c>ObserverIds</c>, and the client's <c>OBSERVER_IDS</c> is the same list (#397).</item>
+/// <item>Stored credentials (NTRIP passwords, the AgShare key) never go to a client: the
+/// projectors send them only through <c>Secrets.Masked</c> (#397).</item>
+/// <item>Point-in-polygon has one crossing rule, <c>GeometryMath.CrossesSouth</c>, walked by
+/// <c>GeometryMath.IsPointInPolygon</c> or looked up through <c>PolygonSlabIndex</c>.</item>
 /// </list>
 /// </summary>
 [TestFixture]
@@ -82,39 +89,66 @@ public class CodePathContinuityTests
 
     // ── The web client ────────────────────────────────────────────────────
 
-    private static readonly string[] ClientScripts = { "app.js", "transport.js", "i18n.js" };
+    // The client's files outside vendor/: the loader and the transport, and the client's own
+    // scripts (js/) and styles (css/) (Docs/WEB_CLIENT.md).
+    private static readonly string[] FixedScripts = { "transport.js", "i18n.js" };
+
+    private static string WwwRoot() => Path.Combine(RepoRoot(), "Shared", "AgOpenWeb.RemoteServer", "wwwroot");
+
+    private static bool IsAppScript(string rel) =>
+        Regex.IsMatch(rel, @"^js/[a-z0-9-]+\.js$");
+
+    private static bool IsStylesheet(string rel) => Regex.IsMatch(rel, @"^css/[a-z0-9-]+\.css$");
+
+    /// <summary>The scripts index.html loads, in order, without vendor/.</summary>
+    private static List<string> LoadedScripts(string html) =>
+        Regex.Matches(html, @"<script\b[^>]*\bsrc=""/?([^""]+)""").Select(m => m.Groups[1].Value)
+            .Where(src => !src.StartsWith("vendor/")).ToList();
+
+    /// <summary>The client's own code (js/*.js), in the order index.html loads it.</summary>
+    private static string AppSource(string www)
+    {
+        var html = File.ReadAllText(Path.Combine(www, "index.html"));
+        return string.Join("\n", LoadedScripts(html).Where(IsAppScript)
+            .Select(rel => File.ReadAllText(Path.Combine(www, rel))));
+    }
 
     [Test]
-    public void WebClient_IsIndexAppTransportI18n_NoModulesNoWorkers()
+    public void WebClient_ClassicScriptsLoadedByIndex_NoModulesNoWorkers()
     {
-        var www = Path.Combine(RepoRoot(), "Shared", "AgOpenWeb.RemoteServer", "wwwroot");
+        var www = WwwRoot();
         var violations = new List<string>();
+        var html = File.ReadAllText(Path.Combine(www, "index.html"));
+        var scripts = LoadedScripts(html);
+        var sheets = Regex.Matches(html, @"<link\b[^>]*rel=""stylesheet""[^>]*href=""/?(?!https?://)([^""]+)""")
+            .Select(m => m.Groups[1].Value).ToList();
 
-        // Script and stylesheet files outside vendor/: only the three scripts. Styles live in index.html.
+        // Script and stylesheet files outside vendor/: the fixed scripts, the client's scripts
+        // and styles, each one loaded by index.html (a file nothing loads is dead or forgotten).
         foreach (var file in Directory.EnumerateFiles(www, "*", SearchOption.AllDirectories))
         {
             var rel = Path.GetRelativePath(www, file).Replace('\\', '/');
             if (rel.StartsWith("vendor/")) continue;
             var ext = Path.GetExtension(rel);
-            if ((ext == ".js" || ext == ".mjs" || ext == ".css") && !ClientScripts.Contains(rel))
-                violations.Add($"{rel}: extra client file; the client is index.html + app.js + transport.js + i18n.js");
+            if (ext != ".js" && ext != ".mjs" && ext != ".css") continue;
+            if (!FixedScripts.Contains(rel) && !IsAppScript(rel) && !IsStylesheet(rel))
+                violations.Add($"{rel}: not a client file; scripts go in js/ (lower-case-name.js), styles in css/");
+            else if (ext == ".css" ? !sheets.Contains(rel) : !scripts.Contains(rel))
+                violations.Add($"{rel}: index.html doesn't load it");
         }
 
-        // index.html loads exactly those scripts, as classic scripts.
-        var html = File.ReadAllText(Path.Combine(www, "index.html"));
-        var tags = Regex.Matches(html, @"<script\b[^>]*>").Select(m => m.Value).ToList();
-        foreach (var tag in tags)
-        {
-            if (tag.Contains("type=\"module\"")) violations.Add($"index.html: {tag} — module scripts are not used; app.js is a classic script");
-            var src = Regex.Match(tag, @"src=""/?([^""]+)""").Groups[1].Value;
-            if (src.Length > 0 && !src.StartsWith("vendor/") && !ClientScripts.Contains(src))
-                violations.Add($"index.html: {tag} — not one of the client's scripts");
-        }
-        if (Regex.IsMatch(html, @"<link\b[^>]*rel=""stylesheet""[^>]*href=""/?(?!https?://)[^""]+"""))
-            violations.Add("index.html: a local stylesheet link; styles live inline in index.html");
+        // index.html loads only those, as classic scripts, and only files that exist.
+        foreach (var tag in Regex.Matches(html, @"<script\b[^>]*>").Select(m => m.Value))
+            if (tag.Contains("type=\"module\"")) violations.Add($"index.html: {tag} — module scripts are not used; the client's scripts are classic scripts");
+        foreach (var rel in scripts)
+            if (!FixedScripts.Contains(rel) && !IsAppScript(rel)) violations.Add($"index.html: loads {rel}, not one of the client's scripts");
+            else if (!File.Exists(Path.Combine(www, rel))) violations.Add($"index.html: loads {rel}, which doesn't exist");
+        foreach (var rel in sheets)
+            if (!IsStylesheet(rel)) violations.Add($"index.html: stylesheet {rel}; styles go in css/");
+            else if (!File.Exists(Path.Combine(www, rel))) violations.Add($"index.html: stylesheet {rel}, which doesn't exist");
 
         // The scripts don't import or spawn anything.
-        foreach (var name in ClientScripts)
+        foreach (var name in scripts.Where(r => File.Exists(Path.Combine(www, r))))
         {
             var lines = File.ReadAllLines(Path.Combine(www, name));
             for (int i = 0; i < lines.Length; i++)
@@ -122,7 +156,7 @@ public class CodePathContinuityTests
                 var l = lines[i].TrimStart();
                 if (l.StartsWith("//") || l.StartsWith("*")) continue;
                 if (Regex.IsMatch(l, @"^import\s|^export\s|\bimport\(|\bnew Worker\(|\bimportScripts\("))
-                    violations.Add($"{name}:{i + 1}: {l.Trim()} — no modules or workers; add to app.js directly");
+                    violations.Add($"{name}:{i + 1}: {l.Trim()} — no modules or workers; a classic script in js/ shares the page's scope");
             }
         }
 
@@ -151,15 +185,55 @@ public class CodePathContinuityTests
     }
 
     [Test]
+    public void Observers_ChangeNothing_ClientAndHostAgree()
+    {
+        var root = RepoRoot();
+        var wiring = File.ReadAllText(Path.Combine(root, "Shared", "AgOpenWeb.RemoteWiring", "RemoteServerWiring.cs"));
+        Assert.That(wiring, Does.Contain("server.IsRestrictedCommand = id => !ObserverIds.Contains(id);"),
+            "Every command needs control except ObserverIds (#397): an observer sees everything " +
+            "and changes nothing. Don't gate by prefix again.");
+
+        var helpers = File.ReadAllText(Path.Combine(root, "Shared", "AgOpenWeb.RemoteWiring", "RemoteServerWiring.Helpers.cs"));
+        var hostBlock = Regex.Match(helpers, @"ObserverIds\s*=\s*new\(\)\s*\{(.*?)\};", RegexOptions.Singleline);
+        Assert.That(hostBlock.Success, "ObserverIds not found in RemoteServerWiring.Helpers.cs");
+        var host = Regex.Matches(hostBlock.Groups[1].Value, @"""([^""]+)""").Select(m => m.Groups[1].Value);
+
+        var app = AppSource(WwwRoot());
+        var clientBlock = Regex.Match(app, @"OBSERVER_IDS\s*=\s*new Set\(\[(.*?)\]\)", RegexOptions.Singleline);
+        Assert.That(clientBlock.Success, "OBSERVER_IDS not found in the client's scripts");
+        var client = Regex.Matches(clientBlock.Groups[1].Value, @"'([^']+)'").Select(m => m.Groups[1].Value);
+
+        // The hub answers these itself, before the gate.
+        var hub = new[] { "control.acquire", "control.release", "control.presence", "diag.ping" };
+        Assert.That(client.OrderBy(x => x), Is.EqualTo(host.Concat(hub).OrderBy(x => x)),
+            "The client's OBSERVER_IDS must be the host's ObserverIds plus the hub's control.* and diag.ping.");
+    }
+
+    [Test]
+    public void Credentials_GoOutMasked()
+    {
+        // Every browser on the LAN gets the read frames, signed in or not.
+        var bare = new System.Text.RegularExpressions.Regex(@"\.(Password|AgShareApiKey)\b");
+        // The projectors build the DTOs; WireCodec only encodes what they hold.
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(RepoRoot(), "Shared", "AgOpenWeb.RemoteServer"), "*Projector.cs"))
+        {
+            foreach (var (line, i) in File.ReadAllLines(file).Select((l, i) => (l, i + 1)))
+                if (bare.IsMatch(line) && !line.Contains("Secrets.Masked(") && !line.Contains("GetHashCode()"))
+                    Assert.Fail($"{Path.GetFileName(file)}:{i} reads a stored credential without Secrets.Masked: " +
+                        $"{line.Trim()}. Send the mask; the wiring takes the mask back as \"unchanged\".");
+        }
+    }
+
+    [Test]
     public void EveryClientCommand_HasAHostHandler()
     {
         var root = RepoRoot();
-        var www = Path.Combine(root, "Shared", "AgOpenWeb.RemoteServer", "wwwroot");
-        var app = File.ReadAllText(Path.Combine(www, "app.js"));
+        var www = WwwRoot();
+        var app = AppSource(www);
         var html = File.ReadAllText(Path.Combine(www, "index.html"));
 
         // Command ids the client can send: literal ids in transport.send(...), data-cmd
-        // attributes in the page and in app.js markup, and the hotkey → command table.
+        // attributes in the page and in the scripts' markup, and the hotkey → command table.
         var ids = new HashSet<string>(StringComparer.Ordinal);
         foreach (Match m in Regex.Matches(app, @"transport\.send\([^)]*?'([a-z][A-Za-z0-9_.-]*\.[A-Za-z][A-Za-z0-9_.-]*)"))
             ids.Add(m.Groups[1].Value);
@@ -184,7 +258,7 @@ public class CodePathContinuityTests
 
         var unhandled = ids.Where(id => !handled.Contains(id.Split('|')[0]) && !id.StartsWith("control.")).OrderBy(x => x).ToList();
         Assert.That(unhandled, Is.Empty,
-            "app.js / index.html send command ids with no handler in RemoteServerWiring. " +
+            "The client's scripts / index.html send command ids with no handler in RemoteServerWiring. " +
             "Route them there (a `case` or a `\"id\" => vm.Command` arm); that is the only " +
             "client → host path:\n  " + string.Join("\n  ", unhandled));
     }
@@ -198,7 +272,7 @@ public class CodePathContinuityTests
     {
         // Field folder (Plans/Completed/FILE_FORMAT_MODERNIZATION_PLAN.md)
         "field.geojson", "background.png", "contours.geojson", "recorded-paths.geojson", "elevation.csv",
-        "job.json", "screenshot.png", "manifest.json", "field.json", "doc.kml",
+        "job.json", "screenshot.png", "manifest.json", "doc.kml",
         "coverage_disp.bin", "coverage_detect.bin",
         // App data
         "appsettings.json", "appstate.json", "configuration.json", "runtime_state.json",
@@ -207,6 +281,8 @@ public class CodePathContinuityTests
         ".AutoSteer.json", ".tool.xml", ".env.xml",
         // Bug report dump
         "gps_data_log.csv", "logs.txt", "system_info.txt", "ntrip_rtcm.txt",
+        "ntrip_session.txt", // what the NTRIP connection did and why it failed (Plans/Completed/NTRIP_MAIN_FALLBACK_PLAN.md, Phase 2)
+        "contact.txt", // the reporter's email, maintainers only (#407 follow-up)
         "appsettings_error.txt", "configuration_error.txt", "field_error.txt", "job_error.txt",
         "logs_error.txt", "save_error.txt", "screenshot_error.txt", "state_error.txt",
         "turn_path_error.txt", "gps_data_log_error.txt",
@@ -285,6 +361,40 @@ public class CodePathContinuityTests
                 .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
                          && !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}"))
             : Enumerable.Empty<string>();
+
+    // ── Geometry ──────────────────────────────────────────────────────────
+
+    [Test]
+    public void PointInPolygon_HasOneImplementation()
+    {
+        // A ray cast flips a flag at each edge it crosses, worked out from eastings and
+        // northings. Copies used to differ on points on an edge, missed speed-ups and were
+        // invisible to the hot-path budgets.
+        var allowed = new[] { "GeometryMath.cs", "PolygonSlabIndex.cs" };
+        var toggle = new Regex(@"\b(\w+)\s*=\s*!\1\s*;");
+        var root = RepoRoot();
+        var offenders = new List<string>();
+        foreach (var dir in new[] { "Shared", "Platforms" })
+        foreach (var file in Directory.EnumerateFiles(Path.Combine(root, dir), "*.cs", SearchOption.AllDirectories))
+        {
+            if (file.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}")
+                || file.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                || allowed.Contains(Path.GetFileName(file)))
+                continue;
+            var lines = File.ReadAllLines(file);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (!toggle.IsMatch(lines[i])) continue;
+                var before = string.Join(" ", lines.Skip(Math.Max(0, i - 6)).Take(Math.Min(6, i))).Replace("//", "");
+                if ((before.Contains("Easting") || before.Contains("Northing")) && before.Contains('/'))
+                    offenders.Add($"{Path.GetRelativePath(root, file)}:{i + 1}");
+            }
+        }
+        Assert.That(offenders, Is.Empty,
+            "Point-in-polygon tests go through GeometryMath.IsPointInPolygon (or a PolygonSlabIndex for one " +
+            "tested every tick, as BoundaryPolygon does), so every caller uses one edge rule and is counted by " +
+            "the hot-path budgets. Hand-written ray casts: " + string.Join(", ", offenders));
+    }
 
     private static string RepoRoot()
     {
