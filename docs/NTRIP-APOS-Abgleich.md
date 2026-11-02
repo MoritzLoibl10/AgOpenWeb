@@ -21,6 +21,8 @@ oder nicht, mit Codestelle (Stand `feature/installer`). **Nichts geändert**, nu
 | 12 | Anmeldung in zitierten Caster-Antworten als `***` | abgedeckt (Passwort und Base64-Wert werden geschwärzt) | `NtripClientService.cs:394, :416` |
 | 13 | Verbindungstest wie die echte Verbindung | abgedeckt (gleicher Aufbau; wie im Fork ohne GGA) | `NtripConnectionTester.cs:32` |
 
-**Offen (nicht geändert):** 2 (Altersgrenze der letzten Position), 5 (NTRIP 1: GGA vor der
-Antwort), 6 (Minuten-Übertrag), 11 (mehr Antwortzeilen). Betrifft 5 nur Caster, die NTRIP 2.0 nicht
+**Nachtrag 02.11.2026:** 2 (300 s) und 6 (Minuten-Übertrag) sind eingebaut (genehmigte Ausnahme,
+`NtripClientService.NextGgaSentence`/`NmeaDegreesMinutes`, Tests `NtripGgaRoundingAndAgeTests`;
+Upstream-Entwürfe Nr. 5 und 6 in `docs/Upstream-PRs.md`). **Offen (nicht geändert):** 5 (NTRIP 1:
+GGA vor der Antwort), 11 (mehr Antwortzeilen). Betrifft 5 nur Caster, die NTRIP 2.0 nicht
 verstehen; APOS ist bei diesem Stand nicht nachgetestet. Kandidaten für einen Upstream-Hinweis.
