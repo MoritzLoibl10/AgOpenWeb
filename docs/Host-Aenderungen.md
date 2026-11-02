@@ -471,3 +471,11 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
   diese Texte (`js/tablet.js`, `TOASTS`/`TOAST_RX`).
 - **Lenk-, Regel- und Sicherheitslogik:** unverändert von upstream übernommen.
 
+## 23. NTRIP-GGA (November 2026; genehmigte Ausnahme, nur diese zwei Punkte)
+- `NtripClientService.NmeaDegreesMinutes`: Minuten auf 4 Stellen runden, 60,0000 in den nächsten Grad
+  übertragen (Breite und Länge).
+- `NtripClientService.NextGgaSentence`: die letzte Position höchstens 300 s (`MaxLastFixAgeSeconds`),
+  danach wie upstream der Schlag-Ursprung, sonst keine GGA.
+- Eingebaut in `upstream-sync`, nach oben gemergt. Tests: `NtripGgaRoundingAndAgeTests`.
+  Upstream-Entwürfe: `upstream/gga-minute-carry`, `upstream/gga-last-fix-age`.
+
