@@ -665,7 +665,9 @@ public class NtripClientService : INtripClientService, IDisposable
     /// wrong place or the connection dropped (#443), so no GGA goes out until one is known.
     /// Any fix counts, single and DGPS too: IsValid means good enough to steer by (RTK by
     /// default), and a receiver in single that waited for it would never get the corrections
-    /// to reach RTK. AgIO sends the receiver's position whatever its quality.
+    /// to reach RTK. AgIO sends the receiver's position whatever its quality. The last fix stands
+    /// in for at most <see cref="MaxLastFixAgeSeconds"/>: the vehicle may be far away by then, and
+    /// the caster would build its virtual base there; after that the fallback as before a fix.
     /// </summary>
     internal string? NextGgaSentence(NtripConfiguration config)
     {
@@ -676,17 +678,21 @@ public class NtripClientService : INtripClientService, IDisposable
         if (gpsData != null && HasFix(gpsData))
         {
             var p = gpsData.CurrentPosition;
-            _lastGgaFix = (p.Latitude, p.Longitude, p.Altitude);
+            _lastGgaFix = (p.Latitude, p.Longitude, p.Altitude, Clock.Current.GetTimestamp());
             return GenerateGgaSentence(p.Latitude, p.Longitude, p.Altitude, gpsData.FixQuality, gpsData.SatellitesInUse);
         }
-        if (_lastGgaFix is { } last)
+        if (_lastGgaFix is { } last
+            && Clock.Current.ElapsedSeconds(last.Stamp, Clock.Current.GetTimestamp()) <= MaxLastFixAgeSeconds)
             return GenerateGgaSentence(last.Latitude, last.Longitude, last.Altitude, 1, 8);
         if (config.FallbackPositionProvider?.Invoke() is { } fallback)
             return GenerateGgaSentence(fallback.Latitude, fallback.Longitude, 0, 1, 8);
         return null;
     }
 
-    private (double Latitude, double Longitude, double Altitude)? _lastGgaFix;
+    private (double Latitude, double Longitude, double Altitude, long Stamp)? _lastGgaFix;
+
+    /// <summary>How long the last fix stands in for a lost one, seconds.</summary>
+    internal const double MaxLastFixAgeSeconds = 300;
 
     /// <summary>The receiver reports a fix of any quality, at a position (not 0,0).</summary>
     private static bool HasFix(GpsData gpsData) =>
@@ -750,22 +756,29 @@ public class NtripClientService : INtripClientService, IDisposable
     }
 
 
+    /// <summary>Degrees as NMEA "DDMM.MMMM" (latitude, 2 degree digits) or "DDDMM.MMMM" (longitude,
+    /// 3): the minutes rounded to 4 places first, so 47° 59.99996' becomes 48° 00.0000' and
+    /// never 47° 60.0000'.</summary>
+    internal static string NmeaDegreesMinutes(double value, int degreeDigits)
+    {
+        double abs = Math.Abs(value);
+        int degrees = (int)abs;
+        double minutes = Math.Round((abs - degrees) * 60.0, 4, MidpointRounding.AwayFromZero);
+        if (minutes >= 60.0) { degrees++; minutes = 0; }
+        string d = degrees.ToString(new string('0', degreeDigits), CultureInfo.InvariantCulture);
+        return d + minutes.ToString("00.0000", CultureInfo.InvariantCulture);
+    }
+
     private string GenerateGgaSentence(double lat, double lon, double alt, int fixQuality, int sats)
     {
         // NMEA is invariant: in a ','-decimal locale (de, el, nl, fr…) "5230,0000" split the
         // latitude field and VRS casters got a broken position.
         var inv = CultureInfo.InvariantCulture;
         // Convert decimal degrees to NMEA format (DDMM.MMMM)
-        double latDeg = Math.Abs(lat);
-        int latDegrees = (int)latDeg;
-        double latMinutes = (latDeg - latDegrees) * 60.0;
-        string latStr = string.Create(inv, $"{latDegrees:00}{latMinutes:00.0000}");
+        string latStr = NmeaDegreesMinutes(lat, 2);
         string latDir = lat >= 0 ? "N" : "S";
 
-        double lonDeg = Math.Abs(lon);
-        int lonDegrees = (int)lonDeg;
-        double lonMinutes = (lonDeg - lonDegrees) * 60.0;
-        string lonStr = string.Create(inv, $"{lonDegrees:000}{lonMinutes:00.0000}");
+        string lonStr = NmeaDegreesMinutes(lon, 3);
         string lonDir = lon >= 0 ? "E" : "W";
 
         // Get UTC time
