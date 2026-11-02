@@ -11,6 +11,8 @@ anlegen und Titel und Text unten übernehmen. Vorher upstream nach passenden Iss
 | 2 | `upstream/explicit-off-commands` | Host-Paket A (Punkt 35) | ViewModels-Tests (SwitchOff) |
 | 3 | `upstream/fix-quality-rank` | Upstream-Issue 5; im Fork nur in der Ampel | Services 1692 + 7 übersprungen, ViewModels 355 |
 | 4 | `upstream/translatable-host-messages` | Host-Paket D (#11) | ViewModels 357, RemoteServer 13, Wächtertests 11 |
+| 5 | `upstream/gga-minute-carry` | NTRIP-Fix Nov. 2026 (a), von upstream `develop` d84513c5 | NtripGga* 18 |
+| 6 | `upstream/gga-last-fix-age` | NTRIP-Fix Nov. 2026 (b), von upstream `develop` d84513c5 | NtripGga* 12 |
 
 Nr. 3 ändert im Gegensatz zum Fork die Qualitätsschwelle der Führung im Host; das ist bewusst als
 Vorschlag für upstream so gebaut und dort von den Maintainern zu prüfen. Im Fork bleibt der Host
@@ -109,3 +111,37 @@ file name, a count). The toast could only be English: the web client had no key 
 `KeyedFailureTests` (English text, key and values during the event, nothing left afterwards; a
 plain failure has no key), `ToastKeyTests` (frame layout).
 ~~~~
+
+## 5. NTRIP GGA: minutes that round to 60 carry into the degrees
+
+~~~~markdown
+### What changed
+`NtripClientService.GenerateGgaSentence` took the whole degrees and formatted the rest as
+minutes with `00.0000`. Minutes that round up (47° 59.99996') went out as `4760.0000`: 47° and
+60 minutes, which a VRS caster reads as a wrong or invalid position. `NmeaDegreesMinutes`
+rounds the minutes to 4 places first and carries 60.0000 into the next degree, for latitude
+(`DDMM.MMMM`) and longitude (`DDDMM.MMMM`). Nothing else in the GGA changes.
+
+### Tests
+`NtripGgaMinuteCarryTests`: 59.99996' and 59.999994' carry, 59.9999' stays, longitude with three
+degree digits, the sign stays the hemisphere letter, a whole GGA never says `60.0000`. The
+existing NtripGga tests pass.
+~~~~
+
+## 6. NTRIP GGA: a lost fix stands in for at most 300 s
+
+~~~~markdown
+### What changed
+`NextGgaSentence` keeps the last fix for the caster after the receiver loses it (#443), with no
+limit. After a long outage the vehicle can be far from that position, and a VRS caster builds
+its virtual base there. The last fix now counts for at most `MaxLastFixAgeSeconds` (300 s);
+after that the field origin goes out as before the first fix, or no GGA without one (as now).
+
+### Tests
+`NtripGgaLastFixAgeTests` (TestClock): the last fix at 300 s, the field origin at 301 s; no field
+origin → no GGA. The existing NtripGga tests pass.
+
+### Note
+300 s is a proposal; a shorter limit may suit a fast-moving vehicle better.
+~~~~
+
