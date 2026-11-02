@@ -750,22 +750,29 @@ public class NtripClientService : INtripClientService, IDisposable
     }
 
 
+    /// <summary>Degrees as NMEA "DDMM.MMMM" (latitude, 2 degree digits) or "DDDMM.MMMM" (longitude,
+    /// 3): the minutes rounded to 4 places first, so 47° 59.99996' becomes 48° 00.0000' and
+    /// never 47° 60.0000'.</summary>
+    internal static string NmeaDegreesMinutes(double value, int degreeDigits)
+    {
+        double abs = Math.Abs(value);
+        int degrees = (int)abs;
+        double minutes = Math.Round((abs - degrees) * 60.0, 4, MidpointRounding.AwayFromZero);
+        if (minutes >= 60.0) { degrees++; minutes = 0; }
+        string d = degrees.ToString(new string('0', degreeDigits), CultureInfo.InvariantCulture);
+        return d + minutes.ToString("00.0000", CultureInfo.InvariantCulture);
+    }
+
     private string GenerateGgaSentence(double lat, double lon, double alt, int fixQuality, int sats)
     {
         // NMEA is invariant: in a ','-decimal locale (de, el, nl, fr…) "5230,0000" split the
         // latitude field and VRS casters got a broken position.
         var inv = CultureInfo.InvariantCulture;
         // Convert decimal degrees to NMEA format (DDMM.MMMM)
-        double latDeg = Math.Abs(lat);
-        int latDegrees = (int)latDeg;
-        double latMinutes = (latDeg - latDegrees) * 60.0;
-        string latStr = string.Create(inv, $"{latDegrees:00}{latMinutes:00.0000}");
+        string latStr = NmeaDegreesMinutes(lat, 2);
         string latDir = lat >= 0 ? "N" : "S";
 
-        double lonDeg = Math.Abs(lon);
-        int lonDegrees = (int)lonDeg;
-        double lonMinutes = (lonDeg - lonDegrees) * 60.0;
-        string lonStr = string.Create(inv, $"{lonDegrees:000}{lonMinutes:00.0000}");
+        string lonStr = NmeaDegreesMinutes(lon, 3);
         string lonDir = lon >= 0 ? "E" : "W";
 
         // Get UTC time
