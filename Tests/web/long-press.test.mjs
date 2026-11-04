@@ -13,7 +13,8 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/js/tablet.js', import.meta.url), 'utf8');
-const block = app.slice(app.indexOf('// explain:begin'), app.indexOf('// explain:end'));
+const block = app.slice(app.indexOf('// press:begin'), app.indexOf('// press:end'))
+  + app.slice(app.indexOf('// explain:begin'), app.indexOf('// explain:end'));
 let chromium = null;
 try { ({ chromium } = createRequire(import.meta.url)('playwright')); } catch (_) { /* not installed */ }
 
