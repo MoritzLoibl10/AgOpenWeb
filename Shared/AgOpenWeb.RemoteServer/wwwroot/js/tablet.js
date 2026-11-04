@@ -2653,16 +2653,45 @@ const TabletProfiles = (() => {
 // translated for display; addresses and caster replies inside them stay as they are, and
 // anything unknown stays English. Exact texts are keys (the page translates them itself);
 // texts with a variable part are rewritten on the elements that show them.
+// hosttext:begin
 const TabletHostText = (() => {
   [tr('No Fix'), tr('GPS Fix'), tr('DGPS Fix'), tr('RTK Fixed'), tr('RTK Float'), tr('Connected'), tr('Caster sent an invalid reply'),
    tr('Success: Connected to caster and mount point')];
   const FIX = /\b(No Fix|GPS Fix|DGPS Fix|RTK Fixed|RTK Float)\b/g;
+  // The NTRIP outcome behind "Error: …" (Test button), "Connection failed: …" and "Rejected: …"
+  // (host: ConnectionErrors, NtripConnection, NtripResponse, NtripConnectionTester): the sentence
+  // in German, the address, port and caster reply as the host wrote them (moritz.31, point 8).
+  const NT_EXACT = new Set([tr('No network connection.'), tr('The caster sent an invalid reply.'), tr('Caster sent an empty reply'),
+    tr('Mount point not found (the caster sent its source table)'), tr('Mount point not found'),
+    tr('This address answered with a web page, not an NTRIP caster. Check the address and port.'),
+    tr('Authentication failed (check username, password and mount point)'), tr('Authentication failed (check username and password)'),
+    tr('The caster cannot take another connection now: it is busy, starting up, or this login is in use.'),
+    tr('This caster needs your e-mail address as user name.'), tr('The caster closed the connection.'),
+    tr('Caster host is required'), tr('Mount point is required')]);
+  const NT_RX = [
+    [/^No answer from (.+)\.$/s, w => tr('No answer from {w}.', { w })],
+    [/^Cannot reach (.+)\. Is the base station or caster switched on\?$/s, w => tr('Cannot reach {w}. Is the base station or caster switched on?', { w })],
+    [/^Cannot find (.+)\. Check the address and your internet connection\.$/s, w => tr('Cannot find {w}. Check the address and your internet connection.', { w })],
+    [/^Cannot reach (.+) \(no route\)\.$/s, w => tr('Cannot reach {w} (no route).', { w })],
+    [/^(.+) closed the connection without answering\.$/s, w => tr('{w} closed the connection without answering.', { w })],
+    [/^(\S+) closed the connection\.$/s, w => tr('{w} closed the connection.', { w })],
+    [/^Cannot connect to (.+) \((\w+)\)\.$/s, (w, c) => tr('Cannot connect to {w} ({c}).', { w, c })],
+    [/^Caster is busy or unavailable: (.+)$/s, r => tr('Caster is busy or unavailable: {r}', { r })],
+    [/^Caster refused: (.+)$/s, r => tr('Caster refused: {r}', { r })],
+    [/^Access denied: (.+)$/s, r => tr('Access denied: {r}', { r })],
+    [/^Unexpected caster reply: (.+)$/s, r => tr('Unexpected caster reply: {r}', { r })],
+  ];
+  function ntDe(x) {
+    if (NT_EXACT.has(x)) return I18n.text(x);
+    for (const [re, f] of NT_RX) { const m = re.exec(x); if (m) return f(...m.slice(1)); }
+    return x;
+  }
   const PAT = [
     [/^Connecting to (.+)…$/s, x => tr('Connecting to {x}…', { x })],
     [/^Connected to (.+)$/s, x => tr('Connected to {x}', { x })],
-    [/^Connection failed: (.+)$/s, x => tr('Connection failed: {x}', { x })],
-    [/^Rejected: (.+)$/s, x => tr('Rejected: {x}', { x })],
-    [/^Error: (.+)$/s, x => tr('Error: {x}', { x })],
+    [/^Connection failed: (.+)$/s, x => tr('Connection failed: {x}', { x: ntDe(x) })],
+    [/^Rejected: (.+)$/s, x => tr('Rejected: {x}', { x: ntDe(x) })],
+    [/^Error: (.+)$/s, x => tr('Error: {x}', { x: ntDe(x) })],
     [/^(.+) — reconnecting…$/s, x => tr('{x} — reconnecting…', { x })],
   ];
   // Point 11: the host's fixed failure texts (MainViewModel ReportFailure → toast). Texts with a
@@ -2753,10 +2782,11 @@ const TabletHostText = (() => {
     }
   });
   // Where the host's texts are shown: status bar, GPS popup, Network IO, System Data, NTRIP test.
-  const IDS = ['sb-fix', 'sb-gps-d', 'gc-fix', 'nio-ntrip-status', 'nio-ntrip-rx', 'sd-fix', 'nte-teststatus'];
+  const IDS = ['sb-fix', 'sb-gps-d', 'gc-fix', 'nio-ntrip-status', 'nio-ntrip-rx', 'sd-fix', 'nte-teststatus', 'nte-fb-teststatus'];
   for (const id of IDS) { const e = document.getElementById(id); if (e) obs.observe(e, { subtree: true, childList: true, characterData: true }); }
   return { de };
 })();
+// hosttext:end
 
 // ===== Tablet UI (Phase 4a): product look, help, support diagnosis ====================
 // BRAND is the one place for the product name, colours, logo and links of the web app (the
@@ -3881,8 +3911,10 @@ const TabletReady = (() => {
     if (key === last) return;
     last = key;
     pill.dataset.lv = demo ? 'demo' : String(lvl);
+    // A symbol in the light as well as the word (moritz.31, point 6): readable without colour.
+    pill.querySelector('.rd-dot').textContent = demo ? '' : lvl === 2 ? '✓' : lvl === 1 ? '!' : '✕';
     pill.querySelector('.rd-t').textContent = T(word);
-    pill.title = T(tr('Ready to steer'));
+    pill.title = T(tr('Ready to steer')) + ': ' + T(word);
     if (pop.hidden) return;
     pop.innerHTML = '';
     pop.appendChild(el('div', 'rd-h', T(tr('Ready to steer')) + ': ' + T(word)));
