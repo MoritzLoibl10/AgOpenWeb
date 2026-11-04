@@ -14,6 +14,7 @@ Issues gibt, ließ sich aus der Fork-Sitzung nicht prüfen; vor dem Anlegen kurz
 | 5 | MinFixQuality vergleicht die NMEA-Zahl: RTK Float (5) besteht die Vorgabe RTK Fix (4) | Entwurf fertig (27.10.2026), einreichen |
 | 6 | Simulator mit Teilbreiten: Bedienseite hängt bei jedem Abdeckungs-Update ~1 s, Totmann (1,5 s) nimmt die Bedienung weg, Lenkung geht aus | Entwurf fertig (30.10.2026), einreichen |
 | 7 | Tastenkürzel F (Schlagmenü) und V (Fahrzeug) wirken nur bei jedem zweiten Druck: der Geister-Druck-Filter (#465) verwirft den zweiten Druck mit pointerId 0 | Entwurf fertig (04.11.2026), einreichen |
+| 8 | NTRIP-Test (Knopf „Test“) schickt keine Position: ein VRS-Caster, der erst mit Position antwortet, ergibt nach 15 s „No answer“ | Entwurf fertig (04.11.2026), einreichen |
 
 ## 1. IMU heading from PGN 253 (#357): AiO v26 sends 0 for "no IMU", which now goes into the heading fusion as a real heading
 
@@ -358,4 +359,44 @@ open, nothing, open, nothing, open, nothing. The same for V (vehicle settings).
 - A press made by code needs a `pointerId` no real pointer uses (e.g. a counter from 1e6) or a
   matching `pointerup`; `new PointerEvent('pointerdown', { bubbles: true, pointerId: ++id })`.
 - Any other code that presses buttons this way (add-ons, tests) runs into the same filter.
+~~~~
+
+## 8. The NTRIP Test button sends no position; a VRS caster that waits for one gives "No answer"
+
+Stand: **Entwurf zum Einreichen**. Befund am Tablet (moritz.31, Windows, APOS): erster Test „no
+answer“, zweiter „Erfolg“. Nachgestellt am 04.11.2026 mit einem Test-Caster (Fork, NTRIP-Code von
+upstream unverändert): Antwort nach 14 s → Erfolg, nach 16 s → „No answer“ nach 15 s; ein Caster,
+der erst nach einer GGA antwortet → immer „No answer“ nach 15 s; ein Caster, der die erste
+Verbindung unbeantwortet lässt → erst „No answer“, dann „Erfolg“ (das Muster vom Tablet). Ob APOS
+die erste Verbindung so behandelt oder auf die Position wartet, ließ sich ohne Zugang nicht klären.
+Der Fork zeigt die Meldung jetzt auf Deutsch und ändert am Verbindungsaufbau nichts (Host).
+
+**Titel:**
+
+~~~~text
+NTRIP Test button: no position in the request, so a VRS caster that waits for one times out with "No answer"
+~~~~
+
+**Text:**
+
+~~~~markdown
+### Description
+`NtripConnectionTester.TestAsync` opens the connection with `gga: () => null`: the NTRIP 2.0 request
+has no `Ntrip-GGA` header and no GGA follows. The real connection (`NtripClientService`) sends the
+position. A network-RTK (VRS) caster that answers only once it knows the rover's position never
+answers the test; after `NtripTimeouts.Header` (15 s) the test reports "No answer from host:port."
+although the same profile connects fine.
+
+### Steps to reproduce
+A caster that replies `ICY 200 OK` only after a GGA (a 20-line Python asyncio server does), then
+the Test button with its address: "Error: No answer from 127.0.0.1:2199." after 15 s. With a
+caster that answers at once: "Success" within 0.3 s.
+
+### Expected
+The test behaves like the connection: with a position when one is known.
+
+### Notes
+- Measured header limit: an answer after 14 s passes, after 16 s it is "No answer" (15 s).
+- Suggestion: pass the client's current GGA (the same source as `NtripClientService.NextGgaSentence`)
+  to the tester; without a fix, say in the result that some casters need a position.
 ~~~~
