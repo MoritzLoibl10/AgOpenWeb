@@ -4745,7 +4745,7 @@ const TabletWorkLog = (() => {
     const f = m.querySelector('.tui-tiles.tui-f'); if (!f || f.querySelector('[data-tile="worklog"]')) return;
     const t = el('button', 'tui-tile field'); t.dataset.tile = 'worklog'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Work log'));
-    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(); });
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
     f.appendChild(t);
   }, 300);
   return { open, get entries() { return all(); } };
