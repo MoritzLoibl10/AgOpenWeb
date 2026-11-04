@@ -43,6 +43,11 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Build Windows launcher bundle (x64)
+        # Fork (start time): ReadyToRun = the app's own assemblies are compiled ahead of time,
+        # so the start does not wait for the JIT (MSBuild reads the variable as a property;
+        # package.sh stays as upstream).
+        env:
+          PublishReadyToRun: 'true'
         run: ./deploy/windows/package.sh --arch x64 --out "$GITHUB_WORKSPACE/dist"
 
       - name: Upload bundle artifact
@@ -196,8 +201,50 @@ jobs:
       - name: Compile iOS
         run: dotnet build Platforms/AgOpenWeb.iOS/AgOpenWeb.iOS.csproj -c Debug -f net10.0-ios -r iossimulator-arm64
 
+  # Customer installer (feature/installer): Inno Setup on a Windows runner, from the bundle above.
+  installer:
+    needs: windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: agopenweb-win-x64
+          path: bundle
+
+      - name: Build installer
+        shell: pwsh
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          Expand-Archive bundle/agopenweb-win-x64.zip -DestinationPath bundle
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress; }
+          if (-not (Test-Path $iscc)) { throw "Inno Setup not found" }
+          # File version: the numbers of the tag (26.7.0-moritz.25 -> 26.7.0.25), four at most.
+          $nums = [regex]::Matches($env:TAG, '\d+') | ForEach-Object { $_.Value }
+          $fv = (@($nums | Select-Object -First 3) + @(if ($nums.Count -gt 3) { $nums[-1] } else { '0' })) -join '.'
+          # Microsoft's WebView2 bootstrapper (small; fetches the runtime only where it is missing).
+          # Microsoft allows passing it on with an application (WebView2 distribution terms).
+          New-Item -ItemType Directory -Force wv2 | Out-Null
+          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile wv2\MicrosoftEdgeWebview2Setup.exe
+          $sig = Get-AuthenticodeSignature wv2\MicrosoftEdgeWebview2Setup.exe
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'O=Microsoft Corporation') { throw "WebView2 bootstrapper: no valid Microsoft signature" }
+          & $iscc "/DAppVersion=$env:TAG" "/DFileVersion=$fv" "/DSourceDir=$PWD\bundle\agopenweb-win-x64" "/DOutDir=$PWD\dist" "/DWebView2Setup=$PWD\wv2\MicrosoftEdgeWebview2Setup.exe" deploy\windows\installer.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Get-ChildItem dist
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agopenweb-setup
+          path: dist/*-Setup-*.exe
+          if-no-files-found: error
+
   prerelease:
-    needs: [windows, android]
+    needs: [windows, android, installer]
     runs-on: ubuntu-latest
     permissions:
       contents: write   # create the tag + pre-release
@@ -215,6 +262,16 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
+
+      # Release files carry the product name: the portable ZIP (test versions only; a stable
+      # release keeps only the setup, see fork-stable-release.yml).
+      - name: Name the portable ZIP
+        env:
+          TAG: ${{ inputs.tag }}
+        run: |
+          ZIP=$(find dist -name agopenweb-win-x64.zip | head -1)
+          [ -n "$ZIP" ] || { echo "::error::agopenweb-win-x64.zip not found"; exit 1; }
+          mv "$ZIP" "dist/LM-Steering-Solutions-portable-$TAG.zip"
 
       - name: Write release notes
         env:
@@ -235,7 +292,8 @@ jobs:
           draft: false
           body_path: notes.md
           files: |
-            dist/**/agopenweb-win-x64.zip
+            dist/LM-Steering-Solutions-portable-*.zip
             dist/**/agopenweb-android.apk
+            dist/**/*-Setup-*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
