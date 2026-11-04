@@ -4324,11 +4324,29 @@ const TabletFirstSetup = (() => {
     shB.appendChild(box);
   }
   setInterval(render, 500);
+  // The host's untouched vehicle profile: the host saves its active profile "Default" as soon as
+  // anything is saved (leaving the vehicle settings, loading another profile), with the values
+  // it gives every new store. Those values are the host's own (VehicleConfig.cs initializers, the
+  // same in VehicleProfileService.CreateDefaultProfile; Tests/web/firstsetup.test.mjs reads them
+  // from both files), not suggestions: they only tell "nothing set up yet" (moritz.31, point 4).
+  const HOST_DEFAULT_VEHICLE = { type: 0, wheelbase: 2.5, trackWidth: 1.8, antennaHeight: 3.0, antennaPivot: 0, antennaOffset: 0, hitchLength: 1.8, imuPivot: 0, imuHeight: 0, imuOffset: 0 };
+  // null while the client can't tell yet (profile list or active config not received).
+  function noVehicleYet() {
+    if (!profiles || !profiles.vehicles) return null;
+    const v = profiles.vehicles;
+    if (!v.length) return true;
+    if (v.length !== 1 || v[0].name !== 'Default' || profiles.activeVehicle !== 'Default') return false;
+    const c = config && config.vehicle;
+    if (!c) return null;
+    return Object.keys(HOST_DEFAULT_VEHICLE).every(k => Math.abs(+c[k] - HOST_DEFAULT_VEHICLE[k]) < 1e-9);
+  }
   // First start on this device: once, on the device that has control, not during a demo.
   const auto = setInterval(() => {
     if (lsOk()) { clearInterval(auto); return; }
-    // Only while no vehicle profile exists yet (the profile list the client already has).
-    if (profiles && profiles.vehicles && profiles.vehicles.length) { clearInterval(auto); return; }
+    // Only while no vehicle is set up: no vehicle profile, or only the host's untouched "Default".
+    const none = noVehicleYet();
+    if (none === false) { clearInterval(auto); return; }
+    if (none !== true) return;
     if (connState === 'connected' && iHoldControl && appInfo && config && profiles && !(typeof TabletDemo !== 'undefined' && TabletDemo.active)) {
       clearInterval(auto); mark('shown'); open(0);
     }
