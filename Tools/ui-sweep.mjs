@@ -9,13 +9,22 @@
 // Needs a running host (default http://localhost:5174) and Playwright.
 //
 //   node Tools/ui-sweep.mjs [--url http://localhost:5174] [--size 1024x600] [--lang de] [--scale glove] [--out sweep.json]
+//                           [--touch] [--cpu 4] [--only touch]
 // --scale: the tablet UI size (normal, large, glove), as chosen in the menu; default glove.
+// --touch: a second pass with real touch events (CDP Input.dispatchTouchEvent), as a finger on the
+//   tablet: every menu tile and every settings tab is tapped twice, each time from a closed state.
+//   Listed: "second-tap" (the first tap did nothing), "flicker" (opened, then closed by itself
+//   within 1.5 s), "slow" (tap to the first frame of the page > 1 s; with --cpu 4: > 4 s), "error".
+//   The time per tile, first and second opening, is in the report (kind "time").
+// --cpu: slows the page's main thread by this factor (Emulation.setCPUThrottlingRate), as a weak tablet.
+// --only touch: skip the visual sweep.
 import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const url = arg('url', 'http://localhost:5174/'), [W, H] = arg('size', '1024x600').split('x').map(Number);
 const lang = arg('lang', 'de'), out = arg('out', 'ui-sweep.json'), scale = arg('scale', 'glove');
+const touch = process.argv.includes('--touch'), cpu = +arg('cpu', '1'), only = arg('only', '');
 const { chromium } = createRequire(import.meta.url)('playwright');
 const root = new URL('..', import.meta.url);
 const en = JSON.parse(readFileSync(new URL('Shared/AgOpenWeb.RemoteServer/wwwroot/i18n/en.json', root), 'utf8'));
@@ -30,14 +39,16 @@ const SURFACES = () => {
     const open = `wzClose(true); closeDialog(); lnCloseAll(); document.getElementById('${p}').classList.add('open');`;
     s.push([p, open, '#' + p]);
     document.querySelectorAll(`#${p} .cfg-tab`).forEach((b, i) => s.push([`${p} / tab ${i + 1}`,
-      open + `document.querySelectorAll('#${p} .cfg-tab')[${i}].dispatchEvent(new PointerEvent('pointerdown', {bubbles: true}));`, '#' + p]));
+      open + `tuiPress(document.querySelectorAll('#${p} .cfg-tab')[${i}]);`, '#' + p]));
   }
   for (const c of document.querySelectorAll('#dialoghost .dlg-card[id]')) s.push([c.id, `wzClose(true); lnCloseAll(); openDialog('${c.id}');`, '#' + c.id]);
   s.push(['steer wizard', 'lnCloseAll(); closeDialog(); openSteerWizard();', '#wizard-overlay']);
   for (const f of document.querySelectorAll('.bn-flyout[id]'))
     s.push([f.id, `wzClose(true); lnCloseAll(); closeDialog(); document.getElementById('${f.id}').classList.add('open');`, '#' + f.id]);
   // Fork sheets and menus
-  const fire = sel => `document.querySelector('${sel}').dispatchEvent(new PointerEvent('pointerdown', {bubbles: true, cancelable: true}));`;
+  // Presses by code go through tuiPress (js/tablet.js): each with its own pointerId, which the
+  // ghost-press filter (#465) lets through every time (a bare pointerId 0 only every second time).
+  const fire = sel => `tuiPress(document.querySelector('${sel}'));`;
   // The fork's sheets are opened from the menu in setup mode; in drive mode they close again.
   const reset = `TabletTerminal.setMode('setup'); wzClose(true); lnCloseAll(); closeDialog(); document.querySelectorAll('.tui-sheet.open, .tp-scrim.open').forEach(e => e.classList.remove('open'));`;
   s.push(['menu', reset + fire('#tui-menu-btn'), '#tui-menu']);
@@ -120,7 +131,9 @@ const CHECK = ([sel, untranslated]) => {
 };
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: W, height: H } });
+const page = await (await browser.newContext({ viewport: { width: W, height: H }, hasTouch: touch })).newPage();
+const cdp = await page.context().newCDPSession(page);
+if (cpu > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpu });
 await page.addInitScript(s => { try { localStorage.setItem('aow.ui.scale', s); } catch (_) { /* ignore */ } }, scale);
 await page.goto(url);
 await page.waitForFunction(() => typeof iHoldControl !== 'undefined' && iHoldControl === true && config && appInfo, null, { timeout: 60000 });
@@ -128,7 +141,7 @@ await page.evaluate(l => transport.send('app.setLanguage|' + l), lang);
 await page.waitForFunction(l => I18n.language === l, lang);
 await page.waitForTimeout(1500);
 const report = [];
-for (const day of [true, false]) {
+for (const day of only === 'touch' ? [] : [true, false]) {
   await page.evaluate(d => { if (!!(config.display && config.display.isDayMode) !== d) transport.send('display.toggleTheme'); }, day);
   await page.waitForFunction(d => !!(config.display && config.display.isDayMode) === d, day, { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(800);
@@ -139,7 +152,86 @@ for (const day of [true, false]) {
   }
 }
 await page.evaluate(() => { wzClose(true); lnCloseAll(); closeDialog(); });
+if (touch) await touchPass();
 await browser.close();
 writeFileSync(out, JSON.stringify(report, null, 1));
 const by = {}; for (const r of report) by[r.k] = (by[r.k] || 0) + 1;
 console.log(JSON.stringify(by));
+
+// ---- Touch pass (--touch) -------------------------------------------------------------------
+// What a finger does: touchStart, 60 ms, touchEnd at the middle of the element, as on the tablet.
+async function tapEl(sel) {
+  const r = await page.evaluate(s => { const e = document.querySelector(s); if (!e) return null; e.scrollIntoView({ block: 'center' });
+    const b = e.getBoundingClientRect(); return b.width ? { x: b.left + b.width / 2, y: b.top + b.height / 2 } : null; }, sel);
+  if (!r) return false;
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: r.x, y: r.y }] });
+  await page.waitForTimeout(60);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  return true;
+}
+// Everything closed, drive mode: the state a tile is tapped from.
+const RESET = () => { try { wzClose(true); lnCloseAll(); closeDialog(); } catch (_) { /* older page */ }
+  document.querySelectorAll('.tui-sheet.open, .tp-scrim.open, .bn-flyout.open').forEach(e => e.classList.remove('open'));
+  if (typeof TabletTerminal !== 'undefined' && TabletTerminal.mode !== 'drive') TabletTerminal.setMode('drive'); };
+// What is open now (panels, sheets, dialogs), the menu itself left out.
+const OPENED = () => [...document.querySelectorAll('.ln-panel.open, .tui-sheet.open, #dialoghost.open .dlg-card.open, #wizard-overlay.open, .open[id]')]
+  .filter(e => e.id && !/^(tui-menu|tui-scrim|ln-scrim|simbar|sim-launch|bottomnav|statusbar|tui-sb.*|hud.*|dialoghost)$/.test(e.id) && e.getBoundingClientRect().width > 0)
+  .map(e => e.id).sort().join(',');
+// Tap → the first frame with something open (the menu closed), then watch it 1.5 s for closing by itself.
+async function openAndWatch(sel) {
+  const waiter = page.evaluate(([OPENED_SRC]) => new Promise(res => {
+    const opened = (0, eval)('(' + OPENED_SRC + ')');
+    const s = performance.now();
+    const f = () => {
+      const o = opened(), menu = !!document.querySelector('#tui-menu.open');
+      if (o && !menu) requestAnimationFrame(() => res({ ms: performance.now() - s, what: o }));
+      else if (performance.now() - s > 15000) res({ ms: -1, what: o });
+      else requestAnimationFrame(f);
+    };
+    requestAnimationFrame(f);
+  }), [OPENED.toString()]);
+  if (!(await tapEl(sel))) return { ms: -1, what: '', gone: false, missing: true };
+  const r = await waiter;
+  let gone = false;
+  if (r.ms >= 0) for (let i = 0; i < 30; i++) { await page.waitForTimeout(50); if (!(await page.evaluate(OPENED))) { gone = true; break; } }
+  return { ...r, gone };
+}
+async function touchPass() {
+  const slow = cpu > 1 ? 1000 * cpu : 1000;
+  const add = (surface, k, d) => report.push({ mode: 'touch' + (cpu > 1 ? ' cpu×' + cpu : ''), surface, k, w: '', d });
+  await page.evaluate(RESET); await page.waitForTimeout(500);
+  await tapEl('#tui-menu-btn'); await page.waitForTimeout(800);
+  const tiles = await page.evaluate(() => [...document.querySelectorAll('#tui-menu [data-tile]')].map(e => e.dataset.tile)
+    .filter(t => !t.startsWith('#') && t !== 'demo')); // bottom-bar commands and the demo change state: not here
+  for (const t of tiles) {
+    const times = [];
+    for (let n = 0; n < 2; n++) {
+      await page.evaluate(RESET); await page.waitForTimeout(400);
+      if (!(await tapEl('#tui-menu-btn'))) { add(t, 'error', 'menu button not found'); break; }
+      await page.waitForFunction(() => !!document.querySelector('#tui-menu.open'), null, { timeout: 5000 }).catch(() => add(t, 'second-tap', 'menu did not open'));
+      await page.waitForTimeout(300);
+      const r = await openAndWatch(`#tui-menu [data-tile="${t}"]`);
+      if (r.missing) { add(t, 'error', 'tile not found'); break; }
+      if (r.ms < 0) add(t, 'second-tap', `tap ${n + 1}: nothing opened`);
+      else { times.push(Math.round(r.ms)); if (r.gone) add(t, 'flicker', `tap ${n + 1}: ${r.what} closed again within 1.5 s`); if (r.ms > slow) add(t, 'slow', `tap ${n + 1}: ${Math.round(r.ms)} ms`); }
+    }
+    add(t, 'time', times.join(' / ') + ' ms');
+  }
+  // Settings tabs: each tab of each settings page by touch; the tapped tab must become the active one.
+  for (const p of await page.evaluate(() => (typeof LN_NAV_PANELS !== 'undefined' ? LN_NAV_PANELS : []).filter(p => document.querySelectorAll('#' + p + ' .cfg-tab').length))) {
+    await page.evaluate(RESET);
+    await page.evaluate(p => { if (typeof TabletTerminal !== 'undefined') TabletTerminal.setMode('setup'); document.getElementById(p).classList.add('open'); }, p);
+    await page.waitForTimeout(300);
+    const n = await page.evaluate(p => document.querySelectorAll('#' + p + ' .cfg-tab').length, p);
+    for (let i = 0; i < n; i++) {
+      for (let k = 0; k < 2; k++) {
+        await page.evaluate(([p, i]) => document.querySelectorAll('#' + p + ' .cfg-tab').forEach((t, j) => t.toggleAttribute('data-swtab', j === i)), [p, i]);
+        await tapEl(`#${p} [data-swtab]`);
+        await page.waitForTimeout(250);
+        const ok = await page.evaluate(([p, i]) => { const t = document.querySelectorAll('#' + p + ' .cfg-tab')[i]; return !t || t.classList.contains('active') || t.getAttribute('aria-selected') === 'true'; }, [p, i]);
+        if (!ok) { add(p + ' / tab ' + (i + 1), 'second-tap', 'tab not active after tap ' + (k + 1)); break; }
+      }
+    }
+  }
+  await page.evaluate(RESET);
+}
