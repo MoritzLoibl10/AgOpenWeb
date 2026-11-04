@@ -50,7 +50,7 @@ public static class ServiceCollectionExtensions
         // consumer of this graph is BackendHost (daemon + WebView launcher), which runs
         // the VM/pipeline on a single HostLoopDispatcher standing in for the old Avalonia
         // UI thread. BackendHost re-registers its own instance (last-wins); these defaults
-        // keep the container resolvable on its own. See Plans/CONFIG_STATE_AUDIT.md §11.
+        // keep the container resolvable on its own. See Plans/Completed/CONFIG_STATE_AUDIT.md §11.
         services.AddSingleton<HostLoopDispatcher>();
         services.AddSingleton<IUiDispatcher>(sp => sp.GetRequiredService<HostLoopDispatcher>());
         services.AddSingleton<IUiTimerFactory>(sp => sp.GetRequiredService<HostLoopDispatcher>());
@@ -61,6 +61,8 @@ public static class ServiceCollectionExtensions
 
         // Register Services
         services.AddSingleton<ILocalNetworkInfoProvider, SystemLocalNetworkInfoProvider>();
+        // One watcher for network changes; UDP, NTRIP and the bug report outbox subscribe (#385).
+        services.AddSingleton<AgOpenWeb.Services.Network.INetworkWatcher, AgOpenWeb.Services.Network.NetworkWatcher>();
         services.AddSingleton<IUdpCommunicationService, UdpCommunicationService>();
 
         // Core services
@@ -103,6 +105,8 @@ public static class ServiceCollectionExtensions
 
         // ISOBUS task controller link: PGN 240 heartbeat in, PGN 241 section control out
         services.AddSingleton<IIsobusTaskControllerService, AgOpenWeb.Services.Isobus.IsobusTaskControllerService>();
+        // ISOBUS virtual terminal for the VT card
+        services.AddSingleton<IVirtualTerminalService, AgOpenWeb.VirtualTerminal.VirtualTerminalService>();
 
         // Smart WAS calibration (statistical WAS zero analyzer)
         services.AddSingleton<ISmartWasCalibrationService, SmartWasCalibrationService>();
