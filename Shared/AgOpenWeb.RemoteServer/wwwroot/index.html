@@ -436,6 +436,20 @@
    fit: the ready light was squeezed to its dot and the fix field to 17 px. The clock gives way first;
    under 900 px the light shows its symbol alone, larger (the word is in its list and its title). */
 @media (max-width: 999px) { :root[data-tui-layout="terminal"]:not([data-tui-scale="normal"]) #tui-sb-clock { display: none; } }
+/* Setup mode adds the mode badge and the speed: there the same steps come under 1200 px, and the
+   speed gives way under 1000 px (the GPS field had been squeezed to a few pixels). */
+@media (max-width: 1199px) {
+  :root[data-tui-layout="terminal"][data-tui-mode="setup"]:not([data-tui-scale="normal"]) #tui-sb-clock { display: none; }
+  :root[data-tui-layout="terminal"][data-tui-mode="setup"]:not([data-tui-scale="normal"]) #tui-sb-ready .rd-t { display: none; }
+  :root[data-tui-layout="terminal"][data-tui-mode="setup"]:not([data-tui-scale="normal"]) #tui-sb-ready .rd-dot { width: 32px; height: 32px; font-size: 20px; }
+}
+@media (max-width: 999px) { :root[data-tui-layout="terminal"][data-tui-mode="setup"]:not([data-tui-scale="normal"]) .sb-speed-wrap { display: none; } }
+/* Under 900 px in setup mode the modules keep their dot, and the fix field goes rather than being
+   squeezed over its neighbours (the ready light and the GPS popup still tell the fix). */
+@media (max-width: 899px) {
+  :root[data-tui-layout="terminal"][data-tui-mode="setup"]:not([data-tui-scale="normal"]) #sb-modbtn { font-size: 0; }
+  :root[data-tui-layout="terminal"][data-tui-mode="setup"]:not([data-tui-scale="normal"]) .sb-left { display: none; }
+}
 @media (max-width: 899px) {
   :root[data-tui-layout="terminal"]:not([data-tui-scale="normal"]) #tui-sb-ready .rd-t { display: none; }
   :root[data-tui-layout="terminal"]:not([data-tui-scale="normal"]) #tui-sb-ready .rd-dot { width: 32px; height: 32px; font-size: 20px; }
