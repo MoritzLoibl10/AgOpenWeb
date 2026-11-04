@@ -5268,7 +5268,7 @@ const TabletAcceptance = (() => {
     const sBox = m.querySelector('.tui-tiles.tui-s'); if (!sBox || sBox.querySelector('[data-tile="accept"]')) return;
     const t = el('button', 'tui-tile setup'); t.dataset.tile = 'accept'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Acceptance record'));
-    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(); });
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
     sBox.appendChild(t);
   }, 300);
   return { open };
