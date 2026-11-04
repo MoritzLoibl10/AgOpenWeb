@@ -170,13 +170,14 @@ async function tapEl(sel) {
   return true;
 }
 // Everything closed, drive mode: the state a tile is tapped from.
-const RESET = () => { try { wzClose(true); lnCloseAll(); closeDialog(); } catch (_) { /* older page */ }
-  document.querySelectorAll('.tui-sheet.open, .tp-scrim.open, .bn-flyout.open').forEach(e => e.classList.remove('open'));
-  if (typeof TabletTerminal !== 'undefined' && TabletTerminal.mode !== 'drive') TabletTerminal.setMode('drive'); };
+// (Function declarations: the pass runs from the top-level code above, before a const here exists.)
+function RESET() { try { wzClose(true); lnCloseAll(); closeDialog(); } catch (_) { /* older page */ }
+  document.querySelectorAll('.tui-sheet.open, .tp-scrim.open, .bn-flyout.open, #tui-scrim.open').forEach(e => e.classList.remove('open'));
+  if (typeof TabletTerminal !== 'undefined' && TabletTerminal.mode !== 'drive') TabletTerminal.setMode('drive'); }
 // What is open now (panels, sheets, dialogs), the menu itself left out.
-const OPENED = () => [...document.querySelectorAll('.ln-panel.open, .tui-sheet.open, #dialoghost.open .dlg-card.open, #wizard-overlay.open, .open[id]')]
+function OPENED() { return [...document.querySelectorAll('.ln-panel.open, .tui-sheet.open, #dialoghost.open .dlg-card.open, #wizard-overlay.open, .open[id]')]
   .filter(e => e.id && !/^(tui-menu|tui-scrim|ln-scrim|simbar|sim-launch|bottomnav|statusbar|tui-sb.*|hud.*|dialoghost)$/.test(e.id) && e.getBoundingClientRect().width > 0)
-  .map(e => e.id).sort().join(',');
+  .map(e => e.id).sort().join(','); }
 // Tap → the first frame with something open (the menu closed), then watch it 1.5 s for closing by itself.
 async function openAndWatch(sel) {
   const waiter = page.evaluate(([OPENED_SRC]) => new Promise(res => {
@@ -223,7 +224,14 @@ async function touchPass() {
     await page.evaluate(p => { if (typeof TabletTerminal !== 'undefined') TabletTerminal.setMode('setup'); document.getElementById(p).classList.add('open'); }, p);
     await page.waitForTimeout(300);
     const n = await page.evaluate(p => document.querySelectorAll('#' + p + ' .cfg-tab').length, p);
+    const visible = i => page.evaluate(([p, i]) => { const t = document.querySelectorAll('#' + p + ' .cfg-tab')[i]; return !!t && t.getBoundingClientRect().width > 0; }, [p, i]);
     for (let i = 0; i < n; i++) {
+      // A second-row tab shows under its first-row tab only: tap the earlier tabs until it shows.
+      for (let j = 0; j < i && !(await visible(i)); j++) if (await visible(j)) {
+        await page.evaluate(([p, j]) => document.querySelectorAll('#' + p + ' .cfg-tab').forEach((t, k) => t.toggleAttribute('data-swtab', k === j)), [p, j]);
+        await tapEl(`#${p} [data-swtab]`); await page.waitForTimeout(250);
+      }
+      if (!(await visible(i))) { add(p + ' / tab ' + (i + 1), 'hidden', 'not shown by any earlier tab (e.g. an expanded view): not tapped'); continue; }
       for (let k = 0; k < 2; k++) {
         await page.evaluate(([p, i]) => document.querySelectorAll('#' + p + ' .cfg-tab').forEach((t, j) => t.toggleAttribute('data-swtab', j === i)), [p, i]);
         await tapEl(`#${p} [data-swtab]`);
