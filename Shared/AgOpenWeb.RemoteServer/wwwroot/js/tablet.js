@@ -5055,7 +5055,7 @@ const TabletEama = (() => {
     const s = m.querySelector('.tui-tiles.tui-s'); if (!s || s.querySelector('[data-tile="eama"]')) return;
     const t = el('button', 'tui-tile setup'); t.dataset.tile = 'eama'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Fields from eAMA'));
-    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(); });
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
     s.appendChild(t);
   }, 300);
   return { open };
