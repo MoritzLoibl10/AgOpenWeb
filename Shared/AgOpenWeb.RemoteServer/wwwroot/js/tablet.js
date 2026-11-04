@@ -4052,7 +4052,7 @@ const TabletExplain = (() => {
     clearTimeout(press.timer);
     const p = press; press = null;
     if (!act) return;
-    const ev = new PointerEvent('pointerdown', p.init); ev.__aowReplay = true;
+    const ev = new PointerEvent('pointerdown', tuiPressInit(p.init)); ev.__aowReplay = true; // own pointerId (#465 filter)
     p.node.dispatchEvent(ev);
   };
   window.addEventListener('pointerup', e => { if (swallowClick) setTimeout(() => { swallowClick = false; }, 400); release(e, true); }, true);
@@ -4106,7 +4106,7 @@ const TabletWork = (() => {
       btn(tr('Fields and Jobs'), () => { park(); openFieldsAndJobs(); }, true);
     } else if (step.k === 'track') {
       btn(tr('Tracks'), () => { park(); openTracksManager(); }, true);
-      btn(tr('Quick AB line'), () => { park(); const q = document.getElementById('bn-quickab'); if (q) q.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); });
+      btn(tr('Quick AB line'), () => { park(); const q = document.getElementById('bn-quickab'); if (q) tuiPress(q); });
     } else if (step.k === 'dir') {
       btn(tr('Yes'), () => { TabletSteerConfirm.confirm(); render(); }, true);
       btn(tr('No – learn the direction again'), () => {
@@ -4114,7 +4114,7 @@ const TabletWork = (() => {
         transport.send('heading.resetDirection'); showToast(T(tr('Direction reset. Drive forward above 1.5 kph.')));
       });
     } else if (step.k === 'ready') {
-      btn(tr('Show the list'), () => { park(); const r = document.getElementById('tui-sb-ready'); if (r) r.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); }, true);
+      btn(tr('Show the list'), () => { park(); const r = document.getElementById('tui-sb-ready'); if (r) tuiPress(r); }, true);
     }
     return box;
   }
@@ -4171,7 +4171,7 @@ const TabletWork = (() => {
     const f = m.querySelector('.tui-tiles.tui-f'); if (!f || f.querySelector('[data-tile="work"]')) return;
     const t = el('button', 'tui-tile field'); t.dataset.tile = 'work'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Start work'));
-    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); start(); });
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); start(); });
     f.insertBefore(t, f.firstChild);
   }, 300);
   return { start };
@@ -4208,7 +4208,7 @@ const TabletFirstSetup = (() => {
     sheet.classList.add('open'); scrim.classList.add('open'); last = ''; render();
   }
   // Open an existing panel; the guide waits in the background and comes back with "Back to setup".
-  const goPanel = id => { hide(); TabletTerminal.setMode('setup'); const b = document.getElementById(id); if (b) b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); showBack(); };
+  const goPanel = id => { hide(); TabletTerminal.setMode('setup'); const b = document.getElementById(id); if (b) tuiPress(b); showBack(); };
   const back = el('button', 'tp-btn pri'); back.id = 'tui-setup1-back'; back.hidden = true; document.body.appendChild(back);
   back.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); back.hidden = true; open(); });
   function showBack() { back.textContent = '↩ ' + T(tr('Back to first setup')); back.hidden = false; }
@@ -4309,7 +4309,7 @@ const TabletFirstSetup = (() => {
     const sBox = m.querySelector('.tui-tiles.tui-s'); if (!sBox || sBox.querySelector('[data-tile="setup1"]')) return;
     const t = el('button', 'tui-tile setup'); t.dataset.tile = 'setup1'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('First setup'));
-    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(0); });
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(0); });
     sBox.insertBefore(t, sBox.firstChild);
   }, 300);
   return { open };
