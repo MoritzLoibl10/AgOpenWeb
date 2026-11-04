@@ -348,8 +348,13 @@
 :root[data-tui-layout="terminal"] #statusbar #tui-sb-ready { display: inline-flex; align-items: center; gap: 8px; padding: 0 10px;
   height: calc(var(--tui-sb-h) - 8px); border-radius: 8px; border: 2px solid var(--tui-card-line); background: transparent;
   font: 800 var(--tui-fs-lbl) system-ui, sans-serif; white-space: nowrap; color: inherit; }
-#tui-sb-ready .rd-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--tui-stop); flex: none; }
-#tui-sb-ready[data-lv="1"] .rd-dot { background: var(--tui-warn); }
+#tui-sb-ready .rd-dot { width: 16px; height: 16px; border-radius: 50%; background: var(--tui-stop); flex: none;
+  display: inline-grid; place-items: center; color: var(--tui-stop-ink); font: 900 11px/1 system-ui, sans-serif; }
+/* moritz.31, point 6: the light never shrinks to the dot alone; a symbol in it, larger for gloves. */
+:root[data-tui-layout="terminal"] #statusbar #tui-sb-ready { flex: none; }
+:root:is([data-tui-scale="large"], [data-tui-scale="glove"]) #tui-sb-ready .rd-dot { width: 24px; height: 24px; font-size: 16px; }
+#tui-sb-ready[data-lv="1"] .rd-dot { background: var(--tui-warn); color: var(--tui-warn-ink); }
+#tui-sb-ready[data-lv="2"] .rd-dot { color: #fff; }
 #tui-sb-ready[data-lv="2"] .rd-dot { background: #1fa64a; }
 #tui-sb-ready[data-lv="demo"] .rd-dot { background: repeating-linear-gradient(-45deg, var(--tui-warn) 0 4px, #222 4px 8px); }
 #tui-ready { position: fixed; z-index: 30; top: calc(var(--tui-sb-h) + 6px + var(--sat, 0px)); right: 10px; min-width: 300px; max-width: calc(100vw - 20px);
@@ -448,6 +453,14 @@
   :root[data-tui-layout="terminal"]:not([data-tui-scale="normal"]) #sb-modbtn { font-size: var(--tui-fs-lbl); }
 }
 @media (max-width: 899px) { :root[data-tui-layout="terminal"] #tui-sb-steer .st-k { display: none; } }
+/* moritz.31, point 6: under 1000 px (a 1280 px tablet at 150 %: 853 px) large and glove sizes did not
+   fit: the ready light was squeezed to its dot and the fix field to 17 px. The clock gives way first;
+   under 900 px the light shows its symbol alone, larger (the word is in its list and its title). */
+@media (max-width: 999px) { :root[data-tui-layout="terminal"]:not([data-tui-scale="normal"]) #tui-sb-clock { display: none; } }
+@media (max-width: 899px) {
+  :root[data-tui-layout="terminal"]:not([data-tui-scale="normal"]) #tui-sb-ready .rd-t { display: none; }
+  :root[data-tui-layout="terminal"]:not([data-tui-scale="normal"]) #tui-sb-ready .rd-dot { width: 32px; height: 32px; font-size: 20px; }
+}
 
 /* --- Drive mode / setup mode ------------------------------------------------- */
 :root[data-tui-layout="terminal"][data-tui-mode="drive"] #leftnav { display: none; }
