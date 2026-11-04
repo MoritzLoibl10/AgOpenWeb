@@ -88,7 +88,8 @@ public class ConnectionConfig : ObservableObject
     }
 
     // PGN 100, corrected position (Network IO, #337): sent on every fix to the module subnet
-    // and to AgIO's loopback port, for seed monitors, rate controllers and GPS_Out.
+    // and to AgIO's loopback port, for seed monitors, rate controllers and GPS_Out. With it,
+    // PGN 214 (speed, heading, fix quality) to AgIO's GPS loopback port for GPS_Out (#364).
     private bool _sendCorrectedPosition;
     public bool SendCorrectedPosition
     {
@@ -103,6 +104,22 @@ public class ConnectionConfig : ObservableObject
     {
         get => _ntripEnabled;
         set => SetProperty(ref _ntripEnabled, value);
+    }
+
+    // NTRIP profile per field (a loaded field switches the profile) instead of one profile
+    // with a fallback service.
+    private bool _ntripProfilePerField;
+    public bool NtripProfilePerField
+    {
+        get => _ntripProfilePerField;
+        set => SetProperty(ref _ntripProfilePerField, value);
+    }
+
+    private bool _ntripModeNoticeShown;
+    public bool NtripModeNoticeShown
+    {
+        get => _ntripModeNoticeShown;
+        set => SetProperty(ref _ntripModeNoticeShown, value);
     }
 
     // GPS Mode

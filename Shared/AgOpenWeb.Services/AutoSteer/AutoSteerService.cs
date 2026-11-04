@@ -86,6 +86,24 @@ public class AutoSteerService : IAutoSteerService
     private AutoSteerConfig? _subscribedAutoSteer;
     private ToolConfig? _subscribedTool;
     private MachineConfig? _subscribedMachine;
+    private VehicleConfig? _subscribedVehicle;
+
+    // PGN 235 (section widths) goes out at start and when a profile is saved or loaded, as
+    // AgOpenGPS sends it when the tool settings are saved, and only when it differs from the
+    // last one sent: a rate controller asks the operator to accept every change it sees, so
+    // neither each edit on the way to a new layout nor a save of other settings may repeat it.
+    // Edits apply live, so a layout left unsaved (the panel or the page closed) is in use too:
+    // it goes out once the section count and widths have stayed unchanged for a while.
+    private byte[]? _lastSectionDimensions;
+    private readonly object _sectionDimensionsLock = new();
+    private readonly Timer _sectionSettleTimer;
+    private int _sectionSettleMs = 10_000;
+
+    // PGN 247 (vehicle geometry) also goes out when the steer module is heard after this
+    // long without PGN 253: a module (or the HAT daemon) that started after the app, or
+    // restarted, gets the geometry it may need to set up its receiver (#387).
+    internal const long SteerModuleSilenceMs = 3000;
+    private long _lastSteerDataMs = long.MinValue / 2;
 
     /// <summary>
     /// Test seam: lets tests shorten the debounce so they don't have
@@ -97,8 +115,16 @@ public class AutoSteerService : IAutoSteerService
         set => _configEmitDelayMs = value;
     }
 
+    /// <summary>Test seam: how long an unsaved section layout must stay unchanged before PGN 235.</summary>
+    internal int SectionSettleMilliseconds
+    {
+        get => _sectionSettleMs;
+        set => _sectionSettleMs = value;
+    }
+
     public event EventHandler<VehicleStateSnapshot>? StateUpdated;
     public event Action<string, int, bool>? HardwareMessageReceived;
+    public event Action<byte[]>? RemoteSwitchesReceived;
 
     public bool IsEnabled => _isEnabled;
     public bool IsEngaged => _isEngaged;
@@ -125,6 +151,10 @@ public class AutoSteerService : IAutoSteerService
         // fields in quick succession; we want exactly one PGN emit
         // pair, not one per field).
         _configEmitTimer = new Timer(_ => EmitSteerConfigPgns(),
+            state: null,
+            dueTime: Timeout.Infinite,
+            period: Timeout.Infinite);
+        _sectionSettleTimer = new Timer(_ => { if (_isEnabled) SendSectionDimensions(); },
             state: null,
             dueTime: Timeout.Infinite,
             period: Timeout.Infinite);
@@ -164,12 +194,14 @@ public class AutoSteerService : IAutoSteerService
         // config dialog" symptom — the simulator reads switch-type from
         // PGN 251 byte 5 and we'd previously never send it on startup.
         EmitSteerConfigPgns();
+        SendSectionDimensions();
     }
 
     public void Stop()
     {
         _udpService.DataReceived -= OnUdpDataReceived;
         UnsubscribeFromConfigChanges();
+        _sectionSettleTimer.Change(Timeout.Infinite, Timeout.Infinite);
         _isEnabled = false;
         _isEngaged = false;
     }
@@ -185,6 +217,14 @@ public class AutoSteerService : IAutoSteerService
         // same way, so edits and profile loads reach the machine module (#110).
         _subscribedMachine = _configStore.Machine;
         _subscribedMachine.PropertyChanged += OnConfigPropertyChanged;
+        // Vehicle geometry (PGN 247): edits and profile loads reach the modules (#387).
+        _subscribedVehicle = _configStore.Vehicle;
+        _subscribedVehicle.PropertyChanged += OnConfigPropertyChanged;
+        // Section widths (PGN 235): on save or load of a whole profile, not on each edit;
+        // an unsaved layout once it has settled. The section count is kept on the store.
+        _configStore.ProfileSaved += OnProfileSavedOrLoaded;
+        _configStore.ProfileLoaded += OnProfileSavedOrLoaded;
+        _configStore.PropertyChanged += OnStorePropertyChanged;
         _configSubscribed = true;
     }
 
@@ -197,6 +237,11 @@ public class AutoSteerService : IAutoSteerService
             _subscribedTool.PropertyChanged -= OnConfigPropertyChanged;
         if (_subscribedMachine != null)
             _subscribedMachine.PropertyChanged -= OnConfigPropertyChanged;
+        if (_subscribedVehicle != null)
+            _subscribedVehicle.PropertyChanged -= OnConfigPropertyChanged;
+        _configStore.ProfileSaved -= OnProfileSavedOrLoaded;
+        _configStore.ProfileLoaded -= OnProfileSavedOrLoaded;
+        _configStore.PropertyChanged -= OnStorePropertyChanged;
         _configSubscribed = false;
     }
 
@@ -211,7 +256,25 @@ public class AutoSteerService : IAutoSteerService
     private void OnConfigPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         _configEmitTimer.Change(_configEmitDelayMs, Timeout.Infinite);
+        if (sender is ToolConfig && e.PropertyName == nameof(ToolConfig.SectionWidths))
+            _sectionSettleTimer.Change(_sectionSettleMs, Timeout.Infinite);
     }
+
+    private void OnStorePropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(ConfigurationStore.NumSections))
+            _sectionSettleTimer.Change(_sectionSettleMs, Timeout.Infinite);
+    }
+
+    private void OnProfileSavedOrLoaded(object? sender, EventArgs e)
+    {
+        if (!_isEnabled) return;
+        _sectionSettleTimer.Change(Timeout.Infinite, Timeout.Infinite);
+        SendSectionDimensions();
+    }
+
+    private void SendVehicleGeometry() =>
+        _udpService.SendToModules(PgnBuilder.BuildVehicleGeometryPgn(_configStore.Vehicle));
 
     private void EmitSteerConfigPgns()
     {
@@ -225,6 +288,7 @@ public class AutoSteerService : IAutoSteerService
             // with 251/252 on start and profile load; these were built but never sent (#110).
             SendMachineConfig();
             SendMachinePinConfig();
+            SendVehicleGeometry();
         }
         catch (Exception ex)
         {
@@ -305,6 +369,9 @@ public class AutoSteerService : IAutoSteerService
         switch (e.PGN)
         {
             case PgnNumbers.AUTOSTEER_DATA: // 253 - Steer Data from module
+                long now = Environment.TickCount64;
+                if (now - Interlocked.Exchange(ref _lastSteerDataMs, now) > SteerModuleSilenceMs)
+                    SendVehicleGeometry(); // the module is new or back
                 ProcessSteerData(e.Data);
                 break;
 
@@ -331,6 +398,16 @@ public class AutoSteerService : IAutoSteerService
             case PgnNumbers.HARDWARE_MESSAGE: // 221 - text to show on screen
                 if (TryParseHardwareMessage(e.Data, out var text, out int seconds, out bool warning))
                     HardwareMessageReceived?.Invoke(text, seconds, warning);
+                break;
+
+            case PgnNumbers.SWITCH_CONTROL: // 234 - remote section switches
+                // AgOpenGPS takes the 14-byte packet only, bytes 5-12 into mc.ss[1..8].
+                if (e.Data.Length == 14)
+                {
+                    var ss = new byte[9];
+                    Buffer.BlockCopy(e.Data, 5, ss, 1, 8);
+                    RemoteSwitchesReceived?.Invoke(ss);
+                }
                 break;
         }
     }
@@ -419,20 +496,26 @@ public class AutoSteerService : IAutoSteerService
         if (config.PressureSensorEnabled && config.PressureTripPoint > 0)
         {
             if (_sensorPercent >= config.PressureTripPoint)
-            {
-                Disengage();
-                Debug.WriteLine($"[AutoSteer] Pressure kickout: {_sensorPercent:F1}% >= {config.PressureTripPoint}%");
-            }
+                Kickout("pressure", config.PressureTripPoint);
         }
         // Check current sensor trip point (motor overload protection)
         else if (config.CurrentSensorEnabled && config.CurrentTripPoint > 0)
         {
             if (_sensorPercent >= config.CurrentTripPoint)
-            {
-                Disengage();
-                Debug.WriteLine($"[AutoSteer] Current kickout: {_sensorPercent:F1}% >= {config.CurrentTripPoint}%");
-            }
+                Kickout("current", config.CurrentTripPoint);
         }
+    }
+
+    public event EventHandler<string>? SensorKickout;
+
+    // Every PGN 250 above the trip point lands here; tell the app once, on the kickout itself.
+    private void Kickout(string sensor, int tripPoint)
+    {
+        bool wasEngaged = _isEngaged;
+        Disengage();
+        if (wasEngaged)
+            SensorKickout?.Invoke(this, FormattableString.Invariant(
+                $"{sensor} sensor {_sensorPercent:F0}% reached the trip point ({tripPoint}%)"));
     }
 
     public void Engage()
@@ -525,6 +608,23 @@ public class AutoSteerService : IAutoSteerService
         var config = _configStore.Machine;
         var pgn = PgnBuilder.BuildMachineConfigPgn(config);
         _udpService.SendToModules(pgn);
+        // Rate controllers take the hydraulic lift times from it (AgOpenGPS SendPgnToLoop).
+        _udpService.SendToLoopback(pgn);
+    }
+
+    private void SendSectionDimensions()
+    {
+        // The settle timer and a profile save can race; one of them sends.
+        lock (_sectionDimensionsLock)
+        {
+            var pgn = PgnBuilder.BuildSectionDimensionsPgn(_configStore.Tool, _configStore.NumSections);
+            if (_lastSectionDimensions == null || !pgn.AsSpan().SequenceEqual(_lastSectionDimensions))
+            {
+                _udpService.SendToModules(pgn);
+                _udpService.SendToLoopback(pgn);
+                _lastSectionDimensions = pgn;
+            }
+        }
     }
 
     public void SendMachinePinConfig()
@@ -714,6 +814,12 @@ public class AutoSteerService : IAutoSteerService
         _udpService.SendToLoopback(pgn);
     }
 
+    public void SendGpsData(GpsData data)
+    {
+        if (!_isEnabled) return;
+        _udpService.SendGpsDataToLoopback(PgnBuilder.BuildGpsDataPgn(data));
+    }
+
     /// <summary>
     /// Mirror the parsed VehicleState fields onto a fresh GpsData and fire
     /// GpsService.UpdateGpsData — this is what kicks off the cycle worker.
@@ -783,6 +889,9 @@ public class AutoSteerService : IAutoSteerService
         else
         {
             _state.TramState = 0;
+            // AgOpenGPS: turning the tram display off clears the manual overrides.
+            if (_tramLineService != null)
+                _tramLineService.IsLeftManualOn = _tramLineService.IsRightManualOn = false;
         }
     }
 
@@ -815,12 +924,7 @@ public class AutoSteerService : IAutoSteerService
 
         // Send PGN 239 (Machine Data) - section control, speed, tramline state
         // Sent every GPS cycle so machine module has current section/speed info
-        var machinePgn = PgnBuilder.BuildMachinePgn(ref _state,
-            uturn: _state.IsInUTurn ? (byte)1 : (byte)0,
-            hydLift: _state.HydLiftState,
-            tram: _state.TramState,
-            geoStop: _state.GeoStopState);
-        _udpService.SendToModules(machinePgn);
+        _udpService.SendToModules(BuildMachinePgn());
 
         // Send PGN 229 (64-section on/off) alongside PGN 239 only when more
         // than 16 sections are configured. PGN 239 still carries sections 1–16;
@@ -830,6 +934,29 @@ public class AutoSteerService : IAutoSteerService
         {
             var sections64Pgn = PgnBuilder.BuildSection64Pgn(ref _state);
             _udpService.SendToModules(sections64Pgn);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private byte[] BuildMachinePgn() =>
+        PgnBuilder.BuildMachinePgn(ref _state,
+            uturn: _state.IsInUTurn ? (byte)1 : (byte)0,
+            hydLift: _state.HydLiftState,
+            tram: _state.TramState,
+            geoStop: _state.GeoStopState);
+
+    /// <inheritdoc />
+    public void SendLoopbackPgns(bool hasActiveField)
+    {
+        if (!_isEnabled) return;
+        _udpService.SendToLoopback(PgnBuilder.BuildAutoSteerPgn(ref _state));
+
+        // AgOpenGPS sends 239 and 229 only with a job started, and 229 whatever the section
+        // count: a rate controller reads sections 1-16 from either.
+        if (hasActiveField)
+        {
+            _udpService.SendToLoopback(BuildMachinePgn());
+            _udpService.SendToLoopback(PgnBuilder.BuildSection64Pgn(ref _state));
         }
     }
 

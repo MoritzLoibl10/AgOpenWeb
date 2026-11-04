@@ -201,6 +201,12 @@ public sealed class SceneProjector
         var cref = _state.Operation.IsContourOn ? _state.Operation.ContourRef : null;
         IReadOnlyList<Vec2Dto>? contourRef = cref?.Select(p => new Vec2Dto(p.Easting, p.Northing)).ToList();
 
+        // A curve's extra guidelines: the passes either side, built on the host from the
+        // reference like the pass itself, so they keep its shape at corners (#450).
+        var guideLines = (_state.Guidance.GuideLines ?? System.Array.Empty<IReadOnlyList<AgOpenWeb.Models.Base.Vec3>>())
+            .Select(l => (IReadOnlyList<Vec2Dto>)l.Select(p => new Vec2Dto(p.Easting, p.Northing)).ToList())
+            .ToList();
+
         return new SceneDto(
             version,
             f.OriginLatitude,
@@ -224,7 +230,9 @@ public sealed class SceneProjector
             recordedPaths,
             contourStrips,
             contourRef,
-            _state.Operation.IsContourOn && _state.Operation.IsContourLocked);
+            _state.Operation.IsContourOn && _state.Operation.IsContourLocked,
+            guideLines,
+            _state.Guidance.ToolPass?.Select(p => new Vec2Dto(p.Easting, p.Northing)).ToList());
     }
 
     // Tracks-manager display label — mirrors native TracksDialog (Contour → Path →
@@ -232,6 +240,7 @@ public sealed class SceneProjector
     private static string TrackTypeLabel(AgOpenWeb.Models.Track.Track t) =>
         t.IsContour ? "Contour"
         : t.IsRecordedPath ? "Path"
+        : t.IsPivot ? "Pivot"
         : t.IsCurve ? "Curve"
         : "Line";
 
@@ -351,6 +360,8 @@ public sealed class SceneProjector
             // Driver-relative nudge (#93): the pipeline stores it in track frame and flips the
             // intent's sign when heading against the track, so flip it back the same way.
             g.IsHeadingSameWay ? g.NudgeOffset : -g.NudgeOffset,
+            _state.Operation.RefNudgeMoved, // Ref Nudge panel total (#489)
+            _state.Operation.RefNudgePending,
             // Pure Pursuit goal (#95) — only with an active track (the flag can lag a
             // track deselect by one cycle).
             g.HasGoalPoint && _state.Field.ActiveTrack != null,
@@ -358,7 +369,10 @@ public sealed class SceneProjector
             g.GoalPoint.Northing,
             g.IsReverse,
             _state.Connections.IsModuleNotSteering,
-            hchart.Gps);
+            hchart.Gps,
+            _state.FieldTools.TramLights
+                | (_config.Guidance.TramDisplay && _config.Tram.DisplayMode != TramDisplayMode.Off
+                   && _config.ActualToolWidth > _config.Vehicle.TrackWidth ? 16 : 0));
     }
 
     // Top status-bar readouts (Phase 1). All state-projected: fix/age/sats from
@@ -439,7 +453,19 @@ public sealed class SceneProjector
             IsobusProvider?.Invoke(),
             FieldDataProvider?.Invoke(),
             cfg.SendCorrectedPosition,
-            c.ScanReplySubnet ?? "");
+            c.ScanReplySubnet ?? "",
+            BuildNtripSession(cfg.NtripProfilePerField, c));
+    }
+
+    // The NTRIP session for the Network IO card, read live for every status frame.
+    private NtripSessionDto? BuildNtripSession(bool profilePerField, ConnectionState c)
+    {
+        if (_ntrip == null) return null;
+        var status = _ntrip.Status;
+        bool fallback = _ntrip.Using == NtripService.Fallback;
+        return new NtripSessionDto(fallback, _ntrip.MainIsBack, _ntrip.HasFallback, profilePerField,
+            (int)status.State, status.LastError is { } error ? (int)error : -1, status.Attempts, status.RetryInSeconds, c.NtripNotice ?? "",
+            c.NtripProfileName ?? "", (fallback ? c.NtripFallbackText : c.NtripMainText) ?? "");
     }
 
     // Read live for every status frame, so "seconds since the last one" keeps counting
@@ -461,10 +487,36 @@ public sealed class SceneProjector
         var profiles = _ntripProfiles.Profiles
             .Select(p => new NtripProfileDto(
                 p.Id, p.Name, p.CasterHost, p.CasterPort, p.MountPoint,
-                p.Username, p.Password, p.AutoConnectOnFieldLoad, p.IsDefault,
-                p.AssociatedFields.ToList(), p.NtripVersion))
+                p.Username, Secrets.Masked(p.Password), p.AutoConnectOnFieldLoad, p.IsDefault,
+                p.AssociatedFields.ToList(),
+                p.Fallback is { } f ? new NtripFallbackDto(f.CasterHost, f.CasterPort, f.MountPoint, f.Username, Secrets.Masked(f.Password), f.AutoSwitch, f.SwitchAfterFailures) : null))
             .ToList();
         return new NtripProfilesDto(profiles, _ntripProfiles.GetAvailableFields().ToList());
+    }
+
+    // The mount points last asked for in the profile editor. Re-sent when a request starts or finishes.
+    public NtripMountpointsDto BuildNtripMountpoints()
+    {
+        var list = _state.Connections.NtripMountpoints;
+        return new NtripMountpointsDto(list.Seq, list.For, list.Status,
+            list.Items.Select(m => new NtripMountpointDto(m.Mount, m.Name, m.Format, m.Systems, m.Country, m.DistanceKm, m.NeedsPosition)).ToList());
+    }
+
+    public long NtripMountpointsFingerprint()
+    {
+        var list = _state.Connections.NtripMountpoints;
+        return list.Seq * 31L + list.Status.GetHashCode() + list.Items.Count;
+    }
+
+    // The web cards' bookmarks. The list is replaced whole on a change, so reading it here is safe.
+    public WebCardsDto BuildWebCards() =>
+        new(_settings.Settings.WebCards.Select(b => new WebCardDto(b.Name, b.Url)).ToList());
+
+    public long WebCardsFingerprint()
+    {
+        long h = 17;
+        foreach (var b in _settings.Settings.WebCards) h = h * 31 + HashCode.Combine(b.Name, b.Url);
+        return h;
     }
 
     // Re-send the NTRIP profiles frame on add / edit / delete / set-default.
@@ -480,7 +532,16 @@ public sealed class SceneProjector
             h = h * 31 + (p.MountPoint?.GetHashCode() ?? 0);
             h = h * 31 + (p.Username?.GetHashCode() ?? 0);
             h = h * 31 + (p.IsDefault ? 1 : 0) + (p.AutoConnectOnFieldLoad ? 2 : 0);
-            h = h * 31 + p.NtripVersion;
+            if (p.Fallback is { } fb)
+            {
+                h = h * 31 + (fb.CasterHost?.GetHashCode() ?? 0);
+                h = h * 31 + fb.CasterPort;
+                h = h * 31 + (fb.MountPoint?.GetHashCode() ?? 0);
+                h = h * 31 + (fb.Username?.GetHashCode() ?? 0);
+                h = h * 31 + Secrets.Masked(fb.Password).GetHashCode();   // set or not: that is what the frame shows
+                h = h * 31 + (fb.AutoSwitch ? 1 : 0);
+                h = h * 31 + fb.SwitchAfterFailures;
+            }
             h = h * 31 + p.AssociatedFields.Count;
             foreach (var f in p.AssociatedFields) h = h * 31 + (f?.GetHashCode() ?? 0);
         }
@@ -638,7 +699,7 @@ public sealed class SceneProjector
         catch { /* fields dir optional */ }
         local.Sort((a, b) => string.Compare(a.Name, b.Name, System.StringComparison.OrdinalIgnoreCase));
         var cloud = ag.CloudFields.Select(f => new AgShareCloudFieldDto(f.Id, f.Name, f.AreaHa)).ToList();
-        return new AgShareDto(c.AgShareServer ?? "", c.AgShareApiKey ?? "", c.AgShareEnabled,
+        return new AgShareDto(c.AgShareServer ?? "", Secrets.Masked(c.AgShareApiKey), c.AgShareEnabled,
             ag.Status ?? "", ag.Busy, local, cloud);
     }
 
@@ -701,7 +762,7 @@ public sealed class SceneProjector
                 (int)e.Level, e.Message))
             .ToList();
 
-        return new AppInfoDto(version, git, current, langs, dirs, hotkeys, logs, _state.BugReportStatus ?? "", _state.BackupStatus ?? "");
+        return new AppInfoDto(version, git, current, langs, dirs, hotkeys, logs, _state.BugReportStatus ?? "", _state.BugReportSendStatus ?? "", _state.BackupStatus ?? "");
     }
 
     private static AppDirDto DirInfo(string name, string path) =>
@@ -729,6 +790,7 @@ public sealed class SceneProjector
         h = h * 31 + snap.Count;
         if (snap.Count > 0) h = h * 31 + snap[snap.Count - 1].Timestamp.Ticks.GetHashCode();
         h = h * 31 + (_state.BugReportStatus?.GetHashCode() ?? 0);
+        h = h * 31 + (_state.BugReportSendStatus?.GetHashCode() ?? 0);
         h = h * 31 + (_state.BackupStatus?.GetHashCode() ?? 0);
         return h;
     }
@@ -773,7 +835,8 @@ public sealed class SceneProjector
         var pins = new int[24]; for (int i = 0; i < 24; i++) pins[i] = (int)m.GetPinAssignment(i);
         return new ConfigDto(
             new VehicleConfigDto(v.Name, (int)v.Type, v.HitchType, v.HitchLength, v.Wheelbase,
-                v.TrackWidth, v.AntennaPivot, v.AntennaHeight, v.AntennaOffset),
+                v.TrackWidth, v.AntennaPivot, v.AntennaHeight, v.AntennaOffset,
+                v.ImuPivot, v.ImuHeight, v.ImuOffset),
             new GpsConfigDto(c.IsDualGps, c.DualHeadingOffset, c.DualReverseDistance, c.AutoDualFix,
                 c.DualSwitchSpeed, c.MinGpsStep, c.FixToFixDistance, c.HeadingFusionWeight,
                 c.ReverseDetection, c.RtkLostAlarm, c.RtkLostAction),
@@ -788,7 +851,8 @@ public sealed class SceneProjector
                 t.IsSteerSwitchEnabled, t.IsSteerSwitchManualSections, _config.ActualToolWidth),
             new UturnConfigDto(g.UTurnStyle, g.UTurnExtension, g.UTurnSmoothing, g.UTurnRadius, g.UTurnDistanceFromBoundary),
             // Line = the field's actual start pass (tram settings live with the field), 1-based.
-            new TramConfigDto(g.TramPasses, g.TramDisplay, _config.Tram.StartPass + 1, _config.Tram.TramWidth),
+            new TramConfigDto(g.TramPasses, g.TramDisplay, _config.Tram.StartPass + 1, _config.Tram.TramWidth,
+                _config.Tram.IsOuterInverted),
             new MachineConfigDto(m.HydraulicLiftEnabled, m.RaiseTime, m.LookAhead, m.LowerTime, m.InvertRelay,
                 m.User1Value, m.User2Value, m.User3Value, m.User4Value, pins),
             BuildDisplay(), BuildAutoSteer());
@@ -814,7 +878,7 @@ public sealed class SceneProjector
             GuidanceConfig.UTurnCompensationToPercent(g.UTurnCompensation), a.SideHillCompensation, a.SteerInReverse,
             a.ManualTurnsEnabled, a.ManualTurnsSpeed, a.MinSteerSpeed, a.MaxSteerSpeed,
             a.LineWidth, a.NudgeDistance, a.NextGuidanceTime, a.CmPerPixel,
-            a.LightbarEnabled, a.SteerBarEnabled, a.GuidanceBarOn);
+            a.LightbarEnabled, a.SteerBarEnabled, a.GuidanceBarOn, a.RefNudgeDistance);
     }
 
     // Resolution label mirrors MainViewModel.DisplayResolutionLabel.
@@ -830,7 +894,7 @@ public sealed class SceneProjector
             d.UTurnButtonVisible, d.LateralButtonVisible,
             d.AutoSteerSound, d.UTurnSound, d.HydraulicSound, d.SectionsSound,
             d.KeyboardEnabled, d.StartFullscreen, d.ElevationLogEnabled, rm,
-            _persist.State.IsDayMode);
+            _persist.State.IsDayMode, d.UiScale, d.ImageryVisible);
     }
 
     // Profiles read-frame (Phase 9) — the Vehicle & Tool picker hub: available
@@ -896,6 +960,7 @@ public sealed class SceneProjector
         h = h * 31 + (int)t.SingleCoverageColor;
         h = h * 31 + g.UTurnStyle * 7 + g.UTurnSmoothing * 11 + g.TramPasses * 13 + (g.TramDisplay ? 1 : 0) + g.TramLine * 17;
         h = h * 31 + _config.Tram.StartPass * 19 + _config.Tram.TramWidth.GetHashCode(); // #110
+        h = h * 31 + (_config.Tram.IsOuterInverted ? 1 : 0); // #451
         h = h * 31 + (mc.HydraulicLiftEnabled ? 1 : 0) + mc.RaiseTime * 7 + mc.LowerTime * 11 + (mc.InvertRelay ? 64 : 0)
               + mc.User1Value + mc.User2Value * 3 + mc.User3Value * 5 + mc.User4Value * 7;
         for (int i = 0; i < 24; i++) h = h * 31 + (int)mc.GetPinAssignment(i);
@@ -906,9 +971,11 @@ public sealed class SceneProjector
             | (dp.AutoDayNight ? 64 : 0) | (dp.HardwareMessagesEnabled ? 128 : 0) | (dp.ExtraGuidelines ? 256 : 0)
             | (dp.UTurnButtonVisible ? 512 : 0) | (dp.LateralButtonVisible ? 1024 : 0) | (dp.AutoSteerSound ? 2048 : 0)
             | (dp.UTurnSound ? 4096 : 0) | (dp.HydraulicSound ? 8192 : 0) | (dp.SectionsSound ? 16384 : 0)
-            | (dp.KeyboardEnabled ? 32768 : 0) | (dp.StartFullscreen ? 65536 : 0) | (dp.ElevationLogEnabled ? 131072 : 0);
+            | (dp.KeyboardEnabled ? 32768 : 0) | (dp.StartFullscreen ? 65536 : 0) | (dp.ElevationLogEnabled ? 131072 : 0)
+            | (dp.ImageryVisible ? 262144 : 0);
         h = h * 31 + db;
         h = h * 31 + dp.ExtraGuidelinesCount * 7 + dp.DisplayResolutionMultiplier.GetHashCode();
+        h = h * 31 + dp.UiScale;
         // Day/Night theme lives in PersistentAppState (not ConfigStore.Display), so fold it
         // in here too — otherwise toggling the theme wouldn't re-send the config frame.
         h = h * 31 + (_persist.State.IsDayMode ? 1 : 0);
@@ -924,7 +991,7 @@ public sealed class SceneProjector
         h = h * 31 + asc.WasOffset * 3 + asc.Ackermann * 5 + (int)System.Math.Round(_config.Vehicle.MaxSteerAngle) * 7 + asc.DeadzoneDelay * 11
               + asc.ProportionalGain * 13 + asc.MaxPwm * 17 + asc.MinPwm * 19 + asc.TurnSensorCounts * 23
               + asc.PressureTripPoint * 29 + asc.CurrentTripPoint * 31 + asc.MotorDriver * 37 + asc.AdConverter * 41
-              + asc.ImuAxisSwap * 43 + asc.ExternalEnable * 47 + asc.LineWidth * 53 + asc.NudgeDistance * 59 + asc.CmPerPixel * 61;
+              + asc.ImuAxisSwap * 43 + asc.ExternalEnable * 47 + asc.LineWidth * 53 + asc.NudgeDistance * 59 + asc.CmPerPixel * 61 + asc.RefNudgeDistance * 67;
         foreach (var d in new[] { gdc.GoalPointLookAheadHold, gdc.PurePursuitIntegralGain, gdc.StanleyDistanceErrorGain,
                                   gdc.StanleyHeadingErrorGain, asc.CountsPerDegree, asc.DeadzoneHeading,
                                   gdc.GoalPointLookAheadMult, gdc.GoalPointAcquireFactor, gdc.UTurnCompensation, asc.SideHillCompensation,
@@ -1020,6 +1087,12 @@ public sealed class SceneProjector
             h = h * 31 + (long)System.Math.Round(p0.Easting * 10);
             h = h * 31 + (long)System.Math.Round(p0.Northing * 10);
         }
+
+        // Extra guidelines: a new list per pass, or when the setting changes.
+        var tpass = _state.Guidance.ToolPass;
+        h = h * 31 + (tpass is null ? -1 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(tpass));
+        var gl = _state.Guidance.GuideLines;
+        h = h * 31 + (gl is null ? -1 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(gl));
 
         // Section layout — re-send on count or a span change (tool/section config).
         int nSec = _sections.NumSections;

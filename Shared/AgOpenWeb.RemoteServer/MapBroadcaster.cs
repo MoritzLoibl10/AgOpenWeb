@@ -31,6 +31,8 @@ public sealed class MapBroadcaster : IAsyncDisposable
     private long _lastConfigFp = long.MinValue;
     private long _lastProfilesFp = long.MinValue;
     private long _lastNtripFp = long.MinValue;
+    private long _lastMountpointsFp = long.MinValue;
+    private long _lastWebCardsFp = long.MinValue;
     private long _lastFieldOpsFp = long.MinValue;
     private long _lastAgShareFp = long.MinValue;
     private long _lastAppInfoFp = long.MinValue;
@@ -51,6 +53,12 @@ public sealed class MapBroadcaster : IAsyncDisposable
     private long _lastRecPathFp = long.MinValue;
     // Host-driven pending confirm/error dialog (#109). Read every tick, re-sent on change.
     public Func<PromptDto?>? PromptProvider { get; set; }
+
+    /// <summary>The VT card's frames for a new client (see RemoteServerHost).</summary>
+    public Func<IReadOnlyList<byte[]>>? VtSeedProvider { get; set; }
+
+    /// <summary>The VT card's frames since the last tick, drained (see RemoteServerHost).</summary>
+    public Func<IReadOnlyList<byte[]>?>? VtFramesProvider { get; set; }
     private PromptDto _lastPrompt = PromptDto.None;
     // Host-driven Boundary read-frame (menu list + live drive-around recording state).
     public Func<BoundaryDto?>? BoundaryProvider { get; set; }
@@ -95,6 +103,7 @@ public sealed class MapBroadcaster : IAsyncDisposable
             WireCodec.EncodeConfig(_projector.BuildConfig()),
             WireCodec.EncodeProfiles(_projector.BuildProfiles()),
             WireCodec.EncodeNtripProfiles(_projector.BuildNtripProfiles()),
+            WireCodec.EncodeWebCards(_projector.BuildWebCards()),
             WireCodec.EncodeFieldOps(_projector.BuildFieldOps()),
             WireCodec.EncodeAgShare(_projector.BuildAgShare()),
             WireCodec.EncodeAppInfo(_projector.BuildAppInfo()),
@@ -104,6 +113,8 @@ public sealed class MapBroadcaster : IAsyncDisposable
             WireCodec.EncodeControlState(_authority.Snapshot()),
             WireCodec.EncodePrompt(PromptProvider?.Invoke() ?? PromptDto.None),
         };
+        if (VtSeedProvider?.Invoke() is { } vt)
+            frames.AddRange(vt);
         if (ViewPrefsProvider?.Invoke() is { } vp)
             frames.Add(WireCodec.EncodeViewPrefs(vp.Pitch, vp.Zoom, vp.CameraMode));
         if (_coverageProjector.BuildInit() is { } init)
@@ -182,6 +193,22 @@ public sealed class MapBroadcaster : IAsyncDisposable
                     await _ws.BroadcastAsync(WireCodec.EncodeNtripProfiles(_projector.BuildNtripProfiles()), ct).ConfigureAwait(false);
                 }
 
+                // NTRIP mount points (profile editor): a request started or finished.
+                var mfp = _projector.NtripMountpointsFingerprint();
+                if (mfp != _lastMountpointsFp)
+                {
+                    _lastMountpointsFp = mfp;
+                    await _ws.BroadcastAsync(WireCodec.EncodeNtripMountpoints(_projector.BuildNtripMountpoints()), ct).ConfigureAwait(false);
+                }
+
+                // Web cards' bookmarks: add / edit / delete.
+                var wfp = _projector.WebCardsFingerprint();
+                if (wfp != _lastWebCardsFp)
+                {
+                    _lastWebCardsFp = wfp;
+                    await _ws.BroadcastAsync(WireCodec.EncodeWebCards(_projector.BuildWebCards()), ct).ConfigureAwait(false);
+                }
+
                 // Field Operations read-frame: field/job add / delete / open.
                 var fofp = _projector.FieldOpsFingerprint();
                 if (fofp != _lastFieldOpsFp)
@@ -243,6 +270,11 @@ public sealed class MapBroadcaster : IAsyncDisposable
                     _lastPrompt = prompt;
                     await _ws.BroadcastAsync(WireCodec.EncodePrompt(prompt), ct).ConfigureAwait(false);
                 }
+
+                // Virtual terminal (VT card): pictures before the screens that use them, in order.
+                if (VtFramesProvider?.Invoke() is { Count: > 0 } vtFrames)
+                    foreach (var frame in vtFrames)
+                        await _ws.BroadcastAsync(frame, ct).ConfigureAwait(false);
 
                 await _ws.BroadcastAsync(WireCodec.EncodeTick(_projector.BuildTick(_sceneVersion)), ct)
                     .ConfigureAwait(false);
