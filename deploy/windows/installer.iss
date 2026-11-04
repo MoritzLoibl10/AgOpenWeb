@@ -258,8 +258,9 @@ procedure SetupFirewall;
 var
   Code: Integer;
 begin
-  // Our own notice right before Windows' administrator prompt (UAC).
-  if not WizardSilent then
+  // Our own notice right before Windows' administrator prompt (UAC). A setup that already runs
+  // with administrator rights ("for all users") gets no prompt, so no notice either.
+  if not WizardSilent and not IsAdmin then
     MsgBox(CustomMessage('FirewallBeforeUac'), mbInformation, MB_OK);
   WizardForm.StatusLabel.Caption := CustomMessage('FirewallRun');
   ShellExec('runas', ExpandConstant('{sys}\cmd.exe'), '/c ' + FwDeleteAll + ' & ' + FwAddAll(ExpandConstant('{app}\{#AppExe}')),

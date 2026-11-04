@@ -13,6 +13,7 @@ Issues gibt, ließ sich aus der Fork-Sitzung nicht prüfen; vor dem Anlegen kurz
 | 4 | **Dringend:** Eine Antenne, zuerst rückwärts (Ausfahren aus der Halle) → Richtung verkehrt gelernt, Motor lenkt falsch herum | Entwurf fertig (27.10.2026), einreichen, zuerst |
 | 5 | MinFixQuality vergleicht die NMEA-Zahl: RTK Float (5) besteht die Vorgabe RTK Fix (4) | Entwurf fertig (27.10.2026), einreichen |
 | 6 | Simulator mit Teilbreiten: Bedienseite hängt bei jedem Abdeckungs-Update ~1 s, Totmann (1,5 s) nimmt die Bedienung weg, Lenkung geht aus | Entwurf fertig (30.10.2026), einreichen |
+| 7 | Tastenkürzel F (Schlagmenü) und V (Fahrzeug) wirken nur bei jedem zweiten Druck: der Geister-Druck-Filter (#465) verwirft den zweiten Druck mit pointerId 0 | Entwurf fertig (04.11.2026), einreichen |
 
 ## 1. IMU heading from PGN 253 (#357): AiO v26 sends 0 for "no IMU", which now goes into the heading fusion as a real heading
 
@@ -315,3 +316,46 @@ so the host sends on time; the browser cannot read them.
   starved by rendering (keeping the deadman's purpose: a frozen UI must still stop the machine).
 ~~~~
 
+## 7. The F and V hotkeys work only on every second press (#465 ghost-press filter)
+
+Stand: **Entwurf zum Einreichen**. Nachgestellt am 04.11.2026 mit upstream `develop` 5a2c4251
+(unverändert gebaut): sechsmal F, dazwischen alles geschlossen → Schlagmenü offen, zu, offen, zu,
+offen, zu (Skript im Text). Im Fork derselbe Filter; dort traf er zusätzlich die Menükacheln, die
+die Originalknöpfe per Code drücken (Tablet-Test moritz.31, Punkt 1). Der Fork drückt per Code
+jetzt mit eigener pointerId je Druck (`tuiPress`, `js/tablet.js`) und setzt die beiden
+Tastenkürzel ebenso, ohne `map-input.js` zu ändern.
+
+**Titel:**
+
+~~~~text
+Web client: FieldMenu (F) and VehicleSettings (V) hotkeys act only on every second press
+~~~~
+
+**Text:**
+
+~~~~markdown
+### Description
+The ghost-press filter from #465 (`js/map-input.js`) drops a `pointerdown` from a pointer that is
+already down (`_pointersDown`), and forgets the pointer once it is caught pressing twice. The
+FieldMenu and VehicleSettings hotkeys (`HOTKEY_UI`) press their button with
+`dispatchEvent(new PointerEvent('pointerdown'))`: pointerId 0 and no release. The first press adds
+0 to `_pointersDown`, the second is taken for a ghost and dropped (and 0 forgotten), the third
+passes, and so on. So F opens the field menu, the next F after closing it does nothing.
+
+### Steps to reproduce (develop 5a2c4251)
+1. Start the host, open the UI in a browser, default hotkeys (FieldMenu = F).
+2. Press F: the field menu opens. Close it (`lnCloseAll()` or the X).
+3. Press F again.
+
+### Expected
+The field menu opens on every press.
+
+### Actual
+It opens on the 1st, 3rd, 5th … press only. Measured six times with the menu closed between:
+open, nothing, open, nothing, open, nothing. The same for V (vehicle settings).
+
+### Notes
+- A press made by code needs a `pointerId` no real pointer uses (e.g. a counter from 1e6) or a
+  matching `pointerup`; `new PointerEvent('pointerdown', { bubbles: true, pointerId: ++id })`.
+- Any other code that presses buttons this way (add-ons, tests) runs into the same filter.
+~~~~

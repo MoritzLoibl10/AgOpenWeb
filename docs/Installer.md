@@ -27,7 +27,11 @@
   Ausgehend braucht es nichts (RTCM an UDP 2233 geht hinaus). Dafür fragt Windows einmal nach
   Administratorrechten (UAC), auch bei der Installation nur für den Benutzer; der Text am Häkchen
   sagt das, und direkt vor der Abfrage sagt es ein eigener Hinweis noch einmal („Gleich fragt
-  Windows nach Adminrechten, um die Firewall für die Module freizugeben.“). Danach prüft das Setup,
+  Windows nach Adminrechten, um die Firewall für die Module freizugeben.“). Das Häkchen mit Ports und
+  Adminhinweis steht auf der Seite „Zusätzliche Aufgaben“, ohne Bedingung: dieselbe Seite bei „nur für
+  mich“ und „für alle Benutzer“ (geprüft 04.11.2026, Testbefund moritz.31 Punkt 7). Läuft das Setup
+  schon mit Adminrechten („für alle Benutzer“), fragt Windows nicht noch einmal, und der eigene Hinweis
+  entfällt. Danach prüft das Setup,
   ob beide Regeln da sind. Wenn nicht (abgelehnt oder Fehler): Meldung sofort und noch einmal auf der
   letzten Seite des Setups, mit dem Weg zum Nachholen: **Startmenü → LM Steering Solutions →
   „Firewall freigeben“** (`Firewall-freigeben.cmd` im Programmordner, fragt selbst nach

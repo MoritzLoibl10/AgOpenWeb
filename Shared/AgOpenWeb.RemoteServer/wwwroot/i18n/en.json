@@ -1461,6 +1461,7 @@
   "SIM": "SIM",
   "Simulator": "Simulator",
   "simulator off": "simulator off",
+  "Simulator off. To switch it on again: Menu → App & Files → Expert → Simulator.": "Simulator off. To switch it on again: Menu → App & Files → Expert → Simulator.",
   "Simulator on/off": "Simulator on/off",
   "Simulator warning shown": "Simulator warning shown",
   "Simulator: direction learned the wrong way round": "Simulator: direction learned the wrong way round",
