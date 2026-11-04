@@ -6,6 +6,30 @@
 // last, after frame.js, so everything upstream defines is there; the blocks marked
 // `// name:begin` / `// name:end` are what Tests/web cut out and test.
 
+// fork: a press made by code (a menu tile pressing the original button, the long-press replay).
+// Upstream's ghost-press filter (js/map-input.js, #465) drops a pointerdown from a pointer that is
+// already down. Presses made by code have no release, so with the default pointerId 0 every
+// second one was dropped: a tile acted only on the second tap. Each press gets its own pointerId.
+// press:begin
+let tuiPressId = 1000000;
+function tuiPressInit(init) { return { bubbles: true, cancelable: true, ...(init || {}), pointerId: ++tuiPressId }; }
+function tuiPress(node, init) {
+  if (!node) return false;
+  return node.dispatchEvent(new PointerEvent('pointerdown', tuiPressInit(init)));
+}
+// press:end
+// A setup sheet (bench checklist, backup) opened from the menu: in the terminal layout the
+// terminal goes to setup mode first, as the setup tiles of TabletUi do.
+function tuiEnterSetup() {
+  if (typeof TabletTerminal !== 'undefined' && TabletTerminal.layout === 'terminal' && TabletTerminal.mode !== 'setup') TabletTerminal.setMode('setup');
+}
+// Upstream's panel hotkeys (F field menu, V vehicle) press with pointerId 0 as well, so every
+// second key press did nothing (upstream too: docs/Upstream-Issues.md Nr. 7). Same press here.
+if (typeof HOTKEY_UI !== 'undefined') {
+  HOTKEY_UI.FieldMenu = () => tuiPress(document.getElementById('ln-fieldops'));
+  HOTKEY_UI.VehicleSettings = () => tuiPress(document.getElementById('ln-vehicle'));
+}
+
 // ===== Tablet UI (Phase 1) ====================================================
 // Cab-tablet additions, kept in this one section (CSS: <style id="tablet-ui"> in index.html)
 // so the fork rebases cleanly. Per-device settings in localStorage:
@@ -612,7 +636,7 @@ const TabletTerminal = (() => {
       const src = document.querySelector(q.src);
       if (!src || b.classList.contains('disabled')) return;
       // Press the original button: its own handler sends its own command, with its own gates.
-      src.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+      tuiPress(src);
     });
   }
   function srcAvailable(q, src) {
@@ -695,7 +719,7 @@ const TabletTerminal = (() => {
     closeSheets();
     s.classList.add('open'); scrim.classList.add('open');
   }
-  const pressNav = id => { const b = $(id); if (b) b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); };
+  const pressNav = id => { const b = $(id); if (b) tuiPress(b); };
   const TILES_FIELD = [ // [icon, label, key (data-tile), action]
     ['field', tr('Fields and Jobs'), 'ln-fieldops', () => pressNav('ln-fieldops')],
     ['fieldtools', tr('Field Tools'), 'ln-fieldtools', () => pressNav('ln-fieldtools')],
@@ -748,7 +772,7 @@ const TabletTerminal = (() => {
       onTap(t, () => {
         const src = document.querySelector(sel);
         if (!src || t.classList.contains('disabled')) return;
-        src.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+        tuiPress(src);
         setTimeout(renderMoreTiles, 150);
       });
       mBox.appendChild(t);
@@ -2513,7 +2537,7 @@ const TabletProfiles = (() => {
       for (const kind of ['vehicle', 'tool']) {
         const t = el('button', 'tui-tile tp-nowt', '<span class="tp-n-ic"></span><span class="tp-n-tx"><span class="l"></span><span class="v" translate="no"></span><span class="s" translate="no"></span></span><span class="tp-n-go"></span>');
         t.dataset.kind = kind;
-        onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(); });
+        onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
         band.appendChild(t);
       }
       box.prepend(band);
@@ -3182,7 +3206,7 @@ const TabletBrand = (() => {
       if (!box || box.querySelector('[data-tile="' + key + '"]')) return;
       const t = el('button', 'tui-tile ' + cls, ICS[key.slice(3)] + '<span></span>'); t.dataset.tile = key;
       t.querySelector('span').textContent = T(label);
-      onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); fn(); });
+      onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); fn(); });
       box.appendChild(t);
     };
     add(f, 'tb-help', 'field', tr('Help'), () => openHelp());
@@ -3540,8 +3564,14 @@ const TabletBench = (() => {
   let cur = 0, valBox = null, warnBox = null, lastKey = '', clearArmed = 0;
   const drafts = {}; // notes typed before OK / Problem, per step, until the sheet is reloaded
 
+  // The checklist belongs to setup mode: opening it switches the terminal layout there, and it
+  // closes when the mode changes again (not merely because it was opened from drive mode, which
+  // closed it within half a second: moritz.31 test, point 3).
+  let openMode = null;
   function open(i) {
+    tuiEnterSetup();
     if (typeof lnCloseAll === 'function') lnCloseAll();
+    openMode = TabletTerminal.mode;
     cur = i == null ? Math.max(0, STEPS.findIndex(s => !res.r[s.id])) : i;
     fill();
     sheet.classList.add('open'); scrim.classList.add('open');
@@ -3613,7 +3643,7 @@ const TabletBench = (() => {
   }
   setInterval(tickVals, 250);
   // Close when leaving setup mode: the checklist is for the bench.
-  setInterval(() => { if (sheet.classList.contains('open') && TabletTerminal.mode !== 'setup') close(); }, 500);
+  setInterval(() => { if (sheet.classList.contains('open') && TabletTerminal.mode !== openMode) close(); }, 500);
 
   // --- Menu tile (setup) --------------------------------------------------------------------
   const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M8.5 10l1.5 1.5 3-3M8.5 16l1.5 1.5 3-3M15 11h1M15 17h1"/></svg>';
@@ -3622,7 +3652,7 @@ const TabletBench = (() => {
     const s = m.querySelector('.tui-tiles.tui-s'); if (!s || s.querySelector('[data-tile="tbn"]')) return;
     const t = el('button', 'tui-tile setup'); t.dataset.tile = 'tbn'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Bench checklist'));
-    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(); });
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
     s.appendChild(t);
   }, 300);
 
@@ -3697,8 +3727,11 @@ const TabletBackup = (() => {
   onTap(sheet.querySelector('.x'), close); onTap(scrim, close);
   const isOpen = () => sheet.classList.contains('open');
 
+  let openMode = null; // closes when the mode changes, as the bench checklist
   function open() {
+    tuiEnterSetup();
     if (typeof lnCloseAll === 'function') lnCloseAll();
+    openMode = TabletTerminal.mode;
     confirm = false;
     sheet.classList.add('open'); scrim.classList.add('open');
     if (connState === 'connected') transport.send('backup.list');
@@ -3824,7 +3857,7 @@ const TabletBackup = (() => {
     if (scrollTo && (pv || (st.op === 'preview' && st.err))) { scrollTo = false; im.scrollIntoView({ block: 'start' }); }
   }
   setInterval(() => render(false), 300);
-  setInterval(() => { if (isOpen() && TabletTerminal.mode !== 'setup') close(); }, 500);
+  setInterval(() => { if (isOpen() && TabletTerminal.mode !== openMode) close(); }, 500);
 
   // --- Menu tile (setup) --------------------------------------------------------------------
   const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16v13H4z"/><path d="M8 7V4h8v3M12 10v6M9 13l3 3 3-3"/></svg>';
@@ -3833,7 +3866,7 @@ const TabletBackup = (() => {
     const s = m.querySelector('.tui-tiles.tui-s'); if (!s || s.querySelector('[data-tile="tbk"]')) return;
     const t = el('button', 'tui-tile setup'); t.dataset.tile = 'tbk'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Back up and restore'));
-    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(); });
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
     s.appendChild(t);
   }, 300);
   return { open, get state() { return status(); }, get selection() { return [...sel]; } };
@@ -3988,7 +4021,7 @@ const TabletDemo = (() => {
     let t = s.querySelector('[data-tile="demo"]');
     if (!t) {
       t = el('button', 'tui-tile setup'); t.dataset.tile = 'demo'; t.innerHTML = IC + '<span></span>';
-      onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); if (active) end(''); else start(); });
+      onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); if (active) end(''); else start(); });
       s.appendChild(t);
     }
     const lbl = T(active ? tr('End demo') : tr('Demo mode'));
@@ -4128,7 +4161,7 @@ const TabletExplain = (() => {
     clearTimeout(press.timer);
     const p = press; press = null;
     if (!act) return;
-    const ev = new PointerEvent('pointerdown', p.init); ev.__aowReplay = true;
+    const ev = new PointerEvent('pointerdown', tuiPressInit(p.init)); ev.__aowReplay = true; // own pointerId (#465 filter)
     p.node.dispatchEvent(ev);
   };
   window.addEventListener('pointerup', e => { if (swallowClick) setTimeout(() => { swallowClick = false; }, 400); release(e, true); }, true);
@@ -4184,7 +4217,7 @@ const TabletWork = (() => {
       btn(tr('Fields and Jobs'), () => { park(); openFieldsAndJobs(); }, true);
     } else if (step.k === 'track') {
       btn(tr('Tracks'), () => { park(); openTracksManager(); }, true);
-      btn(tr('Quick AB line'), () => { park(); const q = document.getElementById('bn-quickab'); if (q) q.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); });
+      btn(tr('Quick AB line'), () => { park(); const q = document.getElementById('bn-quickab'); if (q) tuiPress(q); });
     } else if (step.k === 'dir') {
       btn(tr('Yes'), () => { TabletSteerConfirm.confirm(); render(); }, true);
       btn(tr('No – learn the direction again'), () => {
@@ -4192,7 +4225,7 @@ const TabletWork = (() => {
         transport.send('heading.resetDirection'); showToast(T(tr('Direction reset. Drive forward above 1.5 kph.')));
       });
     } else if (step.k === 'ready') {
-      btn(tr('Show the list'), () => { park(); const r = document.getElementById('tui-sb-ready'); if (r) r.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); }, true);
+      btn(tr('Show the list'), () => { park(); const r = document.getElementById('tui-sb-ready'); if (r) tuiPress(r); }, true);
     }
     return box;
   }
@@ -4249,7 +4282,7 @@ const TabletWork = (() => {
     const f = m.querySelector('.tui-tiles.tui-f'); if (!f || f.querySelector('[data-tile="work"]')) return;
     const t = el('button', 'tui-tile field'); t.dataset.tile = 'work'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Start work'));
-    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); start(); });
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); start(); });
     f.insertBefore(t, f.firstChild);
   }, 300);
   return { start, steps, finish };
@@ -4300,7 +4333,7 @@ const TabletFirstSetup = (() => {
     sheet.classList.add('open'); scrim.classList.add('open'); last = ''; render();
   }
   // Open an existing panel; the guide waits in the background and comes back with "Back to setup".
-  const goPanel = id => { hide(); TabletTerminal.setMode('setup'); const b = document.getElementById(id); if (b) b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); showBack(); };
+  const goPanel = id => { hide(); TabletTerminal.setMode('setup'); const b = document.getElementById(id); if (b) tuiPress(b); showBack(); };
   const back = el('button', 'tp-btn pri'); back.id = 'tui-setup1-back'; back.hidden = true; document.body.appendChild(back);
   back.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); back.hidden = true; open(); });
   function showBack() { back.textContent = '↩ ' + T(tr('Back to first setup')); back.hidden = false; }
@@ -4402,7 +4435,7 @@ const TabletFirstSetup = (() => {
     const sBox = m.querySelector('.tui-tiles.tui-s'); if (!sBox || sBox.querySelector('[data-tile="setup1"]')) return;
     const t = el('button', 'tui-tile setup'); t.dataset.tile = 'setup1'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('First setup'));
-    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(0); });
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(0); });
     sBox.insertBefore(t, sBox.firstChild);
   }, 300);
   return { open, get isOpen() { return isOpen(); } };
@@ -4945,7 +4978,7 @@ const TabletWorkLog = (() => {
     const f = m.querySelector('.tui-tiles.tui-f'); if (!f || f.querySelector('[data-tile="worklog"]')) return;
     const t = el('button', 'tui-tile field'); t.dataset.tile = 'worklog'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Work log'));
-    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(); });
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
     f.appendChild(t);
   }, 300);
   // Other records kept in the same store (kind set): read, add or replace, delete.
@@ -5319,7 +5352,7 @@ const TabletAcceptance = (() => {
     const sBox = m.querySelector('.tui-tiles.tui-s'); if (!sBox || sBox.querySelector('[data-tile="accept"]')) return;
     const t = el('button', 'tui-tile setup'); t.dataset.tile = 'accept'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Acceptance record'));
-    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(); });
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
     sBox.appendChild(t);
   }, 300);
   return { open };
