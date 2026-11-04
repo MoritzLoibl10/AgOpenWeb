@@ -4605,6 +4605,7 @@ const TabletUpdate = (() => {
 // The liability notice from docs/Rechtliches-Entwurf.md (section A, a DRAFT, not legally checked),
 // shown once per device and text version until "Read and understood". Stored only in this
 // browser. It switches nothing; the first setup waits for it.
+// legal:begin
 const TabletLegal = (() => {
   const T = k => I18n.text(k);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
@@ -4637,12 +4638,20 @@ const TabletLegal = (() => {
   }
   // Automated browsers (CI's layout check, tests) get no notice: it would cover what they measure.
   let done = acked() || !!navigator.webdriver;
+  // The language is set at once, its dictionary arrives a moment later; the box is translate=no,
+  // so the page never translates it afterwards: drawn again when the translation is there
+  // (moritz.31 sweep: the notice stayed English on a German tablet).
+  const title = () => T(tr('Please read before use'));
+  const since = performance.now();
+  const ready = () => String(I18n.language).startsWith('en') || title() !== 'Please read before use' || performance.now() - since > 5000;
   const t = setInterval(() => {
     if (done) { clearInterval(t); return; }
-    if (typeof I18n !== 'undefined' && appInfo) { clearInterval(t); show(); }
+    if (box.hidden && typeof I18n !== 'undefined' && appInfo && ready()) show();
+    else if (!box.hidden && box.querySelector('.lg-t').textContent !== title()) show();
   }, 500);
   return { get done() { return done || acked(); }, show };
 })();
+// legal:end
 
 // ===== Work log (feature/arbeitsdoku) =========================================================
 // One entry per working session: from the moment this device (holding control) sees a job open
