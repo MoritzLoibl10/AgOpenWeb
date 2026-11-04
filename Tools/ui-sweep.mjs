@@ -173,6 +173,7 @@ async function tapEl(sel) {
 // (Function declarations: the pass runs from the top-level code above, before a const here exists.)
 function RESET() { try { wzClose(true); lnCloseAll(); closeDialog(); } catch (_) { /* older page */ }
   document.querySelectorAll('.tui-sheet.open, .tp-scrim.open, .bn-flyout.open, #tui-scrim.open').forEach(e => e.classList.remove('open'));
+  const legal = document.getElementById('tui-legal'); if (legal) legal.hidden = true; // opened by the visual pass
   if (typeof TabletTerminal !== 'undefined' && TabletTerminal.mode !== 'drive') TabletTerminal.setMode('drive'); }
 // What is open now (panels, sheets, dialogs), the menu itself left out.
 function OPENED() { return [...document.querySelectorAll('.ln-panel.open, .tui-sheet.open, #dialoghost.open .dlg-card.open, #wizard-overlay.open, .open[id]')]
