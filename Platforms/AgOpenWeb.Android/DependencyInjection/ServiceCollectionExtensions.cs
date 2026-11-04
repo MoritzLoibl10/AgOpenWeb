@@ -49,7 +49,7 @@ public static class ServiceCollectionExtensions
         // UI-thread dispatcher + timer abstraction. With the native UI gone the VM/pipeline
         // run on a single HostLoopDispatcher (owned by the foreground BackendService's
         // AndroidBackendHost, which re-registers its own instance — last-wins), so guidance
-        // stays live while the WebView Activity is backgrounded. See Plans/CONFIG_STATE_AUDIT.md §11.
+        // stays live while the WebView Activity is backgrounded. See Plans/Completed/CONFIG_STATE_AUDIT.md §11.
         services.AddSingleton<HostLoopDispatcher>();
         services.AddSingleton<IUiDispatcher>(sp => sp.GetRequiredService<HostLoopDispatcher>());
         services.AddSingleton<IUiTimerFactory>(sp => sp.GetRequiredService<HostLoopDispatcher>());
@@ -63,6 +63,14 @@ public static class ServiceCollectionExtensions
             new AndroidLocalNetworkInfoProvider(
                 global::Android.App.Application.Context
                 ?? throw new InvalidOperationException("Android application context is unavailable.")));
+        // One watcher for network changes; UDP, NTRIP and the bug report outbox subscribe (#385).
+        services.AddSingleton<AgOpenWeb.Services.Network.INetworkWatcher>(sp =>
+        {
+            var watcher = new AgOpenWeb.Services.Network.NetworkWatcher(
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<AgOpenWeb.Services.Network.NetworkWatcher>>());
+            AgOpenWeb.Android.Services.AndroidNetworkEvents.Register(global::Android.App.Application.Context, watcher);
+            return watcher;
+        });
         services.AddSingleton<IUdpCommunicationService, UdpCommunicationService>();
 
         // Core services
@@ -105,6 +113,8 @@ public static class ServiceCollectionExtensions
 
         // ISOBUS task controller link: PGN 240 heartbeat in, PGN 241 section control out
         services.AddSingleton<IIsobusTaskControllerService, AgOpenWeb.Services.Isobus.IsobusTaskControllerService>();
+        // ISOBUS virtual terminal for the VT card
+        services.AddSingleton<IVirtualTerminalService, AgOpenWeb.VirtualTerminal.VirtualTerminalService>();
 
         // Smart WAS calibration (statistical WAS zero analyzer)
         services.AddSingleton<ISmartWasCalibrationService, SmartWasCalibrationService>();

@@ -40,12 +40,25 @@ public interface IAutoSteerService
     event Action<string, int, bool>? HardwareMessageReceived;
 
     /// <summary>
+    /// PGN 234 (remote section switches) arrived: its switch bytes, indexed as AgOpenGPS
+    /// <c>mc.ss</c> (1 = main … 8 = off group 1; 0 unused). Raised on the socket thread.
+    /// </summary>
+    event Action<byte[]>? RemoteSwitchesReceived;
+
+    /// <summary>
     /// AutoSteer was engaged but guidance stopped updating for longer than
     /// <c>AutoSteerService.GuidanceStaleLimit</c> (GPS input or the pipeline stalled), so the
     /// service stopped steering on its own (#169). Raised once per stall, on the control-loop
     /// thread; the handler should marshal to the UI and take AutoSteer off.
     /// </summary>
     event EventHandler? GuidanceLost;
+
+    /// <summary>
+    /// The pressure or current sensor (PGN 250) reached its trip point while AutoSteer was
+    /// engaged, so the service stopped steering. Raised once per kickout, on the UDP receive
+    /// thread, with the reason; the handler should marshal to the UI and take AutoSteer off.
+    /// </summary>
+    event EventHandler<string>? SensorKickout;
 
     /// <summary>
     /// Whether auto-steer is enabled and processing GPS data.
@@ -96,6 +109,20 @@ public interface IAutoSteerService
     /// port, once per fix, as AgOpenGPS does. Seed monitors and rate controllers use it.
     /// </summary>
     void SendCorrectedPosition(double latitude, double longitude, double headingDegrees);
+
+    /// <summary>
+    /// Copy PGN 254 to AgIO's loopback port, and with a field open PGN 239 and 229 too,
+    /// once per fix: AgOpenGPS sends every module PGN there, where rate controllers listen
+    /// for speed and section states. The modules keep getting theirs from the 100 Hz control
+    /// loop; this copy goes at the fix rate, as AgOpenGPS's does.
+    /// </summary>
+    void SendLoopbackPgns(bool hasActiveField);
+
+    /// <summary>
+    /// Send PGN 214, the fix as the receiver (or the simulator) gave it, to AgIO's GPS
+    /// loopback port, as AgIO does after parsing each sentence. GPS_Out needs it (#364).
+    /// </summary>
+    void SendGpsData(GpsData data);
 
     /// <summary>
     /// Update guidance results from external calculation (e.g. ViewModel guidance).

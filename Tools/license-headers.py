@@ -13,7 +13,7 @@ in the file's own comment syntax:
 
 and no tracked text file names another licence (GPL, MIT, BSD, ...). Third-party
 code (wwwroot/vendor), the AgOpenGPS reference copy (AgOpen_Snapshot) and Plans/
-are left alone. See Plans/LICENSE_HEADERS_PLAN.md.
+are left alone. See Plans/Completed/LICENSE_HEADERS_PLAN.md.
 
 Usage:
   Tools/license-headers.py           add or rewrite headers (old GPL headers included)
@@ -36,6 +36,11 @@ COMMENT = {".cs": "//", ".js": "//", ".py": "#", ".sh": "#"}
 SCANNED = {".md", ".html", ".css", ".axaml", ".xml", ".csproj", ".props", ".targets",
            ".yml", ".yaml", ".json", ".txt", ".ps1", ".iss", ".plist", ".service"}
 SKIP = ("AgOpen_Snapshot/", "Plans/", "LICENSE.md", "Tools/license-headers.py")
+
+# Fork: the one exception, the in-app third-party page (Setup → Info → Third-party components),
+# a block in index.html between these two markers. Everywhere else the rule above holds.
+THIRD_PARTY_FILE = "Shared/AgOpenWeb.RemoteServer/wwwroot/index.html"
+THIRD_PARTY_BEGIN, THIRD_PARTY_END = "<!-- third-party:begin -->", "<!-- third-party:end -->"
 
 COPYRIGHT = re.compile(r"Copyright \(C\) (\d{4}(?:-\d{4})?) " + re.escape(HOLDER) + "$")
 FOREIGN = re.compile(
@@ -98,8 +103,13 @@ def problems(name, ext, text):
                 or top[2] != f"{c} {SPDX}":
             yield start, "missing or changed licence header; expected:\n    " + \
                 "\n    ".join(header(c, "<years>"))
+    inside = False  # the third-party page names other licences on purpose
     for n, line in enumerate(text.split("\n"), 1):
-        if FOREIGN.search(line):
+        if name == THIRD_PARTY_FILE and THIRD_PARTY_BEGIN in line:
+            inside = True
+        elif name == THIRD_PARTY_FILE and THIRD_PARTY_END in line:
+            inside = False
+        elif not inside and FOREIGN.search(line):
             yield n, f"names a licence other than Apache 2.0: {line.strip()[:100]}"
 
 
