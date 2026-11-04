@@ -23,7 +23,8 @@ public static class WireCodec
     public const byte Scene = 1, Tick = 2, CoverageInit = 3, CoverageCells = 4, Status = 5,
         ControlState = 6, Hello = 7, Config = 8, Profiles = 9, Wizard = 10, NtripProfiles = 11,
         FieldOps = 12, AgShare = 13, AppInfo = 14, FieldTools = 15, RecordedPath = 16, Boundary = 17,
-        Sound = 18, Pong = 19, CoverageEdge = 20, ViewPrefs = 21, Prompt = 22, Toast = 23, DrivePick = 24, HardwareMessage = 25;
+        Sound = 18, Pong = 19, CoverageEdge = 20, ViewPrefs = 21, Prompt = 22, Toast = 23, DrivePick = 24, HardwareMessage = 25,
+        Vt = 26, VtImage = 27, NtripMountpoints = 28, WebCards = 29;
 
     /// <summary>One-shot alert: tells the client to play sound effect
     /// <paramref name="effectId"/> (the <c>SoundEffect</c> enum value). Pushed
@@ -67,6 +68,32 @@ public static class WireCodec
         w.Write(seconds);
         w.Write((byte)(warning ? 1 : 0));
         return ms.ToArray();
+    }
+
+    /// <summary>A virtual terminal message for a VT card: the terminal it is about (0 to 3; 255
+    /// for the host's own <c>link</c> state), then one JSON object, relayed as the terminal wrote
+    /// it (screen, edit, workingSets, alarms, audio, ...).</summary>
+    public static byte[] EncodeVt(int terminal, string json)
+    {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms);
+        w.Write(Vt);
+        w.Write((byte)(terminal is >= 0 and < 255 ? terminal : 255));
+        WriteStr(w, json);
+        return ms.ToArray();
+    }
+
+    /// <summary>A virtual terminal picture: its id, size, and the pixels as RGBA, rows top
+    /// first. Sent once, before the first screen that uses it.</summary>
+    public static byte[] EncodeVtImage(uint id, int width, int height, ReadOnlySpan<byte> rgba)
+    {
+        var frame = new byte[13 + rgba.Length];
+        frame[0] = VtImage;
+        BitConverter.TryWriteBytes(frame.AsSpan(1), id);
+        BitConverter.TryWriteBytes(frame.AsSpan(5), width);
+        BitConverter.TryWriteBytes(frame.AsSpan(9), height);
+        rgba.CopyTo(frame.AsSpan(13));
+        return frame;
     }
 
     public static byte[] EncodeToast(string message)
@@ -169,6 +196,7 @@ public static class WireCodec
         w.Write(a.Logs.Count);
         foreach (var lg in a.Logs) { WriteStr(w, lg.Time); w.Write(lg.Level); WriteStr(w, lg.Message); }
         WriteStr(w, a.BugReportStatus);
+        WriteStr(w, a.BugReportSendStatus);
         WriteStr(w, a.BackupStatus); // append-only (fork)
         return ms.ToArray();
     }
@@ -223,6 +251,40 @@ public static class WireCodec
         return ms.ToArray();
     }
 
+    // The mount points last asked for in the profile editor: [i32 seq] str for, str status,
+    // [i32 n][ per mount point: str mount, name, format, systems, country, f32 km (NaN = unknown), u8 needs position ].
+    public static byte[] EncodeWebCards(WebCardsDto d)
+    {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms);
+        w.Write(WebCards);
+        w.Write(d.Cards.Count);
+        foreach (var c in d.Cards) { WriteStr(w, c.Name); WriteStr(w, c.Url); }
+        return ms.ToArray();
+    }
+
+    public static byte[] EncodeNtripMountpoints(NtripMountpointsDto d)
+    {
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms);
+        w.Write(NtripMountpoints);
+        w.Write(d.Seq);
+        WriteStr(w, d.For);
+        WriteStr(w, d.Status);
+        w.Write(d.Items.Count);
+        foreach (var m in d.Items)
+        {
+            WriteStr(w, m.Mount);
+            WriteStr(w, m.Name);
+            WriteStr(w, m.Format);
+            WriteStr(w, m.Systems);
+            WriteStr(w, m.Country);
+            w.Write((float)m.DistanceKm);
+            w.Write((byte)(m.NeedsPosition ? 1 : 0));
+        }
+        return ms.ToArray();
+    }
+
     public static byte[] EncodeNtripProfiles(NtripProfilesDto p)
     {
         using var ms = new MemoryStream();
@@ -242,7 +304,20 @@ public static class WireCodec
             w.Write((byte)(e.IsDefault ? 1 : 0));
             w.Write(e.AssociatedFields.Count);
             foreach (var f in e.AssociatedFields) WriteStr(w, f);
-            w.Write((byte)(e.NtripVersion == 2 ? 2 : 1));
+            // The fallback service (append-only): [u8 present] then str host, i32 port, str mount,
+            // str user, str password (masked), u8 auto-switch, i32 failed attempts before switching.
+            var fb = e.Fallback;
+            w.Write((byte)(fb != null ? 1 : 0));
+            if (fb != null)
+            {
+                WriteStr(w, fb.CasterHost);
+                w.Write(fb.CasterPort);
+                WriteStr(w, fb.MountPoint);
+                WriteStr(w, fb.Username);
+                WriteStr(w, fb.Password);
+                w.Write((byte)(fb.AutoSwitch ? 1 : 0));
+                w.Write(fb.SwitchAfterFailures);
+            }
         }
         w.Write(p.AvailableFields.Count);
         foreach (var f in p.AvailableFields) WriteStr(w, f);
@@ -278,6 +353,9 @@ public static class WireCodec
         w.Write(v.AntennaPivot);
         w.Write(v.AntennaHeight);
         w.Write(v.AntennaOffset);
+        w.Write(v.ImuPivot);
+        w.Write(v.ImuHeight);
+        w.Write(v.ImuOffset);
         var g = c.Gps;
         w.Write((byte)(g.IsDualGps ? 1 : 0));
         w.Write(g.DualHeadingOffset);  // f64
@@ -344,6 +422,7 @@ public static class WireCodec
         w.Write((byte)(tr.Display ? 1 : 0));
         w.Write(tr.Line);              // i32
         w.Write(tr.Width);             // f64 — tram width, m (#110)
+        w.Write((byte)(tr.OuterInverted ? 1 : 0)); // #451 — swap outer/inner
         // Machine Control tab.
         var m = c.Machine;
         w.Write((byte)(m.HydraulicLiftEnabled ? 1 : 0));
@@ -367,6 +446,8 @@ public static class WireCodec
         DB(d.KeyboardEnabled); DB(d.StartFullscreen); DB(d.ElevationLogEnabled);
         w.Write(d.DisplayResolutionMultiplier); // f64 — web imagery LOD (quality)
         DB(d.IsDayMode); // day/night theme — web switches its full palette + map colours
+        w.Write(d.UiScale); // i32 — UI size, percent
+        DB(d.ImageryVisible); // the field's aerial imagery on the map (#500)
 
         // AutoSteer config tab (full 9-tab surface). Append-only; field order mirrors
         // AutoSteerConfigDto exactly so transport.js decodes it positionally.
@@ -393,6 +474,7 @@ public static class WireCodec
         // Tab 9 — Display
         w.Write(a.LineWidth); w.Write(a.NudgeDistance); w.Write(a.NextGuidanceTime); w.Write(a.CmPerPixel);
         DB(a.LightbarEnabled); DB(a.SteerBarEnabled); DB(a.GuidanceBarOn);
+        w.Write(a.RefNudgeDistance); // i32 — Ref Nudge panel step, cm
         return ms.ToArray();
     }
 
@@ -528,6 +610,9 @@ public static class WireCodec
         foreach (var line in s.ContourStrips) WritePts(w, line);
         WriteOptPts(w, s.ContourRef);
         w.Write((byte)(s.ContourLocked ? 1 : 0));
+        w.Write(s.GuideLines.Count);                              // #450
+        foreach (var line in s.GuideLines) WritePts(w, line);
+        WriteOptPts(w, s.ToolPass);
 
         return ms.ToArray();
     }
@@ -589,12 +674,15 @@ public static class WireCodec
         w.Write((byte)(t.IsYouTurnExecuting ? 1 : 0)); // #50 — mid-turn gate for on-screen buttons
         w.Write(t.PassNumber);       // i32 — guidance pass offset (0 = on reference)
         w.Write((float)t.NudgeOffset); // f32 — driver-relative nudge (m, +right) — #93 readout
+        w.Write((float)t.RefNudgeMoved); // f32 — Ref Nudge panel total (m, +right) — #489
+        w.Write((byte)(t.RefNudgePending ? 1 : 0)); // unsaved reference move
         w.Write((byte)(t.HasGoal ? 1 : 0)); // #95 — PP goal marker
         w.Write(t.GoalE);            // f64
         w.Write(t.GoalN);            // f64
         w.Write((byte)(t.IsReverse ? 1 : 0)); // #125 — reversing
         w.Write((byte)(t.ModuleNotSteering ? 1 : 0)); // #126 — engaged but module not steering
         w.Write((float)t.ChartGpsHeading); // f32 — heading chart GPS fix-to-fix (#111)
+        w.Write((byte)t.TramLights);  // #451 — tram lights bits
         return ms.ToArray();
     }
 
@@ -752,6 +840,26 @@ public static class WireCodec
         w.Write((byte)(s.SendCorrectedPosition ? 1 : 0));
         // Network IO: the subnet the scan came from (append-only, #334).
         WriteStr(w, s.ScanReplySubnet);
+        // NTRIP session (append-only, NTRIP plan Phase 4): [u8 present] then u8 using fallback,
+        // main is back, has fallback, profile per field; u8 state; i32 last error (-1 none);
+        // i32 failed attempts; f32 retry s; str notice.
+        var ns = s.NtripSession;
+        w.Write((byte)(ns != null ? 1 : 0));
+        if (ns != null)
+        {
+            w.Write((byte)(ns.UsingFallback ? 1 : 0));
+            w.Write((byte)(ns.MainIsBack ? 1 : 0));
+            w.Write((byte)(ns.HasFallback ? 1 : 0));
+            w.Write((byte)(ns.ProfilePerField ? 1 : 0));
+            w.Write((byte)ns.State);
+            w.Write(ns.LastError);
+            w.Write(ns.Attempts);
+            w.Write((float)ns.RetryInSeconds);
+            WriteStr(w, ns.Notice);
+            // Append-only: the profile in use ("" for a caster typed in) and the service in use ("MOUNT@host:port").
+            WriteStr(w, ns.Profile);
+            WriteStr(w, ns.Service);
+        }
         return ms.ToArray();
     }
 
@@ -837,7 +945,7 @@ public static class WireCodec
     }
 
     /// <summary>No coverage grid any more (field closed): a reset init with an empty grid.
-    /// The client drops its raster and perimeter (transport.js / app.js onCoverageInit).</summary>
+    /// The client drops its raster and perimeter (transport.js / js/core.js onCoverageInit).</summary>
     public static byte[] EncodeCoverageClear() =>
         EncodeCoverageInit(new CoverageInitDto(0, 0, 0, 0, 0), reset: true);
 

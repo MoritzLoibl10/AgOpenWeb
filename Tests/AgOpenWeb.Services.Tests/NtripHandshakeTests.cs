@@ -44,7 +44,7 @@ public class NtripHandshakeTests
     [Test]
     public void SourceTable_IsReportedAsAMissingMountPoint()
     {
-        Assert.That(NtripResponse.Classify("SOURCETABLE 200 OK").Reason, Does.Contain("Mount point not found"));
+        Assert.That(NtripResponse.Classify("SOURCETABLE 200 OK").Message, Does.Contain("Mount point not found"));
     }
 
     // ── Fake caster ──────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ public class NtripHandshakeTests
         {
             await Task.Delay(400);
             await Send(s, "ICY 200 OK\r\n");
-            await Send(s, "\xD3\x00\x13rtcm");
+            await s.WriteAsync(new byte[] { 0xD3, 0x00, 0x13, 0x72, 0x74, 0x63, 0x6D }); // RTCM preamble: not text, so the header ends before it
             await Task.Delay(3000);
         });
         var (svc, events) = Client();
@@ -151,13 +151,29 @@ public class NtripHandshakeTests
         var (svc, events) = Client();
         await svc.ConnectAsync(Config(caster.Port));
 
-        Assert.That(WaitFor(() => events.Any(e => e.Message?.StartsWith("Rejected") == true), 2000), Is.True);
+        Assert.That(WaitFor(() => events.Any(e => e.Message?.Contains("Mount point not found") == true), 2000), Is.True);
         Assert.That(events.Last().Message, Does.Contain("Mount point not found"));
         Thread.Sleep(1800); // past the first 1 s backoff
         Assert.That(caster.Accepted, Is.EqualTo(1), "a missing mount point isn't retried");
         Assert.That(svc.IsConnected, Is.False);
         Assert.That(events.Any(e => e.IsConnected), Is.False);
         Assert.That(svc.IsActive, Is.True, "still requested, so editing the profile reconnects");
+        Assert.That(svc.Status.State, Is.EqualTo(NtripState.GaveUp));
+        Assert.That(svc.RtcmDestination.Address, Is.Empty, "nothing is forwarded once the session is over");
+        svc.Dispose();
+    }
+
+    [Test]
+    public async Task Disconnect_ResetsTheStatus()
+    {
+        using var caster = new FakeCaster(async s => { await Send(s, "ICY 200 OK\r\n\r\n"); await Task.Delay(2000); });
+        var (svc, _) = Client();
+        await svc.ConnectAsync(Config(caster.Port));
+        Assert.That(WaitFor(() => svc.Status.State == NtripState.Connected, 2000), Is.True);
+
+        await svc.DisconnectAsync();
+
+        Assert.That(svc.Status, Is.EqualTo(NtripSessionStatus.Idle));
         svc.Dispose();
     }
 
@@ -173,6 +189,69 @@ public class NtripHandshakeTests
         Assert.That(WaitFor(() => caster.Accepted >= 2, 3000), Is.True, "reconnects with backoff");
         await svc.DisconnectAsync();
         svc.Dispose();
+    }
+
+    [Test]
+    public async Task AFirstConnectThatFails_KeepsRetrying_UntilTheCasterIsThere()
+    {
+        // #385: a unit that boots before its network is up. The first connect is refused;
+        // the backoff must carry on and connect once the caster is reachable.
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        int port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+
+        var (svc, _) = Client();
+        await svc.ConnectAsync(Config(port));
+        Assert.That(svc.IsActive, Is.True);
+
+        var caster = new TcpListener(IPAddress.Loopback, port);
+        caster.Start();
+        try
+        {
+            var accept = caster.AcceptTcpClientAsync();
+            Assert.That(await Task.WhenAny(accept, Task.Delay(5000)), Is.SameAs(accept), "retried and connected");
+            accept.Result.Dispose();
+        }
+        finally
+        {
+            await svc.DisconnectAsync();
+            svc.Dispose();
+            caster.Stop();
+        }
+    }
+
+    [Test]
+    public async Task ANetworkChange_EndsTheBackoffWait()
+    {
+        // #385: the network comes up while a retry waits out its backoff; it tries at once.
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        int port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+
+        using var watcher = new AgOpenWeb.Services.Network.NetworkWatcher(null, systemEvents: false,
+            TimeSpan.Zero, Timeout.InfiniteTimeSpan);
+        var svc = new NtripClientService(NSubstitute.Substitute.For<IGpsService>(),
+            NullLogger<NtripClientService>.Instance, watcher);
+        await svc.ConnectAsync(Config(port));
+        Thread.Sleep(3300); // retries at ~1 s and ~3 s fail; the next is due at ~7 s
+
+        var caster = new TcpListener(IPAddress.Loopback, port);
+        caster.Start();
+        try
+        {
+            var accept = caster.AcceptTcpClientAsync();
+            watcher.Check(AgOpenWeb.Services.Network.NetworkCheckReason.AddressChanged);
+            Assert.That(await Task.WhenAny(accept, Task.Delay(1500)), Is.SameAs(accept), "tried at once");
+            accept.Result.Dispose();
+        }
+        finally
+        {
+            await svc.DisconnectAsync();
+            svc.Dispose();
+            caster.Stop();
+        }
     }
 
     [Test]
@@ -207,7 +286,7 @@ public class NtripHandshakeTests
         using var caster = new FakeCaster(_ => Task.CompletedTask); // close right away
         var (svc, events) = Client();
         await svc.ConnectAsync(Config(caster.Port));
-        Assert.That(WaitFor(() => events.Any(e => e.Message?.Contains("reconnecting") == true), 2000), Is.True);
+        Assert.That(WaitFor(() => events.Any(e => e.Message?.Contains("Trying again") == true), 2000), Is.True);
 
         await svc.DisconnectAsync();
         Thread.Sleep(2500); // the 1 s backoff would have reconnected by now
@@ -226,9 +305,10 @@ public class NtripHandshakeTests
         probe.Stop(); // nothing listens here now
 
         var (svc, events) = Client();
-        Assert.ThrowsAsync<SocketException>(() => svc.ConnectAsync(Config(closedPort)));
+        await svc.ConnectAsync(Config(closedPort));
         Assert.That(svc.IsConnected, Is.False);
-        Assert.That(events.Last().Message, Does.StartWith("Connection failed"));
+        Assert.That(WaitFor(() => events.Any(e => e.Message?.Contains("Cannot reach") == true), 5000), Is.True);
+        Assert.That(WaitFor(() => events.Last().Message?.Contains("Trying again") == true, 5000), Is.True, "and retries (#385)");
 
         // A later connect works (nothing half-open is left behind).
         using var caster = new FakeCaster(async s => { await Send(s, "ICY 200 OK\r\n"); await Task.Delay(2000); });
