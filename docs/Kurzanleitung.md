@@ -59,7 +59,8 @@ verkehrt herum, und die Lenkung arbeitet dann für die falsche Richtung.
 ## 7. Arbeitsprotokoll sichern
 **Menü → Arbeitsprotokoll** zeigt je Arbeitssitzung Datum, Zeit, Fläche (vom Lenkrechner), Gerät
 und Arbeitsbreite. Antippen: Tätigkeit, Mittel/Sorte, Menge, Bemerkung eintragen.
-- Die Einträge liegen **nur auf diesem Tablet**. Regelmäßig sichern:
+- Die Einträge liegen auf dem Tablet und am Lenkrechner (abgeglichen, sobald er erreichbar ist; im
+  Profil-Backup enthalten). Eine zusätzliche Kopie:
   - **„Als Datei sichern“** (am Tablet ggf. kein Download möglich) oder
   - **„CSV kopieren“** und in eine Tabelle oder E-Mail einfügen.
 - Am PC-Browser: „CSV exportieren“ und „Druckseite je Schlag“ (als PDF speichern).

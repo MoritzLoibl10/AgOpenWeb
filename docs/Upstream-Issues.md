@@ -11,6 +11,7 @@ Issues gibt, ließ sich aus der Fork-Sitzung nicht prüfen; vor dem Anlegen kurz
 | 2 | Mehrgeräte-Sicherheit (Beobachter-Rechte, gleichzeitiges Speichern, Klartext-Passwörter) | upstream erledigt (#397: #404, #402) |
 | 3 | Arbeitsbreite: Ersatzwert 6 m im Web-Client | upstream erledigt (#398: #401) |
 | 4 | **Dringend:** Eine Antenne, zuerst rückwärts (Ausfahren aus der Halle) → Richtung verkehrt gelernt, Motor lenkt falsch herum | Entwurf fertig (27.10.2026), einreichen, zuerst |
+| 5 | MinFixQuality vergleicht die NMEA-Zahl: RTK Float (5) besteht die Vorgabe RTK Fix (4) | Entwurf fertig (27.10.2026), einreichen |
 
 ## 1. IMU heading from PGN 253 (#357): AiO v26 sends 0 for "no IMU", which now goes into the heading fusion as a real heading
 
@@ -205,4 +206,43 @@ Reverse detection with an IMU: travel more than 90° off IMU + offset (lines 242
 3. Optionally keep the IMU offset across restarts while IMU and antenna haven't moved.
 
 Our fork shows, in the web client only, a card "Does the vehicle face the way it drives?" after every (re)connection, a warning in the simulator when the speed sign and the reverse flag disagree, and a ready light that stays yellow until the direction is confirmed. For real GPS the client cannot tell the trap itself, so this needs the host.
+~~~~
+
+## 5. MinFixQuality compares the NMEA number: RTK Float (5) passes the default minimum RTK Fixed (4)
+
+Stand: **Entwurf zum Einreichen**. Code-Stellen geprüft gegen upstream `develop` 77a03518
+(27.10.2026). Im Fork nur in der Ampel abgefangen (strenger als der Host, `docs/Host-Aenderungen.md` 17);
+der Host-Vergleich ist unverändert.
+
+**Titel:**
+
+~~~~text
+MinFixQuality compares the NMEA fix number, so RTK Float (5) passes the default minimum RTK Fixed (4)
+~~~~
+
+**Text:**
+
+~~~~markdown
+### Description
+The guidance quality gate compares the GGA fix quality as a number:
+
+- `Shared/AgOpenWeb.Services/Gps/GpsFixQualityValidator.cs:33`: `if (fixQuality < config.MinFixQuality)` → rejected.
+- `Shared/AgOpenWeb.Models/Configuration/ConnectionConfig.cs:200`: default `_minFixQuality = 4` (RTK Fixed).
+- `Shared/AgOpenWeb.Services/Pipeline/GpsPipelineService.cs:583–586`: a rejected fix sets `data.IsValid = false`; the comment at line 578 reads "fell below MinFixQuality (default 4 = RTK Fixed)".
+
+The NMEA numbers are not ordered by quality: 4 = RTK Fixed, 5 = RTK Float, 6 = estimated (dead reckoning), 7 = manual input, 8 = simulation. With the default 4, every one of 5–8 is `>= 4` and passes the gate.
+
+### Steps to reproduce
+1. Default settings (MinFixQuality 4).
+2. Feed GGA sentences with fix quality 5 (RTK Float), e.g. a receiver losing its fix, or a replayed log.
+3. Check `GpsData.IsValid` after the pipeline's quality gate (or engage AutoSteer on a line).
+
+### Expected
+With the minimum set to RTK Fixed, RTK Float (and estimated/manual/simulated fixes) are refused like DGPS or GPS: `IsValid = false`, as the comment at line 578 describes.
+
+### Actual
+Fix quality 5, 6, 7 and 8 pass (`5 < 4` is false); `IsValid` stays true and guidance runs on an RTK Float position, which can be off by decimetres.
+
+### Proposal
+Compare by a quality rank instead of the number, e.g. 4 > 5 > 2 = 3 > 1, with 0 and 6–8 as no usable fix, in `GpsFixQualityValidator`; keep the setting's meaning ("at least this good"). Not tested on real hardware.
 ~~~~

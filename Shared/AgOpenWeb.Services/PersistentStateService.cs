@@ -134,6 +134,7 @@ public class PersistentStateService : IPersistentStateService
         State.BoundaryDrawRightSide = s.BoundaryDrawRightSide;
         State.BoundaryDrawAtPivot = s.BoundaryDrawAtPivot;
         State.BoundaryOffset = s.BoundaryOffset;
+        State.FirstSetup = s.FirstSetup;
         // IsFirstRun / LastRunDate are recomputed by Load(), not copied.
     }
 
