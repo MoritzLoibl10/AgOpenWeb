@@ -7,12 +7,12 @@ sind nicht getestet; Lenkung nur mit Abstand zu Personen, auf eigenem Gelände.
 ☐ App installieren (APK aus der Vorabversion), starten → Hinweis „Bitte vor der Nutzung lesen“, erst „Gelesen und verstanden“ schließt ihn · #23
 ☐ Danach → Ersteinrichtung öffnet sich, solange kein Fahrzeugprofil existiert; jeder Schritt überspringbar · #22
 ☐ Ersteinrichtung: Sprache, Fahrzeug, Gerät durchgehen → nichts vorausgefüllt, leere Felder bleiben leer · #22
-☐ Menü → Vorführmodus → gestreiftes Band „VORFÜHRUNG“, Simulator fährt; „Vorführung beenden“ → Band weg · #21
+☐ Menü → Service → Vorführmodus → gestreiftes Band „VORFÜHRUNG“, Simulator fährt; „Vorführung beenden“ → Band weg · #21
 ☐ Ampel antippen → Liste mit GPS, Lenkmodul, IMU, Linie, Richtung · #21
 ☐ Knopf lange drücken (z. B. Spuren, Menü-Kachel) → Erklärung, nichts geschaltet; kurz drücken → wirkt beim Loslassen · #22
 ☐ „Lenken“, Teilbreiten, Wende, Vorgewende kurz antippen → wirken sofort beim Aufsetzen, keine Erklärung · #22
 ☐ Eine Fehlermeldung auslösen (z. B. „Arbeit starten“ ohne Schlag, Spur ohne Schlag) → deutscher Text sagt, was zu tun ist · #22
-☐ Einrichtung → Info → Drittkomponenten (Liste, BEV-Namensnennung), Aktualisierungen → „Nach Aktualisierungen suchen“ zeigt die neueste Version mit Link (nur mit Internet) · #23
+☐ Menü → Einstellungen → Info → Drittkomponenten (Liste, BEV-Namensnennung), Aktualisierungen → „Nach Aktualisierungen suchen“ zeigt die neueste Version mit Link (nur mit Internet) · #23
 ☐ Windows-PC: Knopf ⛶ → Fenster echtes Vollbild, noch einmal → zurück · #21
 ☐ Windows-PC, neu: Setup aus der Testversion ausführen → Text am Häkchen „Windows-Firewall … freigeben“ nennt die Ports und die Administratorrechte; Häkchen „Beim Windows-Start automatisch starten“ ist an; installieren → vor der UAC-Abfrage eigener Hinweis „Gleich fragt Windows nach Adminrechten …“, dann eine UAC-Abfrage; Setup, Startmenü, Desktop-Verknüpfung, „Apps“ und Fenstertitel heißen „LM Steering Solutions“; App startet mit Bediengröße „Handschuh“; Hinweis beim ersten Start und Einrichtung → Info zeigen den Namen und „basiert auf AgOpenWeb/AgOpenGPS“ · #27
 ☐ Ohne WebView2 (falls ein Rechner ohne sie da ist): Setup installiert sie (Internet nötig), Fenster nicht leer · #27
@@ -28,9 +28,9 @@ sind nicht getestet; Lenkung nur mit Abstand zu Personen, auf eigenem Gelände.
 ☐ Lange Arbeit mit Teilbreiten (mind. 30 min, Simulator oder Feld): auf Lenkungsabbrüche ohne Meldung achten, die mit Rucklern der Karte beim Zeichnen der bearbeiteten Fläche zusammenfallen (Anzeige „Bediener“ springt kurz weg, Lenkung aus). Uhrzeit notieren, Diagnose-Datei sichern (Upstream-Issue 6, docs/Upstream-Issues.md)
 ☐ Simulator: Kanal „Stabil“, noch keine Update-Prüfung → App & Dateien zeigt den Simulator nur unter „Experte“, kein „SIM“-Knopf auf der Karte (Simulator aus); Kanal „Test“ oder Prüfung findet die Testversion → wie bisher sichtbar; Vorführmodus startet den Simulator wie bisher · #27
 ☐ Release-Dateien: Testversion enthält Setup, `LM-Steering-Solutions-portable-….zip` und APK; nach „Fork Stable Release“ nur noch Setup und APK · #27
-☐ Einrichtung → Info → Aktualisierungen: Kanal „Stabil“ (Vorgabe) → nur freigegebene Versionen; „Test“ → auch Testversionen, Anzeige wechselt; anderes Gerät/Browser bleibt auf seinem Kanal · #27
+☐ Menü → Einstellungen → Info → Aktualisierungen: Kanal „Stabil“ (Vorgabe) → nur freigegebene Versionen; „Test“ → auch Testversionen, Anzeige wechselt; anderes Gerät/Browser bleibt auf seinem Kanal · #27
 ☐ Ersteinrichtung schließen, App-Daten des Browsers löschen, neu öffnen → Ersteinrichtung kommt **nicht** wieder (Stand am Lenkrechner) · #25
-☐ Einrichtung → Abnahmeprotokoll → „Neues Abnahmeprotokoll“: Kit-Daten zeigen Antennenmaße und Fahrzeugprofil wie eingestellt; Kunde/Traktor eintragen · #26
+☐ Menü → Service → Abnahmeprotokoll → „Neues Abnahmeprotokoll“: Kit-Daten zeigen Antennenmaße und Fahrzeugprofil wie eingestellt; Kunde/Traktor eintragen · #26
 ☐ NTRIP-Profil bearbeiten: Passwort steht als Maske, „Verbindung testen“ klappt (NTRIP 2.0, bei Bedarf selbst 1.0: upstream wählt die Version, die Auswahl im Profil gibt es nicht mehr), Passwort bleibt erhalten · #20
 
 ## 2. Am Prüfstand (Kit angeschlossen, Räder frei, niemand an den Rädern)
@@ -65,4 +65,4 @@ Schritte der Prüfstand-Checkliste (`docs/Pruefstand-Checkliste.md`) wie bisher,
 ☐ Abnahme „Wende“: mit Wende fahren → „Wende gefahren“; Ergebnis je Schritt setzen, Bemerkung · #26
 ☐ Abnahme → „Drucken / PDF“ am PC-Browser (eine Seite, Unterschriften), „CSV exportieren“ · #26
 
-**Notieren:** was nicht passt, mit Uhrzeit; danach Diagnose-Datei (Menü → Diagnose für Support).
+**Notieren:** was nicht passt, mit Uhrzeit; danach Diagnose-Datei (Menü → Service → Diagnose für Support).

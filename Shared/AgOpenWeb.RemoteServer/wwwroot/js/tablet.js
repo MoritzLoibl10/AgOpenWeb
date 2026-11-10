@@ -281,6 +281,9 @@ const TabletTerminal = (() => {
   const STROKE = 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
   const IC = {
     menu: svg('<rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/>', 'fill="currentColor"'),
+    tracks: svg('<path d="M7 21 L9 3 M17 21 L15 3"/><circle cx="8" cy="12" r="1.6"/><circle cx="16" cy="12" r="1.6"/>', STROKE),
+    settings: svg('<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/>', STROKE),
+    service: svg('<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8V21h3.2l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.4-.4-.4-2.4z"/>', STROKE),
     drive: svg('<path d="M8 21 L10.5 3 M16 21 L13.5 3"/><path d="M12 7v2M12 12v2M12 17v2"/>', STROKE),
     field: svg('<path d="M3 18 L6 7 L15 5 L21 14 L13 20 Z"/><path d="M11 15V8l4 1.5-4 1.5"/>', STROKE),
     fieldtools: svg('<path d="M4 20 L4 6 L18 20 Z"/><path d="M8 16h2M4 10h2M4 14h2"/><path d="M15 4l5 5-2 2-5-5z"/>', STROKE),
@@ -746,6 +749,7 @@ const TabletTerminal = (() => {
     ['fieldtools', tr('Field Tools'), 'ln-fieldtools', () => pressNav('ln-fieldtools')],
     ['pages', tr('Work pages'), 'pages', () => { renderPagesEditor(); openSheet(pagesSheet); }],
     ['quick', tr('Quick bar'), 'quick', () => { renderQuickEditor(); openSheet(quickSheet); }],
+    ['tracks', tr('Tracks'), 'tracks', () => { if (typeof openTracksManager === 'function') openTracksManager(); }], // review measure 7
   ];
   const TILES_SETUP = [
     ['vehicle', tr('Vehicle & Tool'), 'ln-vehicle'],
@@ -778,14 +782,71 @@ const TabletTerminal = (() => {
       if (m.st.textContent !== st) m.st.textContent = st;
     }
   }
+  // --- Menu pages (docs/Menue-Aufteilung.md, review 10.11.2026, measure 7) ----------------
+  // The menu opens on the everyday tiles; settings for the customer and "Service" for the fitter
+  // and support are one page deeper. Nothing removed: every tile keeps its key, its action and
+  // its setup mode. Modules add their tiles to the two staging boxes (.tui-f, .tui-s) as before;
+  // placeTiles() moves each to its page and place (MENU_PLACE; one not listed goes to Settings).
+  const MENU_PLACE = [
+    ['main', ['work', 'ln-fieldops', 'tracks', 'worklog', 'tb-help', 'page:settings']],
+    ['tools', ['ln-fieldtools', '#bn-skipcycle', '#bn-skiptoggle', '#bn-tram', '#bottomnav .bn-bar [data-cmd="map.cycleColor"]', '#bottomnav .bn-bar [data-cmd="tool.resetHeading"]']],
+    ['foot', ['page:service']],
+    ['settings', ['ln-vehicle', 'ln-autosteer', 'ln-network', 'ln-screenalerts', 'pages', 'quick', 'language', 'ln-filemenu', 'setup1', 'tbk', 'eama', 'tb-info']],
+    ['service', ['ln-tools', 'tbn', 'accept', 'tb-diag', 'demo']],
+  ];
+  const PLACE_OF = {};
+  MENU_PLACE.forEach(([box, keys]) => keys.forEach((k, i) => { PLACE_OF[k] = [box, i]; }));
+  const PAGE_OF_BOX = { main: 'main', tools: 'main', foot: 'main', settings: 'settings', service: 'service' };
+  const PAGE_TITLE = { main: tr('Menu'), settings: tr('Settings'), service: tr('Service') };
+  let menuPage = 'main';
+  function showMenuPage(pg) {
+    menuPage = pg;
+    for (const d of menuBody.querySelectorAll('.tui-mpage')) d.hidden = d.dataset.mpage !== pg;
+    menuSheet.querySelector('.tui-sh-hdr .t').textContent = I18n.text(PAGE_TITLE[pg]);
+    menuBody.scrollTop = 0;
+  }
+  function placeTiles() {
+    const boxes = {};
+    for (const b of menuBody.querySelectorAll('[data-box]')) boxes[b.dataset.box] = b;
+    if (!boxes.main) return;
+    const now = menuBody.querySelector(':scope > .tp-now'); // the vehicle and tool cards: on the first page
+    if (now) boxes.main.parentNode.insertBefore(now, boxes.main.parentNode.firstChild);
+    for (const t of menuBody.querySelectorAll('.tui-tiles [data-tile]')) {
+      const [box, i] = PLACE_OF[t.dataset.tile] || ['settings', 99];
+      t.dataset.order = String(i);
+      const dst = boxes[box];
+      if (t.parentNode !== dst) {
+        const next = [...dst.children].find(c => +c.dataset.order > i);
+        dst.insertBefore(t, next || null);
+      }
+      t.classList.toggle('big', box === 'main');
+    }
+  }
+  setInterval(() => { if (menuSheet.classList.contains('open')) placeTiles(); }, 150);
   function renderMenu() {
+    const back = '<button class="tui-mback" type="button"></button>';
     menuBody.innerHTML =
-      '<div class="tui-sh-sec">' + esc(tr('In the field')) + '</div><div class="tui-tiles tui-f"></div>' +
-      '<div class="tui-sh-sec">' + esc(tr('Setup')) + '<small>' + esc(tr('opens setup mode; the left bar comes back')) + '</small></div>' +
-      '<div class="tui-tiles setup-band tui-s"></div>';
+      '<div class="tui-mpage" data-mpage="main">' +
+        '<div class="tui-tiles tui-big" data-box="main"></div>' +
+        '<div class="tui-sh-sec">' + esc(tr('Field tools')) + '</div><div class="tui-tiles tui-m" data-box="tools"></div>' +
+        '<div class="tui-tiles tui-foot" data-box="foot"></div>' +
+      '</div>' +
+      '<div class="tui-mpage" data-mpage="settings" hidden>' + back +
+        '<div class="tui-sh-sec"><small>' + esc(tr('opens setup mode; the left bar comes back')) + '</small></div>' +
+        '<div class="tui-tiles setup-band" data-box="settings"></div>' +
+      '</div>' +
+      '<div class="tui-mpage" data-mpage="service" hidden>' + back +
+        '<div class="tui-sh-sec"><small>' + esc(I18n.text(tr('for fitting, checking and support')) + ' · ' + I18n.text(tr('opens setup mode; the left bar comes back'))) + '</small></div>' +
+        '<div class="tui-tiles setup-band" data-box="service"></div>' +
+      '</div>' +
+      // Staging: where the modules put their tiles (unchanged); placeTiles() moves them on.
+      '<div class="tui-tiles tui-f" hidden></div><div class="tui-tiles tui-s" hidden></div>';
+    for (const b of menuBody.querySelectorAll('.tui-mback')) {
+      b.textContent = '← ' + I18n.text(tr('Menu')); // the arrow keeps the page's translator from it
+      onTap(b, () => showMenuPage('main'));
+    }
     const fBox = menuBody.querySelector('.tui-f'), sBox = menuBody.querySelector('.tui-s');
-    const mBox = el('div', 'tui-tiles tui-m');
-    fBox.after(Object.assign(el('div', 'tui-sh-sec'), { textContent: tr('More field tools') }), mBox);
+    const mBox = fBox;
     moreTiles = TILES_MORE.map(([sel, label, state]) => {
       const t = el('button', 'tui-tile field more', '<span class="m-ic"></span><span class="m-l"></span><span class="m-st" translate="no"></span>');
       t.querySelector('.m-l').textContent = label;
@@ -806,6 +867,13 @@ const TabletTerminal = (() => {
       onTap(t, () => { closeSheets(); fn(); });
       fBox.appendChild(t);
     }
+    // The two page entries: they turn the page, nothing else (no setup mode).
+    for (const [ic, label, pg, cls] of [['settings', tr('Settings'), 'settings', 'field nav'], ['service', tr('Service'), 'service', 'setup nav quiet']]) {
+      const t = el('button', 'tui-tile ' + cls, IC[ic] + '<span></span><span class="m-go">›</span>'); t.querySelector('span').textContent = label;
+      t.dataset.tile = 'page:' + pg;
+      onTap(t, () => showMenuPage(pg));
+      fBox.appendChild(t);
+    }
     for (const [ic, label, nav] of TILES_SETUP) {
       const t = el('button', 'tui-tile setup', IC[ic] + '<span></span>'); t.querySelector('span').textContent = label;
       t.dataset.tile = nav;
@@ -819,6 +887,8 @@ const TabletTerminal = (() => {
       onTap(t, () => { closeSheets(); setMode('setup'); pressNav(nav); });
       sBox.appendChild(t);
     }
+    placeTiles();
+    showMenuPage('main');
   }
   function openMenu() { renderMenu(); openSheet(menuSheet); }
 
@@ -2851,7 +2921,7 @@ const TabletHostText = (() => {
 // ===== Tablet UI (Phase 4a): product look, help, support diagnosis ====================
 // BRAND is the one place for the product name, colours, logo and links of the web app (the
 // Android launcher name and icon live in the Android project, see docs/Host-Aenderungen.md).
-// Look only: switched per device under Setup → Info (aow.ui.brand = on | off, default on);
+// Look only: switched per device under Menu → Settings → Info (aow.ui.brand = on | off, default on);
 // off = the AgOpenWeb look. Warning, stop and steer-direction colours never change.
 const BRAND = {
   name: 'LM Steering Solutions',
@@ -2909,7 +2979,7 @@ const TabletBrand = (() => {
   }
   apply();
 
-  // --- Setup → Info: name, version, origin, licence, source --------------------------------
+  // --- Menu → Settings → Info: name, version, origin, licence, source --------------------------------
   const LIC = { apache: ['tui-lic-apache', 'Apache License 2.0'], // LICENSE.md, embedded in index.html
     third: ['tui-lic-third', tr('Third-party components')] }; // fork: index.html, block third-party:begin/end (English, -de German)
   const sheet = el('div', 'tui-sheet tb-sheet', '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>');
@@ -3044,7 +3114,7 @@ const TabletBrand = (() => {
     { id: 'rtk', t: tr('Understand NTRIP and RTK'), steps: [
       tr('The box at the top shows the fix: solid frame = RTK Fix (steering ready), dashed = RTK Float, dotted = DGPS/GPS.'),
       tr('"Age" is the age of the correction in seconds. Above about 5 s the correction is old.'),
-      tr('Corrections come from NTRIP over the internet. The state is under Setup → Network & GPS.'),
+      tr('Corrections come from NTRIP over the internet. The state is under Menu → Settings → Network & GPS.'),
       tr('"Rejected: …": user, password or mount point is wrong. "Connection failed": no internet or wrong address.'),
       tr('Network RTK (VRS) needs your position; it is sent automatically once the receiver has a fix.')] },
     { id: 'band', t: tr('Red band: profile not completely saved'), steps: [
@@ -3058,7 +3128,7 @@ const TabletBrand = (() => {
       tr('Then the steering would be computed for the wrong direction, and the auto sections stay off driving forward. Do not engage steering.'),
       tr('Stop, tap the vehicle on the map ("Reset direction"), then drive forward above 1.5 km/h.'),
       tr('So after switching on, drive forward first if you can. With two antennas (Dual GPS) this does not happen.'),
-      tr('On the test bench, Menu → Bench checklist → "Reverse start" reproduces this case on purpose.')] },
+      tr('On the test bench, Menu → Service → Bench checklist → "Reverse start" reproduces this case on purpose.')] },
     { id: 'actnow', t: tr('Buttons that act at once'), steps: [
       tr('Steer: switches automatic steering on or off. It needs a track and, as set by default, an RTK fix. Stay at the wheel; steering is an aid.'),
       tr('Auto U-turn: switches automatic U-turns at the headland on or off.'),
@@ -3075,11 +3145,11 @@ const TabletBrand = (() => {
       tr('Demo mode: the simulator with a "DEMO" band, only without the kit connected.')] },
     { id: 'demo', t: tr('Demo mode'), steps: [
       tr('Demo only without the kit connected.'),
-      tr('Menu → "Demo mode" starts the simulator; a striped "DEMO" band shows it runs.'),
+      tr('Menu → Service → "Demo mode" starts the simulator; a striped "DEMO" band shows it runs.'),
       tr('If a module is detected, the demo ends and steering and sections are switched off: check them anyway.'),
       tr('"End demo" on the band or in the menu stops it.')] },
     { id: 'usb', t: tr('Back up profiles by USB copy'), warn: tr('Not checked on a real tablet yet.'), steps: [
-      tr('Easier: Setup → Menu → "Back up and restore" makes one file and restores it from the Import folder.'),
+      tr('Easier: Menu → Settings → "Back up and restore" makes one file and restores it from the Import folder.'),
       tr('Close the app. Connect the tablet to a PC by USB and choose "File transfer" on the tablet.'),
       tr('On the PC open: Android/data/at.loibl.lenksystem/files/AgOpenWeb/'),
       tr('Copy the folders Vehicles, Tools, Fields and NtripProfiles to the PC. NtripProfiles contains your NTRIP password.'),
@@ -3254,7 +3324,7 @@ const TabletBrand = (() => {
     const m = $('tui-menu'); if (!m || !m.classList.contains('open')) return;
     const f = m.querySelector('.tui-tiles.tui-f'), s = m.querySelector('.tui-tiles.tui-s');
     const add = (box, key, cls, label, fn) => {
-      if (!box || box.querySelector('[data-tile="' + key + '"]')) return;
+      if (!box || m.querySelector('[data-tile="' + key + '"]')) return; // anywhere in the menu: placed tiles move
       const t = el('button', 'tui-tile ' + cls, ICS[key.slice(3)] + '<span></span>'); t.dataset.tile = key;
       t.querySelector('span').textContent = T(label);
       onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); fn(); });
@@ -3700,7 +3770,7 @@ const TabletBench = (() => {
   const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M8.5 10l1.5 1.5 3-3M8.5 16l1.5 1.5 3-3M15 11h1M15 17h1"/></svg>';
   setInterval(() => {
     const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
-    const s = m.querySelector('.tui-tiles.tui-s'); if (!s || s.querySelector('[data-tile="tbn"]')) return;
+    const s = m.querySelector('.tui-tiles.tui-s'); if (!s || m.querySelector('[data-tile="tbn"]')) return;
     const t = el('button', 'tui-tile setup'); t.dataset.tile = 'tbn'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Bench checklist'));
     onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
@@ -3893,7 +3963,7 @@ const TabletBackup = (() => {
       if (done.err) resBox.appendChild(el('div', 'tp-note bad', done.err));
       else if (done.applied) {
         resBox.appendChild(el('div', 'tp-note', T(tr('Imported: {n} entries.')).replace('{n}', (done.applied.written || []).length)));
-        for (const n of done.applied.needPassword || []) resBox.appendChild(el('div', 'tp-note warn', T(tr('Enter the password for NTRIP profile {n} again (Setup → Network & GPS).')).replace('{n}', n)));
+        for (const n of done.applied.needPassword || []) resBox.appendChild(el('div', 'tp-note warn', T(tr('Enter the password for NTRIP profile {n} again (Menu → Settings → Network & GPS).')).replace('{n}', n)));
         const ab = el('div', 'tb-row');
         const fn = el('span', 'tp-note', T(tr('Saved before the import:')) + ' ' + done.applied.auto); ab.appendChild(fn);
         const dl = el('button', 'tp-btn', T(tr('Download')) + ' ↓');
@@ -3914,7 +3984,7 @@ const TabletBackup = (() => {
   const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16v13H4z"/><path d="M8 7V4h8v3M12 10v6M9 13l3 3 3-3"/></svg>';
   setInterval(() => {
     const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
-    const s = m.querySelector('.tui-tiles.tui-s'); if (!s || s.querySelector('[data-tile="tbk"]')) return;
+    const s = m.querySelector('.tui-tiles.tui-s'); if (!s || m.querySelector('[data-tile="tbk"]')) return;
     const t = el('button', 'tui-tile setup'); t.dataset.tile = 'tbk'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Back up and restore'));
     onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
@@ -4071,7 +4141,7 @@ const TabletDemo = (() => {
   setInterval(() => {
     const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
     const s = m.querySelector('.tui-tiles.tui-s'); if (!s) return;
-    let t = s.querySelector('[data-tile="demo"]');
+    let t = m.querySelector('[data-tile="demo"]');
     if (!t) {
       t = el('button', 'tui-tile setup'); t.dataset.tile = 'demo'; t.innerHTML = IC + '<span></span>';
       onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); if (active) end(''); else start(); });
@@ -4088,7 +4158,7 @@ const TabletDemo = (() => {
 // In the customer version the simulator switch is not in the normal menu: App & Files shows it
 // under "Expert" (collapsed), and the demo mode switches it on as before. Test versions keep the
 // menu entry and the SIM button on the map. Test version = this build was found as a pre-release
-// at the last update check (Setup → Info), or, before any check, the device's update channel is
+// at the last update check (Menu → Settings → Info), or, before any check, the device's update channel is
 // "Test". A running simulator keeps its bar, so it can always be switched off. Display only: the
 // host's simulator, its commands and the demo are unchanged.
 // simaccess:begin
@@ -4124,7 +4194,7 @@ const TabletSimAccess = (() => {
     // Switched off here, the SIM button goes with it: say where it is (moritz.31, point 5: "with a
     // field open the simulator can't be switched on" was this, with or without a field).
     const demo = typeof TabletDemo !== 'undefined' && TabletDemo.active;
-    if (statusBar && wasOn && !simOn && !inMenu && performance.now() - demoAt > 5000) showToast(T(tr('Simulator off. To switch it on again: Menu → App & Files → Expert → Simulator.')), 8000);
+    if (statusBar && wasOn && !simOn && !inMenu && performance.now() - demoAt > 5000) showToast(T(tr('Simulator off. To switch it on again: Menu → Settings → App & Files → Expert → Simulator.')), 8000);
     if (statusBar) wasOn = simOn;
     if (demo) demoAt = performance.now(); // the demo's end has its own message
     if (exp) {
@@ -4160,7 +4230,7 @@ const TabletExplain = (() => {
     ['#bn-skiptoggle', tr('U-turn skip mode: normal, alternative, or skip worked tracks.')],
     ['#bn-flags', tr('Flags: set a marker at your position or on the map, and see the list.')],
     ['#bn-tram', tr('Tram lines: changes how the tram lines are shown.')],
-    ['#tui-menu-btn', tr('Menu: fields and jobs, field tools, help and setup.')],
+    ['#tui-menu-btn', tr('Menu: start work, fields, tracks, work log, help; settings and service one page deeper.')],
     ['#tui-sb-steer', tr('Steering status: on, off, no line, or a fault such as "Not steering".')],
     ['#tui-sb-ready', tr('Ready to steer: green = all set, yellow = check first, red = something steering needs is missing. Tap for the list.')],
     ['#sb-fixbtn', tr('GPS: the fix quality. Solid frame = RTK Fix, dashed = RTK Float, dotted = DGPS/GPS. Tap for details.')],
@@ -4183,6 +4253,9 @@ const TabletExplain = (() => {
     ['[data-tile="tbk"]', tr('Back up and restore: one file with vehicles, tools, fields and NTRIP profiles.')],
     ['[data-tile="eama"]', tr('Fields from eAMA: import field boundaries from an eAMA Shapefile export.')],
     ['[data-tile="work"]', tr('Start work: step by step to field, track, direction and the ready light.')],
+    ['[data-tile="tracks"]', tr('Tracks: choose, make and edit the AB lines and curves of this field.')],
+    ['[data-tile="page:settings"]', tr('Settings: vehicle and tool, steering, network and GPS, display, language, backups.')],
+    ['[data-tile="page:service"]', tr('Service: for the fitter and support – calibration, bench checklist, acceptance record, diagnosis, demo.')],
     ['[data-tile="worklog"]', tr('Work log: one entry per working session with time, area from the guidance computer, tool and your notes.')],
     ['[data-tile="setup1"]', tr('First setup: language, vehicle, tool, NTRIP, kit check and the direction trap.')],
   ];
@@ -4340,7 +4413,7 @@ const TabletWork = (() => {
   const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16l13-8z"/></svg>';
   setInterval(() => {
     const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
-    const f = m.querySelector('.tui-tiles.tui-f'); if (!f || f.querySelector('[data-tile="work"]')) return;
+    const f = m.querySelector('.tui-tiles.tui-f'); if (!f || m.querySelector('[data-tile="work"]')) return;
     const t = el('button', 'tui-tile field'); t.dataset.tile = 'work'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Start work'));
     onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); start(); });
@@ -4474,7 +4547,7 @@ const TabletFirstSetup = (() => {
     const skip = el('button', 'tp-btn quiet', T(tr('Skip setup'))); onTap(skip, close);
     nav.append(prev, next, skip);
     box.appendChild(nav);
-    box.appendChild(el('div', 'tp-note', T(tr('You can open the first setup again any time: Menu → First setup.'))));
+    box.appendChild(el('div', 'tp-note', T(tr('You can open the first setup again any time: Menu → Settings → First setup.'))));
     shB.appendChild(box);
   }
   setInterval(render, 500);
@@ -4511,7 +4584,7 @@ const TabletFirstSetup = (() => {
   const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16M6 16l9-9 3 3-9 9H6z"/><path d="M13 9l3 3"/></svg>';
   setInterval(() => {
     const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
-    const sBox = m.querySelector('.tui-tiles.tui-s'); if (!sBox || sBox.querySelector('[data-tile="setup1"]')) return;
+    const sBox = m.querySelector('.tui-tiles.tui-s'); if (!sBox || m.querySelector('[data-tile="setup1"]')) return;
     const t = el('button', 'tui-tile setup'); t.dataset.tile = 'setup1'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('First setup'));
     onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(0); });
@@ -4616,7 +4689,7 @@ const TabletUpdate = (() => {
     if (!onStart()) { clearInterval(auto); return; }
     if (!appInfo) return;
     clearInterval(auto);
-    check().then(r => { if (r && r.kind === 'newer') showToast(T(tr('A newer version is available: {n} ({d}).', { n: r.latest.name || r.latest.tag_name, d: day(r.latest.published_at) })) + ' ' + T(tr('Setup → Info')), 8000); });
+    check().then(r => { if (r && r.kind === 'newer') showToast(T(tr('A newer version is available: {n} ({d}).', { n: r.latest.name || r.latest.tag_name, d: day(r.latest.published_at) })) + ' ' + T(tr('Menu → Settings → Info')), 8000); });
   }, 1000);
   return { check, box, compare };
 })();
@@ -5063,7 +5136,7 @@ const TabletWorkLog = (() => {
   const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h7M9 16h7M9 8h2"/></svg>';
   setInterval(() => {
     const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
-    const f = m.querySelector('.tui-tiles.tui-f'); if (!f || f.querySelector('[data-tile="worklog"]')) return;
+    const f = m.querySelector('.tui-tiles.tui-f'); if (!f || m.querySelector('[data-tile="worklog"]')) return;
     const t = el('button', 'tui-tile field'); t.dataset.tile = 'worklog'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Work log'));
     onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
@@ -5437,7 +5510,7 @@ const TabletAcceptance = (() => {
   const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v3H9z"/><path d="M6 5h12v16H6z"/><path d="M9 13l2 2 4-4"/></svg>';
   setInterval(() => {
     const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
-    const sBox = m.querySelector('.tui-tiles.tui-s'); if (!sBox || sBox.querySelector('[data-tile="accept"]')) return;
+    const sBox = m.querySelector('.tui-tiles.tui-s'); if (!sBox || m.querySelector('[data-tile="accept"]')) return;
     const t = el('button', 'tui-tile setup'); t.dataset.tile = 'accept'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Acceptance record'));
     onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });

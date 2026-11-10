@@ -89,12 +89,18 @@ if (!(await engage())) { console.error('could not switch steering on (no line?)'
 // --- The layers -------------------------------------------------------------------------------
 await tapSel('#tui-menu-btn'); await sleep(600);
 const tiles = await ev(() => [...document.querySelectorAll('#tui-menu [data-tile]')].map(e => e.dataset.tile).filter(t => !t.startsWith('#') && t !== 'demo'));
+// A tile on a deeper menu page (docs/Menue-Aufteilung.md): its page's entry first, as a finger does.
+async function toTilePage(t) {
+  const pg = await ev(t => { const e = document.querySelector('#tui-menu [data-tile="' + t + '"]'); const d = e && e.closest('.tui-mpage');
+    return d && d.hidden ? d.dataset.mpage : ''; }, t);
+  if (pg) await tapSel(`#tui-menu [data-tile="page:${pg}"]`);
+}
 const dialogs = await ev(() => [...document.querySelectorAll('#dialoghost .dlg-card[id]')].map(e => e.id));
 const flyouts = await ev(() => [...document.querySelectorAll('.bn-flyout[id]')].map(e => e.id));
 await reset();
 const L = [];
 L.push(['menu', async () => tapSel('#tui-menu-btn')]);
-for (const t of tiles) L.push(['menu tile ' + t, async () => { await tapSel('#tui-menu-btn'); return tapSel(`#tui-menu [data-tile="${t}"]`); }]);
+for (const t of tiles) L.push(['menu tile ' + t, async () => { await tapSel('#tui-menu-btn'); await toTilePage(t); return tapSel(`#tui-menu [data-tile="${t}"]`); }]);
 for (const d of dialogs) L.push(['dialog ' + d, async () => ev(d => { openDialog(d); return true; }, d)]);
 for (const f of flyouts) L.push(['fly-out ' + f, async () => ev(f => { document.getElementById(f).classList.add('open'); return true; }, f)]);
 L.push(['ready list', async () => tapSel('#tui-sb-ready')]);

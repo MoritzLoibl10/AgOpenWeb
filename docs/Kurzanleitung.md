@@ -10,10 +10,13 @@ ausschalten, sobald Personen im Fahrbereich sind.
    lesen“; mit „Gelesen und verstanden“ geht es weiter.
 3. Oben in der Statuszeile: links **Menü**, die Fix-Anzeige (z. B. „RTK Fix“), die **Ampel** und
    der Lenkungsstatus.
+4. Das **Menü** zeigt zuerst die Alltagskacheln: Arbeit starten, Schläge/Aufträge, Spuren,
+   Arbeitsprotokoll, Hilfe und **Einstellungen**; darunter die Feldwerkzeuge. Ganz unten steht
+   **Service** für Monteur und Support.
 
 ## 2. Ersteinrichtung
 Sie öffnet sich von selbst, solange noch kein Fahrzeugprofil angelegt ist; sonst über
-**Menü → Ersteinrichtung**. Jeder Schritt lässt sich überspringen.
+**Menü → Einstellungen → Ersteinrichtung**. Jeder Schritt lässt sich überspringen.
 1. **Sprache** wählen.
 2. **Fahrzeugprofil:** über „Fahrzeug & Gerät“ das Profil des Traktors wählen oder mit dem
    Assistenten anlegen. Maße nachmessen; die App füllt nichts vor.
@@ -23,7 +26,7 @@ Sie öffnet sich von selbst, solange noch kein Fahrzeugprofil angelegt ist; sons
 5. **Kit prüfen:** Die Liste zeigt live, ob GPS, Lenkmodul und IMU gehört werden.
 6. **Richtungsfalle** lesen (siehe Abschnitt 5).
 
-**Zwei Antennen (Dual-GPS):** unter **Einrichtung → Fahrzeug & Gerät → Fahrzeug → Reiter „GPS“**
+**Zwei Antennen (Dual-GPS):** unter **Menü → Einstellungen → Fahrzeug & Gerät → Fahrzeug → Reiter „GPS“**
 „Dual-GPS“ einschalten. „Kursversatz (°)“ bleibt 0, wenn der Empfänger den Versatz der Antennen
 selbst verrechnet (z. B. `HEADING OFFSET` beim UM982); sonst trägt ihn der Monteur ein.
 „Dual-Fix automatisch“ mit „Schaltgeschwindigkeit“ ist wahlweise. Kommt der Dual-Kurs an, ist die
@@ -78,7 +81,7 @@ und Arbeitsbreite. Antippen: Tätigkeit, Mittel/Sorte, Menge, Bemerkung eintrage
 - Ob das Protokoll gesetzliche Aufzeichnungspflichten erfüllt, ist nicht geprüft.
 
 ## 8. Update
-**Einrichtung → Info → Aktualisierungen → „Nach Aktualisierungen suchen“** (braucht Internet). Die
+**Menü → Einstellungen → Info → Aktualisierungen → „Nach Aktualisierungen suchen“** (braucht Internet). Die
 App zeigt die neueste veröffentlichte Version mit Link. Installiert wird nichts automatisch: die
 neue Version selbst herunterladen und installieren. Auf Wunsch „Beim Start prüfen“ einschalten.
 - **Kanal:** „Stabil“ (Vorgabe) zeigt nur freigegebene Versionen, „Test“ auch Testversionen; gilt
@@ -89,5 +92,5 @@ neue Version selbst herunterladen und installieren. Auf Wunsch „Beim Start pr�
 
 ---
 LM Steering Solutions basiert auf AgOpenWeb und AgOpenGPS. Lizenz: Apache License 2.0. Fremdkomponenten
-und Namensnennungen: Einrichtung → Info →
+und Namensnennungen: Menü → Einstellungen → Info →
 Drittkomponenten. Kurze Erklärungen zu Knöpfen: Knopf lange drücken.

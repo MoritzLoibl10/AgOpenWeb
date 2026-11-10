@@ -18,6 +18,8 @@
 //   The time per tile, first and second opening, is in the report (kind "time").
 // --cpu: slows the page's main thread by this factor (Emulation.setCPUThrottlingRate), as a weak tablet.
 // --only touch: skip the visual sweep.
+// --strict: exit code 1 when the touch pass finds a tap that did nothing, a page that closed by
+//   itself, an error, or when the page threw (CI). Visual findings and "slow" are listed only.
 // --slow-dict MS: the dictionary (i18n/<lang>.json) arrives MS later than the page, as on a slow
 //   tablet; every fork text drawn before it must still end up translated ("english" findings).
 import { createRequire } from 'node:module';
@@ -26,7 +28,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const url = arg('url', 'http://localhost:5174/'), [W, H] = arg('size', '1024x600').split('x').map(Number);
 const lang = arg('lang', 'de'), out = arg('out', 'ui-sweep.json'), scale = arg('scale', 'glove');
-const touch = process.argv.includes('--touch'), cpu = +arg('cpu', '1'), only = arg('only', ''), slowDict = +arg('slow-dict', '0');
+const touch = process.argv.includes('--touch'), strict = process.argv.includes('--strict'), cpu = +arg('cpu', '1'), only = arg('only', ''), slowDict = +arg('slow-dict', '0');
 const { chromium } = createRequire(import.meta.url)('playwright');
 const root = new URL('..', import.meta.url);
 const en = JSON.parse(readFileSync(new URL('Shared/AgOpenWeb.RemoteServer/wwwroot/i18n/en.json', root), 'utf8'));
@@ -54,6 +56,7 @@ const SURFACES = () => {
   // The fork's sheets are opened from the menu in setup mode; in drive mode they close again.
   const reset = `TabletTerminal.setMode('setup'); wzClose(true); lnCloseAll(); closeDialog(); document.querySelectorAll('.tui-sheet.open, .tp-scrim.open').forEach(e => e.classList.remove('open'));`;
   s.push(['menu', reset + fire('#tui-menu-btn'), '#tui-menu']);
+  for (const pg of ['settings', 'service']) s.push(['menu / ' + pg, reset + fire('#tui-menu-btn') + `tuiPress(document.querySelector('#tui-menu [data-tile="page:${pg}"]'));`, '#tui-menu']);
   s.push(['ready list', reset + `document.getElementById('tui-ready').hidden = false; TabletReady.level;`, '#tui-ready']);
   s.push(['first setup', reset + 'TabletFirstSetup.open(0);', '#tui-setup1']);
   for (let i = 1; i < 6; i++) s.push([`first setup / step ${i + 1}`, reset + `TabletFirstSetup.open(${i});`, '#tui-setup1']);
@@ -134,6 +137,7 @@ const CHECK = ([sel, untranslated]) => {
 
 const browser = await chromium.launch();
 const page = await (await browser.newContext({ viewport: { width: W, height: H }, hasTouch: touch })).newPage();
+const pageErrors = []; page.on('pageerror', e => pageErrors.push(String(e)));
 const cdp = await page.context().newCDPSession(page);
 if (cpu > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpu });
 if (slowDict > 0) await page.route('**/i18n/*.json', async r => { await new Promise(res => setTimeout(res, slowDict)); await r.continue(); });
@@ -161,7 +165,11 @@ if (touch) await touchPass();
 await browser.close();
 writeFileSync(out, JSON.stringify(report, null, 1));
 const by = {}; for (const r of report) by[r.k] = (by[r.k] || 0) + 1;
-console.log(JSON.stringify(by));
+console.log(JSON.stringify(by) + (pageErrors.length ? ' page errors: ' + pageErrors.length : ''));
+const failed = report.filter(r => String(r.mode).startsWith('touch') && ['second-tap', 'flicker', 'error'].includes(r.k));
+for (const r of failed) console.log('FAIL ' + r.surface + ': ' + r.k + ' ' + r.d);
+for (const e of pageErrors) console.log('PAGE ERROR ' + e);
+if (strict && (failed.length || pageErrors.length)) process.exit(1);
 
 // ---- Touch pass (--touch) -------------------------------------------------------------------
 // What a finger does: touchStart, 60 ms, touchEnd at the middle of the element, as on the tablet.
@@ -203,13 +211,31 @@ async function openAndWatch(sel) {
   if (r.ms >= 0) for (let i = 0; i < 30; i++) { await page.waitForTimeout(50); if (!(await page.evaluate(OPENED))) { gone = true; break; } }
   return { ...r, gone };
 }
+// A tile on a deeper menu page: tap that page's entry first, as a finger does.
+async function toTilePage(t) {
+  const pg = await page.evaluate(t => { const e = document.querySelector('#tui-menu [data-tile="' + t + '"]'); const d = e && e.closest('.tui-mpage');
+    return d && d.hidden ? d.dataset.mpage : ''; }, t);
+  if (pg) { await tapEl(`#tui-menu [data-tile="page:${pg}"]`); await page.waitForTimeout(400); }
+}
 async function touchPass() {
   const slow = cpu > 1 ? 1000 * cpu : 1000;
   const add = (surface, k, d) => report.push({ mode: 'touch' + (cpu > 1 ? ' cpu×' + cpu : ''), surface, k, w: '', d });
   await page.evaluate(RESET); await page.waitForTimeout(500);
   await tapEl('#tui-menu-btn'); await page.waitForTimeout(800);
   const tiles = await page.evaluate(() => [...document.querySelectorAll('#tui-menu [data-tile]')].map(e => e.dataset.tile)
-    .filter(t => !t.startsWith('#') && t !== 'demo')); // bottom-bar commands and the demo change state: not here
+    .filter(t => !t.startsWith('#') && !t.startsWith('page:') && t !== 'demo')); // bottom-bar commands and the demo change state: not here
+  // The menu's pages (docs/Menue-Aufteilung.md): each entry turns the page on the first tap.
+  for (const pg of await page.evaluate(() => [...document.querySelectorAll('#tui-menu [data-tile^="page:"]')].map(e => e.dataset.tile))) {
+    await page.evaluate(RESET); await page.waitForTimeout(300);
+    await tapEl('#tui-menu-btn'); await page.waitForTimeout(500);
+    for (let n = 0; n < 2; n++) {
+      await tapEl(`#tui-menu [data-tile="${pg}"]`); await page.waitForTimeout(500);
+      const ok = await page.evaluate(pg => { const d = document.querySelector('#tui-menu .tui-mpage[data-mpage="' + pg.slice(5) + '"]'); return !!d && !d.hidden && !!document.querySelector('#tui-menu.open'); }, pg);
+      if (!ok) add(pg, 'second-tap', `tap ${n + 1}: page not shown`);
+      await tapEl('#tui-menu .tui-mpage:not([hidden]) .tui-mback'); await page.waitForTimeout(400);
+      if (!(await page.evaluate(() => { const d = document.querySelector('#tui-menu .tui-mpage[data-mpage="main"]'); return !!d && !d.hidden; }))) add(pg, 'second-tap', `back ${n + 1}: first page not shown`);
+    }
+  }
   for (const t of tiles) {
     const times = [];
     for (let n = 0; n < 2; n++) {
@@ -217,6 +243,7 @@ async function touchPass() {
       if (!(await tapEl('#tui-menu-btn'))) { add(t, 'error', 'menu button not found'); break; }
       await page.waitForFunction(() => !!document.querySelector('#tui-menu.open'), null, { timeout: 5000 }).catch(() => add(t, 'second-tap', 'menu did not open'));
       await page.waitForTimeout(300);
+      await toTilePage(t);
       const r = await openAndWatch(`#tui-menu [data-tile="${t}"]`);
       if (r.missing) { add(t, 'error', 'tile not found'); break; }
       if (r.ms < 0) add(t, 'second-tap', `tap ${n + 1}: nothing opened`);
