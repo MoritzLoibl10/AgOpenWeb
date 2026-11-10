@@ -12,6 +12,9 @@ Issues gibt, ließ sich aus der Fork-Sitzung nicht prüfen; vor dem Anlegen kurz
 | 3 | Arbeitsbreite: Ersatzwert 6 m im Web-Client | upstream erledigt (#398: #401) |
 | 4 | **Dringend:** Eine Antenne, zuerst rückwärts (Ausfahren aus der Halle) → Richtung verkehrt gelernt, Motor lenkt falsch herum | Entwurf fertig (27.10.2026), einreichen, zuerst |
 | 5 | MinFixQuality vergleicht die NMEA-Zahl: RTK Float (5) besteht die Vorgabe RTK Fix (4) | Entwurf fertig (27.10.2026), einreichen |
+| 6 | Simulator mit Teilbreiten: Bedienseite hängt bei jedem Abdeckungs-Update ~1 s, Totmann (1,5 s) nimmt die Bedienung weg, Lenkung geht aus | Entwurf fertig (30.10.2026), einreichen |
+| 7 | Tastenkürzel F (Schlagmenü) und V (Fahrzeug) wirken nur bei jedem zweiten Druck: der Geister-Druck-Filter (#465) verwirft den zweiten Druck mit pointerId 0 | Entwurf fertig (04.11.2026), einreichen |
+| 8 | NTRIP-Test (Knopf „Test“) schickt keine Position: ein VRS-Caster, der erst mit Position antwortet, ergibt nach 15 s „No answer“ | Entwurf fertig (04.11.2026), einreichen |
 
 ## 1. IMU heading from PGN 253 (#357): AiO v26 sends 0 for "no IMU", which now goes into the heading fusion as a real heading
 
@@ -245,4 +248,155 @@ Fix quality 5, 6, 7 and 8 pass (`5 < 4` is false); `IsValid` stays true and guid
 
 ### Proposal
 Compare by a quality rank instead of the number, e.g. 4 > 5 > 2 = 3 > 1, with 0 and 6–8 as no usable fix, in `GpsFixQualityValidator`; keep the setting's meaning ("at least this good"). Not tested on real hardware.
+~~~~
+
+## 6. Coverage painting stalls the web client for ~1 s per update; the 1.5 s deadman then revokes control and AutoSteer disengages
+
+Stand: **Entwurf zum Einreichen**. Nachgestellt am 30.10.2026 mit upstream `develop` ca44833e
+(unverändert gebaut) und mit dem Fork, gleiches Ergebnis. Befund am Tablet: Simulator, ohne GPS
+und Kit, nach einigen Sekunden Fahrt geht die Lenkung aus und lässt sich nur kurz wieder
+einschalten. Messung: `Tools/sim-soak.mjs` (Fork) bzw. das Skript unten. Der Fork ändert an der
+Lenkung, am Totmann und am Zeichnen der Abdeckung nichts; er schickt `autosteer.off` nur beim
+Beenden des Vorführmodus (im Versuch nicht aktiv).
+
+**Nachgemessen 01.11.2026** (nach dem Upstream-Abgleich bis f8ee280a): upstream hat inzwischen das
+Abdeckungsraster an die größte Textur des Geräts angepasst (3dcd3eb7: bei 4096 px wird aus 5000²
+etwa 3334²) und die Karte auf 30 fps begrenzt (#408); `drawCoverageSk` mit dem Schnappschuss je Bild
+ist unverändert. Hier (SwiftShader meldet 8192 px, das Raster bleibt 5000²): ohne Grenze mit
+Teilbreiten weiter Tick-Lücken 0,8–1,5 s; `sim-soak` 15 min (Schlag 240 × 480 m mit Grenze): größte
+Lücke 0,88 s, keine über 1 s, kein Totmann. Der Entwurf bleibt gültig; auf Tablets mit 4096 px-Grenze
+ist weniger zu erwarten.
+
+**Titel:**
+
+~~~~text
+Web client: coverage painting blocks the main thread ~1 s per update; the 1.5 s control deadman then disengages AutoSteer
+~~~~
+
+**Text:**
+
+~~~~markdown
+### Description
+With sections on, every coverage update makes the web client's main thread busy for roughly 0.8–1.2 s
+(headless Chromium, SwiftShader WebGL). The control heartbeat (`control.presence`, `setInterval` 500 ms
+in app.js) runs on that thread; `ControlAuthority.DeadmanMs` is 1500 ms. When one stall plus the
+heartbeat phase passes 1.5 s, the host revokes control, `AuthorityChangedHandler` toggles AutoSteer
+off and the sections off, and the client reclaims the empty seat a moment later. To the operator:
+steering switches itself off a few seconds after the sections start, and again soon after each
+re-engage.
+
+Likely cause: `drawCoverageSk` draws the new cells into the coverage render target and then takes
+`makeImageSnapshot()` every frame with new cells. The next draw into a surface that has a live
+snapshot copies the whole texture (copy-on-write). A field without a boundary gets coverage bounds
+of 500 m × 500 m at 0.1 m (host log: `Display 5000x5001 @ 0.10m = 25,005,000 pixels / 47.7MB`), so
+each copy moves a ~100 MB RGBA texture. Chromium logs `GPU stall due to ReadPixels`. A CPU profile
+over 15 s (fork build, same rendering code) spends ~98 % in "(program)" (GPU/native); the app's own
+JS is a few hundred ms.
+
+### Steps to reproduce (develop ca44833e)
+1. `AGOPENWEB_DATA=<empty dir> AgOpenWeb.Desktop --headless`; open the UI (simulator is on by default).
+2. `field.new|Repro`, `field.startJob|Repro\tSpraying\t\tJob1`, `sim.speedUp` ×4 (2 km/h),
+   `track.aPlus`, `autosteer.toggle`, `section.master`.
+3. Watch the time between tick frames in the page (`lastTick.t`) and `iHoldControl`.
+
+### Expected
+Ticks every ~100 ms; AutoSteer stays engaged while driving straight in the simulator.
+
+### Actual
+Without sections: no gap above 600 ms in 60 s. With sections: a tick gap of 0.75–1.2 s about
+every second for the whole run. In one of two upstream runs (1920×1200, dpr 1.5), about 14 s after
+engaging:
+`as=false`, `iHoldControl=false`, 0.4 s later control back — AutoSteer off by the deadman. A
+WebSocket client in another process (no rendering) receives ticks without gaps at the same time,
+so the host sends on time; the browser cannot read them.
+
+### Notes
+- On a tablet with a weaker GPU the stalls are longer, so the deadman trips more often.
+- Ideas: no per-frame snapshot of the whole surface (draw the surface's texture directly, or
+  tile the coverage), smaller default bounds without a boundary, or a heartbeat that is not
+  starved by rendering (keeping the deadman's purpose: a frozen UI must still stop the machine).
+~~~~
+
+## 7. The F and V hotkeys work only on every second press (#465 ghost-press filter)
+
+Stand: **Entwurf zum Einreichen**. Nachgestellt am 04.11.2026 mit upstream `develop` 5a2c4251
+(unverändert gebaut): sechsmal F, dazwischen alles geschlossen → Schlagmenü offen, zu, offen, zu,
+offen, zu (Skript im Text). Im Fork derselbe Filter; dort traf er zusätzlich die Menükacheln, die
+die Originalknöpfe per Code drücken (Tablet-Test moritz.31, Punkt 1). Der Fork drückt per Code
+jetzt mit eigener pointerId je Druck (`tuiPress`, `js/tablet.js`) und setzt die beiden
+Tastenkürzel ebenso, ohne `map-input.js` zu ändern.
+
+**Titel:**
+
+~~~~text
+Web client: FieldMenu (F) and VehicleSettings (V) hotkeys act only on every second press
+~~~~
+
+**Text:**
+
+~~~~markdown
+### Description
+The ghost-press filter from #465 (`js/map-input.js`) drops a `pointerdown` from a pointer that is
+already down (`_pointersDown`), and forgets the pointer once it is caught pressing twice. The
+FieldMenu and VehicleSettings hotkeys (`HOTKEY_UI`) press their button with
+`dispatchEvent(new PointerEvent('pointerdown'))`: pointerId 0 and no release. The first press adds
+0 to `_pointersDown`, the second is taken for a ghost and dropped (and 0 forgotten), the third
+passes, and so on. So F opens the field menu, the next F after closing it does nothing.
+
+### Steps to reproduce (develop 5a2c4251)
+1. Start the host, open the UI in a browser, default hotkeys (FieldMenu = F).
+2. Press F: the field menu opens. Close it (`lnCloseAll()` or the X).
+3. Press F again.
+
+### Expected
+The field menu opens on every press.
+
+### Actual
+It opens on the 1st, 3rd, 5th … press only. Measured six times with the menu closed between:
+open, nothing, open, nothing, open, nothing. The same for V (vehicle settings).
+
+### Notes
+- A press made by code needs a `pointerId` no real pointer uses (e.g. a counter from 1e6) or a
+  matching `pointerup`; `new PointerEvent('pointerdown', { bubbles: true, pointerId: ++id })`.
+- Any other code that presses buttons this way (add-ons, tests) runs into the same filter.
+~~~~
+
+## 8. The NTRIP Test button sends no position; a VRS caster that waits for one gives "No answer"
+
+Stand: **Entwurf zum Einreichen**. Befund am Tablet (moritz.31, Windows, APOS): erster Test „no
+answer“, zweiter „Erfolg“. Nachgestellt am 04.11.2026 mit einem Test-Caster (Fork, NTRIP-Code von
+upstream unverändert): Antwort nach 14 s → Erfolg, nach 16 s → „No answer“ nach 15 s; ein Caster,
+der erst nach einer GGA antwortet → immer „No answer“ nach 15 s; ein Caster, der die erste
+Verbindung unbeantwortet lässt → erst „No answer“, dann „Erfolg“ (das Muster vom Tablet). Ob APOS
+die erste Verbindung so behandelt oder auf die Position wartet, ließ sich ohne Zugang nicht klären.
+Der Fork zeigt die Meldung jetzt auf Deutsch und ändert am Verbindungsaufbau nichts (Host).
+
+**Titel:**
+
+~~~~text
+NTRIP Test button: no position in the request, so a VRS caster that waits for one times out with "No answer"
+~~~~
+
+**Text:**
+
+~~~~markdown
+### Description
+`NtripConnectionTester.TestAsync` opens the connection with `gga: () => null`: the NTRIP 2.0 request
+has no `Ntrip-GGA` header and no GGA follows. The real connection (`NtripClientService`) sends the
+position. A network-RTK (VRS) caster that answers only once it knows the rover's position never
+answers the test; after `NtripTimeouts.Header` (15 s) the test reports "No answer from host:port."
+although the same profile connects fine.
+
+### Steps to reproduce
+A caster that replies `ICY 200 OK` only after a GGA (a 20-line Python asyncio server does), then
+the Test button with its address: "Error: No answer from 127.0.0.1:2199." after 15 s. With a
+caster that answers at once: "Success" within 0.3 s.
+
+### Expected
+The test behaves like the connection: with a position when one is known.
+
+### Notes
+- Measured header limit: an answer after 14 s passes, after 16 s it is "No answer" (15 s).
+- Suggestion: pass the client's current GGA (the same source as `NtripClientService.NextGgaSentence`)
+  to the tester; without a fix, say in the result that some casters need a position.
 ~~~~

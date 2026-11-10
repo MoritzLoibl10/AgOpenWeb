@@ -59,7 +59,37 @@ Nur wenn zwei Antennen verbaut sind.
   zeigen Statuszeile und Systemdaten „kein Dual-Kurs“.
 - Antennenabstand, Ausrichtung der Antennenlinie, Firmware der AiO für Dual: *vom Monteur zu ergänzen*.
 
-## 6. Abnahme
+## 6. Tablet einrichten (Windows)
+Nur beschrieben: Die App und der Installer ändern an diesen Einstellungen nichts. Ziel: Tablet
+einschalten, die App startet ohne Anmeldung und ohne Zutun im Vollbild.
+- **App installieren:** Setup ausführen, Häkchen „Beim Windows-Start automatisch starten“ und
+  „Windows-Firewall … freigeben“ an lassen, die Abfrage nach Adminrechten erlauben
+  (`docs/Installer.md`).
+- **Lokales Konto:** ein Windows-Konto nur auf diesem Tablet, ohne Microsoft-Konto. Bei einem
+  vorhandenen Microsoft-Konto: Einstellungen → Konten → Ihre Infos → „Stattdessen mit einem lokalen
+  Konto anmelden“. Das Konto, unter dem die App installiert wird, ist das, unter dem sie automatisch
+  startet.
+- **Automatische Anmeldung:**
+  1. Einstellungen → Konten → Anmeldeoptionen: „Für mehr Sicherheit Windows Hello-Anmeldung für
+     Microsoft-Konten auf diesem Gerät zulassen“ (Windows 10: „Windows Hello-Anmeldung für
+     Microsoft-Konten erforderlich“) ausschalten; sonst fehlt das Häkchen in Schritt 2.
+  2. `Win + R` → `netplwiz` → das Konto wählen → Häkchen „Benutzer müssen Benutzernamen und Kennwort
+     eingeben“ entfernen → OK → Kennwort zweimal eingeben.
+  3. Einstellungen → Konten → Anmeldeoptionen → „Wenn Sie abwesend waren, wann soll Windows eine
+     erneute Anmeldung erfordern?“ → „Nie“.
+  Wer das Tablet in die Hand bekommt, ist damit angemeldet; beim Kunden ansprechen.
+- **Energiesparmodus statt Herunterfahren:** Systemsteuerung → Energieoptionen → „Auswählen, was
+  beim Drücken des Netzschalters geschehen soll“ → „Energie sparen“ (Akku und Netzbetrieb). Die App
+  läuft danach weiter; ob Module und Korrekturdaten nach dem Aufwachen von selbst wieder verbunden
+  sind, beim ersten Einsatz prüfen (Ampel). Solange die App läuft, hält sie Bildschirm und System
+  wach; Energie sparen also bewusst mit dem Netzschalter.
+- **Windows-Updates außerhalb der Arbeitszeit:** Einstellungen → Windows Update → Erweiterte
+  Optionen → „Nutzungszeit“ manuell auf die Arbeitszeit des Kunden stellen (Windows erlaubt
+  höchstens 18 Stunden); in dieser Zeit startet Windows nicht von selbst neu. In der Saison bei
+  Bedarf „Updates aussetzen“. Updates dann bewusst einspielen, wenn das Fahrzeug steht.
+- Hardware des Tablets, Halterung, Stromversorgung im Fahrzeug: *vom Monteur zu ergänzen*.
+
+## 7. Abnahme
 **Einrichtung → Abnahmeprotokoll** mit dem Kunden durchgehen (`docs/Abnahme.md`):
 Kit-Daten, Zeit bis RTK Fix, gerade Strecke, Hangfahrt, Wende, Lenkung aus per Knopf und durch
 Übersteuern am Lenkrad, Richtung bzw. Dual-Kurs. Grenzwerte trägt der Monteur selbst ein; die App

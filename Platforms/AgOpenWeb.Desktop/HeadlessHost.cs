@@ -35,6 +35,7 @@ internal static class HeadlessHost
         var backend = new BackendHost();
         await backend.StartAsync(args);
 
+        AgOpenWeb.RemoteWiring.StartupTrace.Write();
         Console.WriteLine($"[headless] ready (v{AppVersion()}) — browse to http://localhost:5174 (or the LAN IP).");
 
         // Block until SIGINT (Ctrl-C) / SIGTERM (systemd stop) / SIGQUIT via the generic
