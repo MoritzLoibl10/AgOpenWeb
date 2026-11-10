@@ -207,7 +207,7 @@ public partial class MainViewModel
             }
             catch (Exception ex)
             {
-                ReportFailure($"Import failed: {ex.Message}");
+                ReportFailure("Import failed: {error}", ("error", ex.Message));
                 _logger.LogWarning(ex, "[TrackImport] Failed to import tracks from {Field}", fieldName);
             }
         });
@@ -260,7 +260,7 @@ public partial class MainViewModel
 
             if (_contourRecordingPoints.Count < 3)
             {
-                ReportFailure($"Need at least 3 points for contour (have {_contourRecordingPoints.Count})");
+                ReportFailure("Need at least 3 points for contour (have {n})", ("n", _contourRecordingPoints.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)));
                 _contourRecordingPoints.Clear();
                 _lastContourPoint = null;
                 return;
