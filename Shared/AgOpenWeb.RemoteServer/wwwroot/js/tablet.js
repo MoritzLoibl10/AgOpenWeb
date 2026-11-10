@@ -1100,8 +1100,6 @@ const TabletPolish = (() => {
     ['#bn-skiptoggle', tr('Skip mode'), true],
     ['[data-cmd="map.cycleColor"]', tr('Coverage colour'), true],
     ['[data-cmd="tool.resetHeading"]', tr('Reset tool heading'), true],
-    ['#bn-secheadland', tr('HL sections'), false],
-    ['#bn-headland', tr('Headland'), false],
     ['#bn-flags', tr('Flags'), false],
     ['[data-cmd="track.snapLeft"]', tr('Track left'), false],
     ['[data-cmd="track.snapRight"]', tr('Track right'), false],
@@ -2946,6 +2944,7 @@ const TabletBrand = (() => {
     rtk: () => sv(box(10, 20, 96, 40, 'RTK Fix', 'hb f1') + box(112, 20, 96, 40, 'RTK Float', 'hb f2') + box(214, 20, 96, 40, 'DGPS', 'hb f3') +
       '<text class="ht" x="58" y="84" text-anchor="middle">———</text><text class="ht" x="160" y="84" text-anchor="middle">- - -</text><text class="ht" x="262" y="84" text-anchor="middle">· · ·</text>' + box(10, 106, 300, 40, tr('Network & GPS'))),
     band: () => sv('<rect class="hband" x="20" y="60" width="280" height="50" rx="10"/><text class="ht inv" x="160" y="90" text-anchor="middle">' + esc(T(tr('Profile not completely saved'))) + '</text>'),
+    actnow: () => sv(box(40, 50, 110, 60, tr('Steer'), 'hb acc') + box(170, 50, 110, 60, tr('Auto'), 'hb acc')),
     demo: () => sv('<rect class="hband" x="20" y="60" width="280" height="50" rx="10"/><text class="ht inv" x="160" y="90" text-anchor="middle">' + esc(T(tr('DEMO – simulator only, no real outputs'))) + '</text>'),
     board: () => sv(box(60, 30, 200, 110, 'AiO v4') + box(84, 100, 70, 26, 'v4', 'hb acc') + box(166, 100, 70, 26, 'v26', 'hb f3')),
     direction: () => sv('<path class="hl" d="M160 150 L160 20"/><path class="hl" d="M146 40 L160 20 L174 40"/>' +
@@ -2997,6 +2996,20 @@ const TabletBrand = (() => {
       tr('Stop, tap the vehicle on the map ("Reset direction"), then drive forward above 1.5 km/h.'),
       tr('So after switching on, drive forward first if you can. With two antennas (Dual GPS) this does not happen.'),
       tr('On the test bench, Menu → Bench checklist → "Reverse start" reproduces this case on purpose.')] },
+    { id: 'actnow', t: tr('Buttons that act at once'), steps: [
+      tr('Steer: switches automatic steering on or off. It needs a track and, as set by default, an RTK fix. Stay at the wheel; steering is an aid.'),
+      tr('Auto U-turn: switches automatic U-turns at the headland on or off.'),
+      tr('Sections automatic: the sections switch on and off by themselves, by the worked area and the boundary.'),
+      tr('Sections manual: switches the sections on by hand; they stay on until you switch them off.'),
+      tr("ISOBUS: switches the implement's own section control on or off."),
+      tr('Contour: guidance along the path you drove before, instead of along a track.'),
+      tr('Contour lock: keeps the contour you follow, so the guidance does not jump to another path.'),
+      tr('Next track: switches to the next track. Steering and auto U-turn are switched off; switch steering on again yourself.'),
+      tr('Previous track: switches to the previous track.'),
+      tr('Auto track: picks the closest track by itself.'),
+      tr('Section control in the headland on or off.'),
+      tr('Headland on or off. The headland distance and the hydraulic lift follow it.'),
+      tr('Demo mode: the simulator with a "DEMO" band, only without the kit connected.')] },
     { id: 'demo', t: tr('Demo mode'), steps: [
       tr('Demo only without the kit connected.'),
       tr('Menu → "Demo mode" starts the simulator; a striped "DEMO" band shows it runs.'),
@@ -3914,7 +3927,7 @@ const TabletReady = (() => {
     pop.appendChild(el('div', 'rd-n', T(tr('Display only. Steering is switched on with the Steer button as before.'))));
   }
   setInterval(render, 300);
-  return { render, get level() { return Math.min(...checks().map(c => c[0])); } };
+  return { checks, get level() { return Math.min(...checks().map(c => c[0])); } };
 })();
 
 // ===== Demo mode (feature/bedienung-1) ========================================================
@@ -3987,3 +4000,367 @@ const TabletDemo = (() => {
   return { start, end, get active() { return active; } };
 })();
 // demo:end
+
+// ===== Long press = explanation (feature/bedienung-2) =========================================
+// Holding one of the main buttons or tiles for LONG_MS shows a short explanation instead of
+// acting. A short press acts as before, only on release: the press is held back (capture phase)
+// and given to the button when the finger lifts, so a long press never switches anything.
+// Texts describe what the button does today (from the help and the buttons' own titles).
+// Not here, on purpose: buttons that switch steering, sections, U-turn, the headland (hydraulic
+// lift), the track or the demo (it switches the simulator). They act at once on touch, as before;
+// their explanation is in the help ("Buttons that act at once").
+// explain:begin
+const TabletExplain = (() => {
+  const T = k => I18n.text(k);
+  const LONG_MS = 600, MOVE_PX = 12;
+  const TEXT = [
+    ['#bn-tracks', tr('Tracks: manage the AB lines and curves of this field.')],
+    ['#bn-quickab', tr('Quick AB line: makes a track quickly, e.g. "A+" through your position in the direction you drive.')],
+    ['#bn-abmenu', tr('AB line options: more ways to make and edit tracks.')],
+    ['#bn-delcontours', tr('Deletes the recorded contour paths.')],
+    ['#bn-nudge', tr('Shows how far the track is moved sideways. Tap to set it back to 0.')],
+    ['#bn-skipcycle', tr('U-turn skip rows: tap to choose how many rows (0–9) each U-turn skips.')],
+    ['#bn-skiptoggle', tr('U-turn skip mode: normal, alternative, or skip worked tracks.')],
+    ['#bn-flags', tr('Flags: set a marker at your position or on the map, and see the list.')],
+    ['#bn-tram', tr('Tram lines: changes how the tram lines are shown.')],
+    ['#tui-menu-btn', tr('Menu: fields and jobs, field tools, help and setup.')],
+    ['#tui-sb-steer', tr('Steering status: on, off, no line, or a fault such as "Not steering".')],
+    ['#tui-sb-ready', tr('Ready to steer: green = all set, yellow = check first, red = something steering needs is missing. Tap for the list.')],
+    ['#sb-fixbtn', tr('GPS: the fix quality. Solid frame = RTK Fix, dashed = RTK Float, dotted = DGPS/GPS. Tap for details.')],
+    ['#sb-modbtn', tr('Modules: whether the steer, machine and GPS modules are heard. Tap for details.')],
+    ['#sb-fs', tr('Fullscreen on or off.')],
+    ['[data-tile="ln-fieldops"]', tr('Fields and Jobs: open, create or import a field, and start or resume a job.')],
+    ['[data-tile="ln-fieldtools"]', tr('Field Tools: boundary, headland, flags and other tools for the open field.')],
+    ['[data-tile="pages"]', tr('Work pages: choose which displays each page shows.')],
+    ['[data-tile="quick"]', tr('Quick bar: choose the buttons in the quick bar.')],
+    ['[data-tile="ln-vehicle"]', tr('Vehicle & Tool: profiles and dimensions of the vehicle and the tool.')],
+    ['[data-tile="ln-autosteer"]', tr('AutoSteer: settings of the steering and the steer module.')],
+    ['[data-tile="ln-network"]', tr('Network & GPS: modules, GPS receiver and NTRIP.')],
+    ['[data-tile="ln-tools"]', tr('Tools & Wizards: setup assistants and calibration.')],
+    ['[data-tile="ln-screenalerts"]', tr('Screen & Alerts: display and alarm settings.')],
+    ['[data-tile="ln-filemenu"]', tr('App & Files: app settings, folders and files.')],
+    ['[data-tile="language"]', tr('Language of the app.')],
+    ['[data-tile="tb-help"]', tr('Help: short guides for the main tasks.')],
+    ['[data-tile="tb-info"]', tr('Info: version, licence and source of this app.')],
+    ['[data-tile="tb-diag"]', tr('Diagnosis for support: a file with the state of this system to send to support.')],
+    ['[data-tile="tbk"]', tr('Back up and restore: one file with vehicles, tools, fields and NTRIP profiles.')],
+    ['[data-tile="eama"]', tr('Fields from eAMA: import field boundaries from an eAMA Shapefile export.')],
+    ['[data-tile="work"]', tr('Start work: step by step to field, track, direction and the ready light.')],
+    ['[data-tile="setup1"]', tr('First setup: language, vehicle, tool, NTRIP, kit check and the direction trap.')],
+  ];
+  const SEL = TEXT.map(t => t[0]).join(',');
+  const textFor = node => { for (const [s, t] of TEXT) if (node.matches(s)) return t; return null; };
+  const pop = document.createElement('div'); pop.id = 'tui-explain'; pop.hidden = true; pop.setAttribute('translate', 'no');
+  document.body.appendChild(pop);
+  let press = null, swallowClick = false, hideAt = 0;
+
+  function show(node, text) {
+    pop.textContent = T(text);
+    pop.hidden = false;
+    const r = node.getBoundingClientRect(), w = Math.min(360, window.innerWidth - 20);
+    pop.style.maxWidth = w + 'px';
+    const ph = pop.offsetHeight, pw = pop.offsetWidth;
+    let x = Math.min(Math.max(10, r.left + r.width / 2 - pw / 2), window.innerWidth - pw - 10);
+    let y = r.bottom + 8; if (y + ph > window.innerHeight - 10) y = Math.max(10, r.top - ph - 8);
+    pop.style.left = x + 'px'; pop.style.top = y + 'px';
+    hideAt = performance.now() + 8000;
+  }
+  setInterval(() => { if (!pop.hidden && performance.now() > hideAt) pop.hidden = true; }, 500);
+
+  window.addEventListener('pointerdown', e => {
+    if (e.__aowReplay || !e.isTrusted) return; // code that presses a button for the operator acts at once
+    if (!pop.hidden && !pop.contains(e.target)) pop.hidden = true;
+    const node = e.target instanceof Element ? e.target.closest(SEL) : null;
+    if (!node || node.disabled) return;
+    e.stopImmediatePropagation();
+    const init = { bubbles: true, cancelable: true, composed: true, clientX: e.clientX, clientY: e.clientY,
+      pointerId: e.pointerId, pointerType: e.pointerType, isPrimary: e.isPrimary, button: e.button, buttons: e.buttons };
+    press = { node, x: e.clientX, y: e.clientY, init, timer: setTimeout(() => {
+      const t = textFor(node); press = null; swallowClick = true; if (t) show(node, t);
+    }, LONG_MS) };
+  }, true);
+  const release = (e, act) => {
+    if (!press) return;
+    clearTimeout(press.timer);
+    const p = press; press = null;
+    if (!act) return;
+    const ev = new PointerEvent('pointerdown', tuiPressInit(p.init)); ev.__aowReplay = true; // own pointerId (#465 filter)
+    p.node.dispatchEvent(ev);
+  };
+  window.addEventListener('pointerup', e => { if (swallowClick) setTimeout(() => { swallowClick = false; }, 400); release(e, true); }, true);
+  window.addEventListener('pointercancel', e => release(e, false), true);
+  window.addEventListener('pointermove', e => { if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > MOVE_PX) release(e, false); }, true);
+  window.addEventListener('click', e => { if (swallowClick) { swallowClick = false; e.stopImmediatePropagation(); e.preventDefault(); } }, true);
+  window.addEventListener('contextmenu', e => { if (e.target instanceof Element && e.target.closest(SEL)) e.preventDefault(); }, true);
+  return { show };
+})();
+// explain:end
+
+// ===== Start work (feature/bedienung-2) =======================================================
+// One button that walks through: field → track → direction → ready light, then the drive view.
+// Each step only opens what exists (Fields and Jobs, the track manager, the direction card's
+// own two answers) and moves on by itself when the state is there. It finishes only on a green
+// ready light and never switches steering on: that stays the operator's Steer button.
+const TabletWork = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
+  const sheet = el('div', 'tui-sheet tb-sheet tbk-sheet'); sheet.id = 'tui-work'; sheet.setAttribute('translate', 'no');
+  sheet.innerHTML = '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>';
+  const scrim = el('div', 'tp-scrim');
+  const mini = el('div'); mini.id = 'tui-work-mini'; mini.hidden = true; mini.setAttribute('translate', 'no');
+  document.body.append(scrim, sheet, mini);
+  for (const n of [sheet, scrim, mini]) n.addEventListener('pointerdown', e => e.stopPropagation());
+  const shT = sheet.querySelector('.t'), shB = sheet.querySelector('.tui-sh-body');
+  let running = false, last = '';
+  const isOpen = () => sheet.classList.contains('open');
+  const openSheet = () => { if (typeof lnCloseAll === 'function') lnCloseAll(); sheet.classList.add('open'); scrim.classList.add('open'); last = ''; render(); };
+  const park = () => { sheet.classList.remove('open'); scrim.classList.remove('open'); last = ''; render(); }; // keep going in the mini bar
+  const stop = () => { running = false; park(); };
+  onTap(sheet.querySelector('.x'), stop); onTap(scrim, park);
+  function start() { running = true; openSheet(); }
+
+  const dual = () => { const g = config && config.gps; return !!(g && g.isDualGps && statusBar && !statusBar.dualHeadingMissing); };
+  const steps = () => {
+    const op = tick && tick.op, field = !!(scene && scene.hasField);
+    return [
+      { k: 'field', t: tr('Field'), done: field, v: field ? (fieldOps && fieldOps.activeField) || '' : tr('No field') },
+      { k: 'track', t: tr('Track'), done: field && !!(op && op.autoSteerAvail), v: op && op.autoSteerAvail ? (tick.lineLabel || tr('selected')) : tr('No line') },
+      { k: 'dir', t: tr('Direction'), done: dual() || (typeof TabletSteerConfirm !== 'undefined' && TabletSteerConfirm.confirmed),
+        v: dual() ? tr('dual antenna') : (TabletSteerConfirm && TabletSteerConfirm.confirmed) ? tr('confirmed') : tr('not confirmed since the start') },
+      { k: 'ready', t: tr('Ready to steer'), done: TabletReady.level === 2, v: TabletReady.level === 2 ? tr('Ready') : TabletReady.level === 1 ? tr('Check') : tr('Not ready') },
+    ];
+  };
+  function actions(step) {
+    const box = el('div', 'tb-row');
+    const btn = (label, fn, pri) => { const b = el('button', 'tp-btn' + (pri ? ' pri big' : ''), T(label)); onTap(b, fn); box.appendChild(b); return b; };
+    if (step.k === 'field') {
+      btn(tr('Fields and Jobs'), () => { park(); openFieldsAndJobs(); }, true);
+    } else if (step.k === 'track') {
+      btn(tr('Tracks'), () => { park(); openTracksManager(); }, true);
+      btn(tr('Quick AB line'), () => { park(); const q = document.getElementById('bn-quickab'); if (q) tuiPress(q); });
+    } else if (step.k === 'dir') {
+      btn(tr('Yes'), () => { TabletSteerConfirm.confirm(); render(); }, true);
+      btn(tr('No – learn the direction again'), () => {
+        if (!iHoldControl) { showToast(T(tr('Take control to reset the direction'))); return; }
+        transport.send('heading.resetDirection'); showToast(T(tr('Direction reset. Drive forward above 1.5 kph.')));
+      });
+    } else if (step.k === 'ready') {
+      btn(tr('Show the list'), () => { park(); const r = document.getElementById('tui-sb-ready'); if (r) tuiPress(r); }, true);
+    }
+    return box;
+  }
+  const HELP = {
+    field: tr('Open the field you work, or create one: Fields and Jobs.'),
+    track: tr('Choose the track to drive, or make one (e.g. "A+" through your position).'),
+    dir: tr('Does the vehicle face the way it drives? With one antenna the direction is learned from the first travel; backing first, it is learned the wrong way round.'),
+    ready: tr('The ready light must be green. Tap it for what is still missing.'),
+  };
+  function render() {
+    const ss = steps(), cur = ss.findIndex(s => !s.done), allDone = cur < 0;
+    const key = JSON.stringify([running, isOpen(), ss.map(s => [s.done, s.v]), I18n.language, iHoldControl]);
+    if (key === last) return;
+    last = key;
+    // Mini bar: the wizard keeps going while another panel is open.
+    const showMini = running && !isOpen();
+    if (mini.hidden === showMini) mini.hidden = !showMini;
+    if (showMini) {
+      mini.innerHTML = '';
+      const s = allDone ? null : ss[cur];
+      mini.appendChild(el('span', 'wm-t', T(tr('Start work')) + ' · ' + (allDone ? T(tr('Ready')) : (cur + 1) + '/4 ' + T(s.t))));
+      const b = el('button', 'tp-btn pri', T(allDone ? tr('Finish') : tr('Back to the steps'))); onTap(b, () => allDone ? finish() : openSheet()); mini.appendChild(b);
+      const x = el('button', 'tp-btn', '✕'); onTap(x, stop); mini.appendChild(x);
+    }
+    if (!isOpen()) return;
+    shT.textContent = T(tr('Start work'));
+    shB.innerHTML = '';
+    const box = el('div', 'tb-box');
+    ss.forEach((s, i) => {
+      const r = el('div', 'tw-step' + (s.done ? ' done' : i === cur ? ' cur' : ''));
+      r.append(el('span', 'tw-n', s.done ? '✓' : String(i + 1)), el('span', 'tw-t', T(s.t)), el('span', 'tw-v', T(s.v)));
+      box.appendChild(r);
+      if (i === cur) { box.appendChild(el('div', 'tp-note', T(HELP[s.k]))); box.appendChild(actions(s)); }
+    });
+    if (allDone) {
+      box.appendChild(el('div', 'tp-note', T(tr('All set. Switch steering on yourself with the Steer button when you drive.'))));
+      const b = el('button', 'tp-btn pri big', T(tr('To the drive view'))); onTap(b, finish); box.appendChild(b);
+    }
+    if (!iHoldControl) box.appendChild(el('div', 'tp-note warn', T(tr('View only: another screen has control'))));
+    shB.appendChild(box);
+  }
+  function finish() {
+    if (TabletReady.level !== 2) { last = ''; openSheet(); return; } // never past a light that isn't green
+    running = false; park();
+    if (typeof lnCloseAll === 'function') lnCloseAll();
+    if (TabletTerminal.mode !== 'drive') TabletTerminal.setMode('drive');
+  }
+  setInterval(render, 400);
+
+  // --- Menu tile (in the field) ---------------------------------------------------------------
+  const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4v16l13-8z"/></svg>';
+  setInterval(() => {
+    const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
+    const f = m.querySelector('.tui-tiles.tui-f'); if (!f || f.querySelector('[data-tile="work"]')) return;
+    const t = el('button', 'tui-tile field'); t.dataset.tile = 'work'; t.innerHTML = IC + '<span></span>';
+    t.querySelector('span').textContent = T(tr('Start work'));
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); start(); });
+    f.insertBefore(t, f.firstChild);
+  }, 300);
+  return { start };
+})();
+
+// ===== First setup (feature/bedienung-2) ======================================================
+// A guide through the first setup: language, vehicle, tool and working width (the existing
+// profile cards and their wizard, TabletProfiles), NTRIP (Network & GPS), a live kit check
+// (modules, GPS, IMU as the ready light sees them; the bench checklist for more) and the
+// direction trap. It enters no values itself: everything is typed in the existing dialogs, an
+// empty field stays empty. Shown by itself once, while no vehicle profile exists (on the device
+// that has control), skippable at every step, and again any time from the menu ("First setup").
+const TabletFirstSetup = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
+  const KEY = 'aow.firstSetup';
+  const lsOk = () => { try { return localStorage.getItem(KEY); } catch (_) { return 'blocked'; } };
+  const mark = v => { try { localStorage.setItem(KEY, v); } catch (_) { /* ignore */ } };
+  const sheet = el('div', 'tui-sheet tb-sheet tbk-sheet'); sheet.id = 'tui-setup1'; sheet.setAttribute('translate', 'no');
+  sheet.innerHTML = '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>';
+  const scrim = el('div', 'tp-scrim');
+  document.body.append(scrim, sheet);
+  for (const n of [sheet, scrim]) n.addEventListener('pointerdown', e => e.stopPropagation());
+  const shT = sheet.querySelector('.t'), shB = sheet.querySelector('.tui-sh-body');
+  let step = 0, last = '';
+  const isOpen = () => sheet.classList.contains('open');
+  const hide = () => { sheet.classList.remove('open'); scrim.classList.remove('open'); };
+  const close = () => { hide(); mark('done'); };
+  onTap(sheet.querySelector('.x'), close); onTap(scrim, close);
+  function open(at) {
+    if (typeof lnCloseAll === 'function') lnCloseAll();
+    if (typeof at === 'number') step = at;
+    sheet.classList.add('open'); scrim.classList.add('open'); last = ''; render();
+  }
+  // Open an existing panel; the guide waits in the background and comes back with "Back to setup".
+  const goPanel = id => { hide(); TabletTerminal.setMode('setup'); const b = document.getElementById(id); if (b) tuiPress(b); showBack(); };
+  const back = el('button', 'tp-btn pri'); back.id = 'tui-setup1-back'; back.hidden = true; document.body.appendChild(back);
+  back.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); back.hidden = true; open(); });
+  function showBack() { back.textContent = '↩ ' + T(tr('Back to first setup')); back.hidden = false; }
+
+  const STEPS = [
+    { k: 'lang', t: tr('Language') },
+    { k: 'vehicle', t: tr('Vehicle profile') },
+    { k: 'tool', t: tr('Tool and working width') },
+    { k: 'ntrip', t: tr('NTRIP') },
+    { k: 'kit', t: tr('Check the kit') },
+    { k: 'dir', t: tr('The direction trap') },
+  ];
+  const lv = l => l === 2 ? '✓' : l === 1 ? '!' : '✗';
+  function body(s, box) {
+    const note = t => box.appendChild(el('div', 'tp-note', T(t)));
+    const row = el('div', 'tb-row'), btn = (label, fn, pri) => { const b = el('button', 'tp-btn' + (pri ? ' pri' : ''), T(label)); onTap(b, fn); row.appendChild(b); return b; };
+    if (s.k === 'lang') {
+      const cur = appInfo ? appInfo.currentLanguage : '';
+      for (const l of (appInfo ? appInfo.languages : [])) {
+        const b = el('button', 'tp-btn' + (l.code === cur ? ' pri' : ''), l.name);
+        onTap(b, () => transport.send('app.setLanguage|' + l.code)); row.appendChild(b);
+      }
+    } else if (s.k === 'vehicle') {
+      note(tr('Choose or create the profile of your tractor. The profile wizard asks for the dimensions; measure them, nothing is filled in for you.'));
+      const v = config && config.vehicle;
+      if (v) note(T(tr('Wheelbase')) + ': ' + (v.wheelbase > 0 ? fmtUnit(v.wheelbase, 'm') : '—'));
+      btn(tr('Vehicle & Tool'), () => { hide(); TabletProfiles.open(); showBack(); }, true);
+    } else if (s.k === 'tool') {
+      note(tr('Choose or create the profile of your tool. The working width comes from its sections.'));
+      const tw = typeof sectionsWidthM === 'function' ? sectionsWidthM() : 0;
+      note(T(tr('Working width')) + ': ' + (tw > 0 ? fmtUnit(tw, 'm') : '—'));
+      btn(tr('Vehicle & Tool'), () => { hide(); TabletProfiles.open(); showBack(); }, true);
+    } else if (s.k === 'ntrip') {
+      note(tr('For RTK corrections over the internet: an NTRIP profile with caster, port, mount point, user and password from your provider (e.g. APOS).'));
+      const sb = statusBar || {};
+      note(T(tr('NTRIP')) + ': ' + (sb.ntripConnected ? T(tr('connected')) : sb.ntripStatus ? T(sb.ntripStatus) : '—'));
+      btn(tr('Network & GPS'), () => goPanel('ln-network'), true);
+    } else if (s.k === 'kit') {
+      note(tr('Power on the kit and connect it. The list follows live.'));
+      const list = el('div', 'fs1-list');
+      const KIT = [tr('Connection'), tr('GPS'), tr('Steer module'), tr('IMU')]; // line and direction belong to the work, not the kit
+      for (const [l, k, v] of TabletReady.checks().filter(c => KIT.includes(c[1]))) {
+        const r = el('div', 'fs1-r'); r.dataset.lv = String(l);
+        r.append(el('span', 'fs1-i', lv(l)), el('span', 'fs1-k', T(k)), el('span', 'fs1-v', T(v)));
+        list.appendChild(r);
+      }
+      box.appendChild(list);
+      btn(tr('Network & GPS'), () => goPanel('ln-network'));
+      if (typeof TabletBench !== 'undefined') btn(tr('Bench checklist'), () => { hide(); TabletBench.open(); showBack(); });
+    } else if (s.k === 'dir') {
+      for (const t of [
+        tr('With one antenna the system learns which way the vehicle faces from the first travel.'),
+        tr('If you back up first (e.g. out of the shed), it learns the direction the wrong way round: the steering then runs for the wrong direction.'),
+        tr('After every start, drive forward first or confirm the direction on the card ("Does the vehicle face the way it drives?").'),
+        tr('The ready light stays yellow until the direction is confirmed.'),
+      ]) note(t);
+    }
+    if (row.children.length) box.appendChild(row);
+  }
+  function render() {
+    if (!isOpen()) return;
+    const s = STEPS[step];
+    const key = JSON.stringify([step, I18n.language, appInfo && appInfo.currentLanguage, s.k === 'kit' ? TabletReady.checks() : 0,
+      s.k === 'ntrip' ? [statusBar && statusBar.ntripConnected, statusBar && statusBar.ntripStatus] : 0, s.k === 'tool' && typeof sectionsWidthM === 'function' ? sectionsWidthM() : 0,
+      s.k === 'vehicle' && config && config.vehicle ? config.vehicle.wheelbase : 0]);
+    if (key === last) return;
+    last = key;
+    shT.textContent = T(tr('First setup')) + ' · ' + (step + 1) + '/' + STEPS.length;
+    shB.innerHTML = '';
+    const box = el('div', 'tb-box');
+    box.appendChild(el('div', 'tb-lbl', T(s.t)));
+    body(s, box);
+    const nav = el('div', 'tb-row');
+    const prev = el('button', 'tp-btn', '← ' + T(tr('Back'))); prev.disabled = step === 0; onTap(prev, () => { step--; last = ''; render(); });
+    const next = el('button', 'tp-btn pri big', step === STEPS.length - 1 ? T(tr('Finish')) : T(tr('Next')) + ' →');
+    onTap(next, () => { if (step === STEPS.length - 1) { close(); return; } step++; last = ''; render(); });
+    const skip = el('button', 'tp-btn quiet', T(tr('Skip setup'))); onTap(skip, close);
+    nav.append(prev, next, skip);
+    box.appendChild(nav);
+    box.appendChild(el('div', 'tp-note', T(tr('You can open the first setup again any time: Menu → First setup.'))));
+    shB.appendChild(box);
+  }
+  setInterval(render, 500);
+  // The host's untouched vehicle profile: the host saves its active profile "Default" as soon as
+  // anything is saved (leaving the vehicle settings, loading another profile), with the values
+  // it gives every new store. Those values are the host's own (VehicleConfig.cs initializers, the
+  // same in VehicleProfileService.CreateDefaultProfile; Tests/web/firstsetup.test.mjs reads them
+  // from both files), not suggestions: they only tell "nothing set up yet" (moritz.31, point 4).
+  const HOST_DEFAULT_VEHICLE = { type: 0, wheelbase: 2.5, trackWidth: 1.8, antennaHeight: 3.0, antennaPivot: 0, antennaOffset: 0, hitchLength: 1.8, imuPivot: 0, imuHeight: 0, imuOffset: 0 };
+  // null while the client can't tell yet (profile list or active config not received).
+  function noVehicleYet() {
+    if (!profiles || !profiles.vehicles) return null;
+    const v = profiles.vehicles;
+    if (!v.length) return true;
+    if (v.length !== 1 || v[0].name !== 'Default' || profiles.activeVehicle !== 'Default') return false;
+    const c = config && config.vehicle;
+    if (!c) return null;
+    return Object.keys(HOST_DEFAULT_VEHICLE).every(k => Math.abs(+c[k] - HOST_DEFAULT_VEHICLE[k]) < 1e-9);
+  }
+  // First start on this device: once, on the device that has control, not during a demo.
+  const auto = setInterval(() => {
+    if (lsOk()) { clearInterval(auto); return; }
+    // Only while no vehicle is set up: no vehicle profile, or only the host's untouched "Default".
+    const none = noVehicleYet();
+    if (none === false) { clearInterval(auto); return; }
+    if (none !== true) return;
+    if (connState === 'connected' && iHoldControl && appInfo && config && profiles && !(typeof TabletDemo !== 'undefined' && TabletDemo.active)) {
+      clearInterval(auto); mark('shown'); open(0);
+    }
+  }, 1000);
+
+  // --- Menu tile (setup) ----------------------------------------------------------------------
+  const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16M6 16l9-9 3 3-9 9H6z"/><path d="M13 9l3 3"/></svg>';
+  setInterval(() => {
+    const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
+    const sBox = m.querySelector('.tui-tiles.tui-s'); if (!sBox || sBox.querySelector('[data-tile="setup1"]')) return;
+    const t = el('button', 'tui-tile setup'); t.dataset.tile = 'setup1'; t.innerHTML = IC + '<span></span>';
+    t.querySelector('span').textContent = T(tr('First setup'));
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(0); });
+    sBox.insertBefore(t, sBox.firstChild);
+  }, 300);
+  return { open };
+})();
