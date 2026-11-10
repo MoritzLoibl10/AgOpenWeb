@@ -9,12 +9,12 @@
 // whose English key has a different German translation). Needs a running host and Playwright.
 // Exit code 1 when English is left.
 //
-//   node Tools/i18n-late-check.mjs [--url http://localhost:5174] [--delay 4000] [--out i18n-late.json]
+//   node Tools/i18n-late-check.mjs [--url http://localhost:5174] [--delay 8000] [--out i18n-late.json]
 import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
-const url = arg('url', 'http://localhost:5174/'), delay = +arg('delay', '4000'), out = arg('out', 'i18n-late.json');
+const url = arg('url', 'http://localhost:5174/'), delay = +arg('delay', '8000'), out = arg('out', 'i18n-late.json');
 const { chromium } = createRequire(import.meta.url)('playwright');
 const root = new URL('..', import.meta.url);
 const en = JSON.parse(readFileSync(new URL('Shared/AgOpenWeb.RemoteServer/wwwroot/i18n/en.json', root), 'utf8'));

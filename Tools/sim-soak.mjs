@@ -10,7 +10,8 @@
 // starts it again. Results as JSON (--out) and a short summary on stdout.
 //
 //   node Tools/sim-soak.mjs [--minutes 30] [--exe <AgOpenWeb.Desktop>] [--data <dir>] [--out soak.json]
-//                          [--size 1280x800] [--lang de]
+//                          [--size 1280x800] [--lang de] [--strict]
+// --strict: exit code 1 when a step failed, the page threw or the host ended by itself (CI).
 // Needs Playwright (Chromium) and a built Desktop head (default: the Debug build). Kills nothing
 // but the host it started. Port 5174 must be free.
 import { createRequire } from 'node:module';
@@ -255,4 +256,6 @@ writeFileSync(OUT, JSON.stringify(R, null, 1));
 console.log('SUMMARY ' + JSON.stringify(R.summary));
 await browser.close();
 if (host) { host.expectedExit = true; host.kill(); }
+const S = R.summary, bad = S.failedSteps.length || S.pageErrors || S.hostUnexpectedExits;
+if (process.argv.includes('--strict') && bad) { console.log('FAILED: steps ' + S.failedSteps.join(', ') + '; page errors ' + S.pageErrors + '; host exits ' + S.hostUnexpectedExits); process.exit(1); }
 process.exit(0);

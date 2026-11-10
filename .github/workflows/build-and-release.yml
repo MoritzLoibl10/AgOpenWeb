@@ -109,6 +109,44 @@ jobs:
       - name: Run Guidance Algorithm Tests
         run: dotnet run --project TestRunner/TestRunner.csproj
 
+      # Fork (review 10.11.2026, measures 1, 3, 4): the app driven as on the tablet, required
+      # in this job: real touch on every menu tile and settings tab (Tools/ui-sweep.mjs --touch),
+      # steering off with one tap on every layer (Tools/steer-off-check.mjs), no English left
+      # when the dictionary comes late (Tools/i18n-late-check.mjs), and a 5-minute simulator run
+      # (Tools/sim-soak.mjs; it starts its own host, so after the first host is gone). Playwright
+      # comes from the web test step above. Results as an artifact.
+      - name: Build Desktop (for the app checks)
+        run: dotnet build Platforms/AgOpenWeb.Desktop/AgOpenWeb.Desktop.csproj -p:DesktopOnly=true
+
+      # One step: the headless app lives only as long as the step that started it.
+      - name: App checks (touch sweep, steering off on every layer, late dictionary)
+        shell: bash
+        run: |
+          export NODE_PATH="$RUNNER_TEMP/pw/node_modules"
+          mkdir -p "$RUNNER_TEMP/checks"
+          AGOPENWEB_DATA="$RUNNER_TEMP/aow" Platforms/AgOpenWeb.Desktop/bin/Debug/net10.0/AgOpenWeb.Desktop --headless > "$RUNNER_TEMP/checks/app.log" 2>&1 &
+          host=$!
+          for i in $(seq 60); do curl -sf -o /dev/null http://localhost:5174/ && break; sleep 1; done
+          curl -sf -o /dev/null http://localhost:5174/ || { cat "$RUNNER_TEMP/checks/app.log"; exit 1; }
+          rc=0
+          node Tools/ui-sweep.mjs --touch --strict --out "$RUNNER_TEMP/checks/ui-sweep.json" || rc=1
+          node Tools/steer-off-check.mjs --out "$RUNNER_TEMP/checks/steer-off.json" || rc=1
+          node Tools/i18n-late-check.mjs --out "$RUNNER_TEMP/checks/i18n-late.json" || rc=1
+          kill $host; wait $host 2>/dev/null || true
+          exit $rc
+
+      - name: Simulator soak (5 minutes)
+        shell: bash
+        run: NODE_PATH="$RUNNER_TEMP/pw/node_modules" node Tools/sim-soak.mjs --minutes 5 --strict --out "$RUNNER_TEMP/checks/sim-soak.json"
+
+      - name: Upload app check results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-checks
+          path: ${{ runner.temp }}/checks
+          if-no-files-found: ignore
+
   # Work budgets for the GPS cycle and the 100 Hz control tick (Performance/HotPathBudgetTests):
   # a large field driven through the real pipeline, every cycle held to a budget of polygon
   # edges, coverage lookups, offset points and bytes allocated. Counts, not time, so the
