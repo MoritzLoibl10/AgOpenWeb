@@ -28,7 +28,7 @@ function node() {
 function load() {
   const timers = [], sent = [], toasts = [];
   const ctx = {
-    I18n: { text: k => k }, tr: k => k,
+    I18n: { text: k => k }, tr: k => k, tuiLang: () => 'en#0',
     document: { createElement: node, body: node(), documentElement: { toggleAttribute() {} }, getElementById: () => null },
     sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     setInterval: fn => timers.push(fn),

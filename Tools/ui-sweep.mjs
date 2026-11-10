@@ -18,13 +18,15 @@
 //   The time per tile, first and second opening, is in the report (kind "time").
 // --cpu: slows the page's main thread by this factor (Emulation.setCPUThrottlingRate), as a weak tablet.
 // --only touch: skip the visual sweep.
+// --slow-dict MS: the dictionary (i18n/<lang>.json) arrives MS later than the page, as on a slow
+//   tablet; every fork text drawn before it must still end up translated ("english" findings).
 import { createRequire } from 'node:module';
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const arg = (k, d) => { const i = process.argv.indexOf('--' + k); return i > 0 ? process.argv[i + 1] : d; };
 const url = arg('url', 'http://localhost:5174/'), [W, H] = arg('size', '1024x600').split('x').map(Number);
 const lang = arg('lang', 'de'), out = arg('out', 'ui-sweep.json'), scale = arg('scale', 'glove');
-const touch = process.argv.includes('--touch'), cpu = +arg('cpu', '1'), only = arg('only', '');
+const touch = process.argv.includes('--touch'), cpu = +arg('cpu', '1'), only = arg('only', ''), slowDict = +arg('slow-dict', '0');
 const { chromium } = createRequire(import.meta.url)('playwright');
 const root = new URL('..', import.meta.url);
 const en = JSON.parse(readFileSync(new URL('Shared/AgOpenWeb.RemoteServer/wwwroot/i18n/en.json', root), 'utf8'));
@@ -134,11 +136,14 @@ const browser = await chromium.launch();
 const page = await (await browser.newContext({ viewport: { width: W, height: H }, hasTouch: touch })).newPage();
 const cdp = await page.context().newCDPSession(page);
 if (cpu > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: cpu });
+if (slowDict > 0) await page.route('**/i18n/*.json', async r => { await new Promise(res => setTimeout(res, slowDict)); await r.continue(); });
 await page.addInitScript(s => { try { localStorage.setItem('aow.ui.scale', s); } catch (_) { /* ignore */ } }, scale);
 await page.goto(url);
 await page.waitForFunction(() => typeof iHoldControl !== 'undefined' && iHoldControl === true && config && appInfo, null, { timeout: 60000 });
 await page.evaluate(l => transport.send('app.setLanguage|' + l), lang);
 await page.waitForFunction(l => I18n.language === l, lang);
+// With --slow-dict the page has drawn without the dictionary so far: sweep once it is there.
+if (slowDict > 0 && lang !== 'en') await page.waitForFunction(() => I18n.text('Steering') !== 'Steering', null, { timeout: slowDict + 30000 });
 await page.waitForTimeout(1500);
 const report = [];
 for (const day of only === 'touch' ? [] : [true, false]) {

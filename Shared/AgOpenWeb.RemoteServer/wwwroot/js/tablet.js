@@ -18,6 +18,27 @@ function tuiPress(node, init) {
   return node.dispatchEvent(new PointerEvent('pointerdown', tuiPressInit(init)));
 }
 // press:end
+// fork: the page's language as the fork modules must see it (review 10.11.2026, measure 3). The
+// language is set at once, its dictionary arrives a moment later (i18n.js fetches it): a module
+// that drew "de" before the dictionary was there kept its English. tuiLang() changes when the
+// language or what its dictionary says changes; modules put it into their redraw keys instead of
+// I18n.language, and onI18n(fn) runs fn then (event "aow:i18n" on window). Checked every 200 ms
+// against a few words every dictionary has.
+// i18n:begin
+let tuiI18nGen = 0, tuiI18nKey = null;
+const TUI_I18N_PROBES = ['Steering', 'Menu', 'Yes', 'Off', 'Back'];
+function tuiI18nCheck() {
+  if (typeof I18n === 'undefined') return false;
+  const k = I18n.language + '|' + TUI_I18N_PROBES.map(w => I18n.text(w)).join('|');
+  if (k === tuiI18nKey) return false;
+  tuiI18nKey = k; tuiI18nGen++;
+  try { window.dispatchEvent(new CustomEvent('aow:i18n', { detail: { language: I18n.language, gen: tuiI18nGen } })); } catch (_) { /* old engine */ }
+  return true;
+}
+function tuiLang() { tuiI18nCheck(); return (typeof I18n !== 'undefined' ? I18n.language : 'en') + '#' + tuiI18nGen; }
+function onI18n(fn) { window.addEventListener('aow:i18n', () => { try { fn(); } catch (e) { console.error(e); } }); }
+setInterval(tuiI18nCheck, 200);
+// i18n:end
 // A setup sheet (bench checklist, backup) opened from the menu: in the terminal layout the
 // terminal goes to setup mode first, as the setup tiles of TabletUi do.
 function tuiEnterSetup() {
@@ -1779,7 +1800,7 @@ const TabletProfiles = (() => {
     const box = W && W.skBox;
     if (!box) return;
     const id = W.focus || W.skDefault || '';
-    const k = id + '|' + (id === 'sections' ? W.nSec.inp.value + W.widths.map(w => w.inp.value).join(',') : id === 'hitch' || id.startsWith('tool:') ? W.type.cur : '') + '|' + I18n.language;
+    const k = id + '|' + (id === 'sections' ? W.nSec.inp.value + W.widths.map(w => w.inp.value).join(',') : id === 'hitch' || id.startsWith('tool:') ? W.type.cur : '') + '|' + tuiLang();
     if (box.dataset.k === k) return;
     box.dataset.k = k;
     box.innerHTML = sketchSvg(id);
@@ -2512,7 +2533,7 @@ const TabletProfiles = (() => {
     }
     if (!isOpen()) return;
     if (view === 'pick') {
-      const k = JSON.stringify([profiles, sel, msg, lockReason(), config && config.tool && config.tool.totalWidth, config && config.vehicle && config.vehicle.type, I18n.language, !!pending]);
+      const k = JSON.stringify([profiles, sel, msg, lockReason(), config && config.tool && config.tool.totalWidth, config && config.vehicle && config.vehicle.type, tuiLang(), !!pending]);
       if (k !== pickKey) { pickKey = k; renderPick(); }
     } else if (view === 'wiz') syncSaveBtn();
   }, 250);
@@ -2593,7 +2614,7 @@ const TabletProfiles = (() => {
         if (inp) { inp.addEventListener('focus', () => { dlgFocus = k; toolDialogExtras(); }); inp.addEventListener('blur', () => { dlgFocus = ''; toolDialogExtras(); }); }
       }
     }
-    const k = t.type + '|' + dlgFocus + '|' + (config.vehicle ? config.vehicle.hitchLength : '') + '|' + I18n.language;
+    const k = t.type + '|' + dlgFocus + '|' + (config.vehicle ? config.vehicle.hitchLength : '') + '|' + tuiLang();
     if (box.dataset.k !== k) { box.dataset.k = k; box.innerHTML = tuiToolSketch(t.type, dlgFocus, config.vehicle); }
   }
   // Pivot distance (Tool.TrailingToolToPivotLength) as the host uses it: the working line sits
@@ -2626,7 +2647,7 @@ const TabletProfiles = (() => {
     }
     if (!box) return;
     const v = +t.trailingToolToPivotLength || 0;
-    const k = v.toFixed(3) + '|' + I18n.language;
+    const k = v.toFixed(3) + '|' + tuiLang();
     if (box.dataset.k === k) return;
     box.dataset.k = k;
     // Side view, tractor to the right: tool axle (pivot) and the working line.
@@ -3431,7 +3452,7 @@ const TabletSteerConfirm = (() => {
     title.textContent = T(tr('Does the vehicle face the way it drives?'));
     yes.textContent = T(tr('Yes'));
     redo.textContent = T(tr('No – learn the direction again'));
-    lastLang = I18n.language;
+    lastLang = tuiLang();
   }
   function draw() {
     const w = cv.clientWidth, h = cv.clientHeight, dpr = window.devicePixelRatio || 1;
@@ -3471,7 +3492,7 @@ const TabletSteerConfirm = (() => {
     const show = connected && !confirmed && !dual && !!iHoldControl && !!op && (op.autoSteerAvail || op.autoSteer);
     if (box.hidden === show) box.hidden = !show;
     if (!show) return;
-    if (lastLang !== I18n.language || !title.textContent) labels();
+    if (lastLang !== tuiLang() || !title.textContent) labels();
     const moved = trail.length > 3;
     const after = resetAt && now - resetAt < 60000;
     text.textContent = T(after ? tr('Now drive forward above 1.5 km/h, then check again.')
@@ -3663,7 +3684,7 @@ const TabletBench = (() => {
     if (!sheet.classList.contains('open') || !valBox) return;
     const st = STEPS[cur];
     const rows = st.rows(), w = st.warn();
-    const key = JSON.stringify([rows, w, I18n.language]);
+    const key = JSON.stringify([rows, w, tuiLang()]);
     if (key === lastKey) return;
     lastKey = key;
     valBox.innerHTML = '';
@@ -3773,7 +3794,7 @@ const TabletBackup = (() => {
     if (!isOpen()) return;
     st = status();
     const lock = lockReason();
-    const key = JSON.stringify([st.seq, lock, confirm, [...sel], selFile, I18n.language, connState]);
+    const key = JSON.stringify([st.seq, lock, confirm, [...sel], selFile, tuiLang(), connState]);
     if (!force && key === render.key) return;
     render.key = key;
     shT.textContent = T(tr('Back up and restore'));
@@ -3967,7 +3988,7 @@ const TabletReady = (() => {
     const demo = typeof TabletDemo !== 'undefined' && TabletDemo.active;
     const cs = checks(), lvl = Math.min(...cs.map(c => c[0]));
     const word = demo ? tr('Demo') : lvl === 2 ? tr('Ready') : lvl === 1 ? tr('Check') : tr('Not ready');
-    const key = JSON.stringify([demo, cs, pop.hidden, I18n.language, T(word)]); // T(word): the dictionary may arrive after the language
+    const key = JSON.stringify([demo, cs, pop.hidden, tuiLang(), T(word)]); // T(word): the dictionary may arrive after the language
     if (key === last) return;
     last = key;
     pill.dataset.lv = demo ? 'demo' : String(lvl);
@@ -4277,7 +4298,7 @@ const TabletWork = (() => {
   };
   function render() {
     const ss = steps(), cur = ss.findIndex(s => !s.done), allDone = cur < 0;
-    const key = JSON.stringify([running, isOpen(), ss.map(s => [s.done, s.v]), I18n.language, iHoldControl]);
+    const key = JSON.stringify([running, isOpen(), ss.map(s => [s.done, s.v]), tuiLang(), iHoldControl]);
     if (key === last) return;
     last = key;
     // Mini bar: the wizard keeps going while another panel is open.
@@ -4436,7 +4457,7 @@ const TabletFirstSetup = (() => {
   function render() {
     if (!isOpen()) return;
     const s = STEPS[step];
-    const key = JSON.stringify([step, I18n.language, appInfo && appInfo.currentLanguage, s.k === 'kit' ? TabletReady.checks() : 0,
+    const key = JSON.stringify([step, tuiLang(), appInfo && appInfo.currentLanguage, s.k === 'kit' ? TabletReady.checks() : 0,
       s.k === 'ntrip' ? [statusBar && statusBar.ntripConnected, statusBar && statusBar.ntripStatus] : 0, s.k === 'tool' && typeof sectionsWidthM === 'function' ? sectionsWidthM() : 0,
       s.k === 'vehicle' && config && config.vehicle ? config.vehicle.wheelbase : 0]);
     if (key === last) return;
@@ -4889,7 +4910,7 @@ const TabletWorkLog = (() => {
   }
   function render() {
     if (!isOpen()) return;
-    const list = filtered(), key = JSON.stringify([list.map(e => [e.id, e.end, e.hostEnd, e.activity, e.product, e.amount, e.note]), fField, fSeason, fText, edit, msg, storeOk, hostAt, hostErr, I18n.language]);
+    const list = filtered(), key = JSON.stringify([list.map(e => [e.id, e.end, e.hostEnd, e.activity, e.product, e.amount, e.note]), fField, fSeason, fText, edit, msg, storeOk, hostAt, hostErr, tuiLang()]);
     if (key === last) return;
     if (document.activeElement && sheet.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // don't rebuild under the cursor
     last = key;
@@ -5212,7 +5233,7 @@ const TabletAcceptance = (() => {
 
   function render() {
     if (!isOpen()) return;
-    const key = JSON.stringify([cur, step, running, msg, I18n.language, list().length, statusBar && statusBar.fixQuality,
+    const key = JSON.stringify([cur, step, running, msg, tuiLang(), list().length, statusBar && statusBar.fixQuality,
       tick && tick.op && [tick.op.autoSteer, tick.op.moduleNotSteering]]);
     if (key === last) return;
     if (document.activeElement && sheet.contains(document.activeElement) && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;

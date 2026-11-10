@@ -30,6 +30,7 @@ export function run(code, g = {}) {
   const timers = [], sent = [], store = new Map();
   const ctx = {
     I18n: { text: k => k, language: 'en' }, tr: fill,
+    tuiLang: () => 'en#0', // the fork's language signal (block i18n:begin/end), tested by i18n-signal.test.mjs
     document: { createElement: node, body: node(), getElementById: () => null, documentElement: node(), activeElement: null },
     window: { addEventListener() {}, removeEventListener() {} }, navigator: { webdriver: false },
     localStorage: { getItem: k => store.get(k) ?? null, setItem: (k, v) => store.set(k, String(v)), removeItem: k => store.delete(k) },
