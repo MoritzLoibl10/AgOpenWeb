@@ -159,7 +159,7 @@
 .fb-pane { display: flex; flex-direction: column; gap: 8px; }
 .fb-pane[hidden] { display: none; }
 .fb-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.fb-act { flex: 1; min-width: 64px; height: 38px; border-radius: 8px; border: 1px solid var(--border);
+.fb-act { flex: 1; min-width: max-content; padding: 0 10px; height: 44px; border-radius: 8px; border: 1px solid var(--border);
   background: rgba(var(--ov),0.05); color: var(--text-2); font: 600 13px system-ui, sans-serif; cursor: pointer; }
 .fb-act:active { background: rgba(74,144,217,0.35); }
 .fb-act.disabled { opacity: 0.4; pointer-events: none; }

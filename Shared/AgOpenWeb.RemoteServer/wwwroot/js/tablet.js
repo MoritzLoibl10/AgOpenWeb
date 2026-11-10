@@ -6,6 +6,30 @@
 // last, after frame.js, so everything upstream defines is there; the blocks marked
 // `// name:begin` / `// name:end` are what Tests/web cut out and test.
 
+// fork: a press made by code (a menu tile pressing the original button, the long-press replay).
+// Upstream's ghost-press filter (js/map-input.js, #465) drops a pointerdown from a pointer that is
+// already down. Presses made by code have no release, so with the default pointerId 0 every
+// second one was dropped: a tile acted only on the second tap. Each press gets its own pointerId.
+// press:begin
+let tuiPressId = 1000000;
+function tuiPressInit(init) { return { bubbles: true, cancelable: true, ...(init || {}), pointerId: ++tuiPressId }; }
+function tuiPress(node, init) {
+  if (!node) return false;
+  return node.dispatchEvent(new PointerEvent('pointerdown', tuiPressInit(init)));
+}
+// press:end
+// A setup sheet (bench checklist, backup) opened from the menu: in the terminal layout the
+// terminal goes to setup mode first, as the setup tiles of TabletUi do.
+function tuiEnterSetup() {
+  if (typeof TabletTerminal !== 'undefined' && TabletTerminal.layout === 'terminal' && TabletTerminal.mode !== 'setup') TabletTerminal.setMode('setup');
+}
+// Upstream's panel hotkeys (F field menu, V vehicle) press with pointerId 0 as well, so every
+// second key press did nothing (upstream too: docs/Upstream-Issues.md Nr. 7). Same press here.
+if (typeof HOTKEY_UI !== 'undefined') {
+  HOTKEY_UI.FieldMenu = () => tuiPress(document.getElementById('ln-fieldops'));
+  HOTKEY_UI.VehicleSettings = () => tuiPress(document.getElementById('ln-vehicle'));
+}
+
 // ===== Tablet UI (Phase 1) ====================================================
 // Cab-tablet additions, kept in this one section (CSS: <style id="tablet-ui"> in index.html)
 // so the fork rebases cleanly. Per-device settings in localStorage:
@@ -429,9 +453,11 @@ const TabletTerminal = (() => {
     cards = {};
     for (const c of host.querySelectorAll('.tui-card')) cards[c.dataset.m] = { el: c, last: '' };
     const pg = host.querySelector('.tui-pager');
-    pg.querySelector('.pg-n').textContent = tr('Page {n} of {count}', { n: pageIdx + 1, count: pages.length });
+    // "1 / 3" on the pager (the sentence ran under the next button at 1024×600); the sentence and
+    // the cards of the page are in the tooltip.
+    pg.querySelector('.pg-n').textContent = (pageIdx + 1) + ' / ' + pages.length;
     pg.querySelector('.pg-dots').innerHTML = pages.map((_, i) => '<i class="' + (i === pageIdx ? 'on' : '') + '"></i>').join('');
-    pg.querySelector('.pg-t').title = p.map(m => MOD_NAME[m]).join(', ');
+    pg.querySelector('.pg-t').title = tr('Page {n} of {count}', { n: pageIdx + 1, count: pages.length }) + ': ' + p.map(m => MOD_NAME[m]).join(', ');
     pg.querySelector('.pg-prev').disabled = pageIdx === 0;
     pg.querySelector('.pg-next').disabled = pageIdx >= pages.length - 1;
     onTap(pg.querySelector('.pg-prev'), () => goPage(pageIdx - 1));
@@ -595,7 +621,7 @@ const TabletTerminal = (() => {
       const src = document.querySelector(q.src);
       if (!src || b.classList.contains('disabled')) return;
       // Press the original button: its own handler sends its own command, with its own gates.
-      src.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+      tuiPress(src);
     });
   }
   function srcAvailable(q, src) {
@@ -678,7 +704,7 @@ const TabletTerminal = (() => {
     closeSheets();
     s.classList.add('open'); scrim.classList.add('open');
   }
-  const pressNav = id => { const b = $(id); if (b) b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); };
+  const pressNav = id => { const b = $(id); if (b) tuiPress(b); };
   const TILES_FIELD = [ // [icon, label, key (data-tile), action]
     ['field', tr('Fields and Jobs'), 'ln-fieldops', () => pressNav('ln-fieldops')],
     ['fieldtools', tr('Field Tools'), 'ln-fieldtools', () => pressNav('ln-fieldtools')],
@@ -731,7 +757,7 @@ const TabletTerminal = (() => {
       onTap(t, () => {
         const src = document.querySelector(sel);
         if (!src || t.classList.contains('disabled')) return;
-        src.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }));
+        tuiPress(src);
         setTimeout(renderMoreTiles, 150);
       });
       mBox.appendChild(t);
@@ -2498,7 +2524,7 @@ const TabletProfiles = (() => {
       for (const kind of ['vehicle', 'tool']) {
         const t = el('button', 'tui-tile tp-nowt', '<span class="tp-n-ic"></span><span class="tp-n-tx"><span class="l"></span><span class="v" translate="no"></span><span class="s" translate="no"></span></span><span class="tp-n-go"></span>');
         t.dataset.kind = kind;
-        onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(); });
+        onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
         band.appendChild(t);
       }
       box.prepend(band);
@@ -2629,16 +2655,45 @@ const TabletProfiles = (() => {
 // translated for display; addresses and caster replies inside them stay as they are, and
 // anything unknown stays English. Exact texts are keys (the page translates them itself);
 // texts with a variable part are rewritten on the elements that show them.
+// hosttext:begin
 const TabletHostText = (() => {
   [tr('No Fix'), tr('GPS Fix'), tr('DGPS Fix'), tr('RTK Fixed'), tr('RTK Float'), tr('Connected'), tr('Caster sent an invalid reply'),
    tr('Success: Connected to caster and mount point')];
   const FIX = /\b(No Fix|GPS Fix|DGPS Fix|RTK Fixed|RTK Float)\b/g;
+  // The NTRIP outcome behind "Error: …" (Test button), "Connection failed: …" and "Rejected: …"
+  // (host: ConnectionErrors, NtripConnection, NtripResponse, NtripConnectionTester): the sentence
+  // in German, the address, port and caster reply as the host wrote them (moritz.31, point 8).
+  const NT_EXACT = new Set([tr('No network connection.'), tr('The caster sent an invalid reply.'), tr('Caster sent an empty reply'),
+    tr('Mount point not found (the caster sent its source table)'), tr('Mount point not found'),
+    tr('This address answered with a web page, not an NTRIP caster. Check the address and port.'),
+    tr('Authentication failed (check username, password and mount point)'), tr('Authentication failed (check username and password)'),
+    tr('The caster cannot take another connection now: it is busy, starting up, or this login is in use.'),
+    tr('This caster needs your e-mail address as user name.'), tr('The caster closed the connection.'),
+    tr('Caster host is required'), tr('Mount point is required')]);
+  const NT_RX = [
+    [/^No answer from (.+)\.$/s, w => tr('No answer from {w}.', { w })],
+    [/^Cannot reach (.+)\. Is the base station or caster switched on\?$/s, w => tr('Cannot reach {w}. Is the base station or caster switched on?', { w })],
+    [/^Cannot find (.+)\. Check the address and your internet connection\.$/s, w => tr('Cannot find {w}. Check the address and your internet connection.', { w })],
+    [/^Cannot reach (.+) \(no route\)\.$/s, w => tr('Cannot reach {w} (no route).', { w })],
+    [/^(.+) closed the connection without answering\.$/s, w => tr('{w} closed the connection without answering.', { w })],
+    [/^(\S+) closed the connection\.$/s, w => tr('{w} closed the connection.', { w })],
+    [/^Cannot connect to (.+) \((\w+)\)\.$/s, (w, c) => tr('Cannot connect to {w} ({c}).', { w, c })],
+    [/^Caster is busy or unavailable: (.+)$/s, r => tr('Caster is busy or unavailable: {r}', { r })],
+    [/^Caster refused: (.+)$/s, r => tr('Caster refused: {r}', { r })],
+    [/^Access denied: (.+)$/s, r => tr('Access denied: {r}', { r })],
+    [/^Unexpected caster reply: (.+)$/s, r => tr('Unexpected caster reply: {r}', { r })],
+  ];
+  function ntDe(x) {
+    if (NT_EXACT.has(x)) return I18n.text(x);
+    for (const [re, f] of NT_RX) { const m = re.exec(x); if (m) return f(...m.slice(1)); }
+    return x;
+  }
   const PAT = [
     [/^Connecting to (.+)…$/s, x => tr('Connecting to {x}…', { x })],
     [/^Connected to (.+)$/s, x => tr('Connected to {x}', { x })],
-    [/^Connection failed: (.+)$/s, x => tr('Connection failed: {x}', { x })],
-    [/^Rejected: (.+)$/s, x => tr('Rejected: {x}', { x })],
-    [/^Error: (.+)$/s, x => tr('Error: {x}', { x })],
+    [/^Connection failed: (.+)$/s, x => tr('Connection failed: {x}', { x: ntDe(x) })],
+    [/^Rejected: (.+)$/s, x => tr('Rejected: {x}', { x: ntDe(x) })],
+    [/^Error: (.+)$/s, x => tr('Error: {x}', { x: ntDe(x) })],
     [/^(.+) — reconnecting…$/s, x => tr('{x} — reconnecting…', { x })],
   ];
   // Point 11: the host's fixed failure texts (MainViewModel ReportFailure → toast). Texts with a
@@ -2729,10 +2784,11 @@ const TabletHostText = (() => {
     }
   });
   // Where the host's texts are shown: status bar, GPS popup, Network IO, System Data, NTRIP test.
-  const IDS = ['sb-fix', 'sb-gps-d', 'gc-fix', 'nio-ntrip-status', 'nio-ntrip-rx', 'sd-fix', 'nte-teststatus'];
+  const IDS = ['sb-fix', 'sb-gps-d', 'gc-fix', 'nio-ntrip-status', 'nio-ntrip-rx', 'sd-fix', 'nte-teststatus', 'nte-fb-teststatus'];
   for (const id of IDS) { const e = document.getElementById(id); if (e) obs.observe(e, { subtree: true, childList: true, characterData: true }); }
   return { de };
 })();
+// hosttext:end
 
 // ===== Tablet UI (Phase 4a): product look, help, support diagnosis ====================
 // BRAND is the one place for the product name, colours, logo and links of the web app (the
@@ -2890,6 +2946,7 @@ const TabletBrand = (() => {
     rtk: () => sv(box(10, 20, 96, 40, 'RTK Fix', 'hb f1') + box(112, 20, 96, 40, 'RTK Float', 'hb f2') + box(214, 20, 96, 40, 'DGPS', 'hb f3') +
       '<text class="ht" x="58" y="84" text-anchor="middle">———</text><text class="ht" x="160" y="84" text-anchor="middle">- - -</text><text class="ht" x="262" y="84" text-anchor="middle">· · ·</text>' + box(10, 106, 300, 40, tr('Network & GPS'))),
     band: () => sv('<rect class="hband" x="20" y="60" width="280" height="50" rx="10"/><text class="ht inv" x="160" y="90" text-anchor="middle">' + esc(T(tr('Profile not completely saved'))) + '</text>'),
+    demo: () => sv('<rect class="hband" x="20" y="60" width="280" height="50" rx="10"/><text class="ht inv" x="160" y="90" text-anchor="middle">' + esc(T(tr('DEMO – simulator only, no real outputs'))) + '</text>'),
     board: () => sv(box(60, 30, 200, 110, 'AiO v4') + box(84, 100, 70, 26, 'v4', 'hb acc') + box(166, 100, 70, 26, 'v26', 'hb f3')),
     direction: () => sv('<path class="hl" d="M160 150 L160 20"/><path class="hl" d="M146 40 L160 20 L174 40"/>' +
       box(110, 70, 100, 60, tr('Vehicle'), 'hb acc') + box(10, 14, 92, 34, tr('REVERSE'), 'hb f2') + box(218, 14, 92, 34, tr('Tap'), 'hb')),
@@ -2940,6 +2997,11 @@ const TabletBrand = (() => {
       tr('Stop, tap the vehicle on the map ("Reset direction"), then drive forward above 1.5 km/h.'),
       tr('So after switching on, drive forward first if you can. With two antennas (Dual GPS) this does not happen.'),
       tr('On the test bench, Menu → Bench checklist → "Reverse start" reproduces this case on purpose.')] },
+    { id: 'demo', t: tr('Demo mode'), steps: [
+      tr('Demo only without the kit connected.'),
+      tr('Menu → "Demo mode" starts the simulator; a striped "DEMO" band shows it runs.'),
+      tr('If a module is detected, the demo ends: then check steering and sections yourself.'),
+      tr('"End demo" on the band or in the menu stops it.')] },
     { id: 'usb', t: tr('Back up profiles by USB copy'), warn: tr('Not checked on a real tablet yet.'), steps: [
       tr('Easier: Setup → Menu → "Back up and restore" makes one file and restores it from the Import folder.'),
       tr('Close the app. Connect the tablet to a PC by USB and choose "File transfer" on the tablet.'),
@@ -2983,7 +3045,7 @@ const TabletBrand = (() => {
         b.appendChild(Object.assign(el('div', 'tp-lead'), { textContent: T(tr('Short guide')) }));
         const g = el('div', 'tb-topics');
         for (const p of PAGES) {
-          const t = el('button', 'tb-topic', ILL[p.id]() + '<span></span>'); t.querySelector('span').textContent = T(p.t);
+          const t = el('button', 'tb-topic', (ILL[p.id] ? ILL[p.id]() : '') + '<span></span>'); t.querySelector('span').textContent = T(p.t); // a page without a picture must not break the index
           onTap(t, () => openHelp(p.id));
           g.appendChild(t);
         }
@@ -2997,7 +3059,7 @@ const TabletBrand = (() => {
     }
     openSheet(T(pg.t), b => {
       const w = el('div', 'tb-page');
-      w.appendChild(el('div', 'tb-pill', ILL[pg.id]()));
+      if (ILL[pg.id]) w.appendChild(el('div', 'tb-pill', ILL[pg.id]()));
       const col = el('div');
       if (pg.warn) col.appendChild(Object.assign(el('div', 'tp-note warn'), { textContent: T(pg.warn) }));
       const ol = el('ol', 'tb-steps');
@@ -3119,7 +3181,7 @@ const TabletBrand = (() => {
       if (!box || box.querySelector('[data-tile="' + key + '"]')) return;
       const t = el('button', 'tui-tile ' + cls, ICS[key.slice(3)] + '<span></span>'); t.dataset.tile = key;
       t.querySelector('span').textContent = T(label);
-      onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); fn(); });
+      onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); fn(); });
       box.appendChild(t);
     };
     add(f, 'tb-help', 'field', tr('Help'), () => openHelp());
@@ -3477,8 +3539,14 @@ const TabletBench = (() => {
   let cur = 0, valBox = null, warnBox = null, lastKey = '', clearArmed = 0;
   const drafts = {}; // notes typed before OK / Problem, per step, until the sheet is reloaded
 
+  // The checklist belongs to setup mode: opening it switches the terminal layout there, and it
+  // closes when the mode changes again (not merely because it was opened from drive mode, which
+  // closed it within half a second: moritz.31 test, point 3).
+  let openMode = null;
   function open(i) {
+    tuiEnterSetup();
     if (typeof lnCloseAll === 'function') lnCloseAll();
+    openMode = TabletTerminal.mode;
     cur = i == null ? Math.max(0, STEPS.findIndex(s => !res.r[s.id])) : i;
     fill();
     sheet.classList.add('open'); scrim.classList.add('open');
@@ -3550,7 +3618,7 @@ const TabletBench = (() => {
   }
   setInterval(tickVals, 250);
   // Close when leaving setup mode: the checklist is for the bench.
-  setInterval(() => { if (sheet.classList.contains('open') && TabletTerminal.mode !== 'setup') close(); }, 500);
+  setInterval(() => { if (sheet.classList.contains('open') && TabletTerminal.mode !== openMode) close(); }, 500);
 
   // --- Menu tile (setup) --------------------------------------------------------------------
   const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M8.5 10l1.5 1.5 3-3M8.5 16l1.5 1.5 3-3M15 11h1M15 17h1"/></svg>';
@@ -3559,7 +3627,7 @@ const TabletBench = (() => {
     const s = m.querySelector('.tui-tiles.tui-s'); if (!s || s.querySelector('[data-tile="tbn"]')) return;
     const t = el('button', 'tui-tile setup'); t.dataset.tile = 'tbn'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Bench checklist'));
-    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(); });
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
     s.appendChild(t);
   }, 300);
 
@@ -3634,8 +3702,11 @@ const TabletBackup = (() => {
   onTap(sheet.querySelector('.x'), close); onTap(scrim, close);
   const isOpen = () => sheet.classList.contains('open');
 
+  let openMode = null; // closes when the mode changes, as the bench checklist
   function open() {
+    tuiEnterSetup();
     if (typeof lnCloseAll === 'function') lnCloseAll();
+    openMode = TabletTerminal.mode;
     confirm = false;
     sheet.classList.add('open'); scrim.classList.add('open');
     if (connState === 'connected') transport.send('backup.list');
@@ -3761,7 +3832,7 @@ const TabletBackup = (() => {
     if (scrollTo && (pv || (st.op === 'preview' && st.err))) { scrollTo = false; im.scrollIntoView({ block: 'start' }); }
   }
   setInterval(() => render(false), 300);
-  setInterval(() => { if (isOpen() && TabletTerminal.mode !== 'setup') close(); }, 500);
+  setInterval(() => { if (isOpen() && TabletTerminal.mode !== openMode) close(); }, 500);
 
   // --- Menu tile (setup) --------------------------------------------------------------------
   const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16v13H4z"/><path d="M8 7V4h8v3M12 10v6M9 13l3 3 3-3"/></svg>';
@@ -3770,8 +3841,149 @@ const TabletBackup = (() => {
     const s = m.querySelector('.tui-tiles.tui-s'); if (!s || s.querySelector('[data-tile="tbk"]')) return;
     const t = el('button', 'tui-tile setup'); t.dataset.tile = 'tbk'; t.innerHTML = IC + '<span></span>';
     t.querySelector('span').textContent = T(tr('Back up and restore'));
-    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) x.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true })); open(); });
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
     s.appendChild(t);
   }, 300);
   return { open, get state() { return status(); }, get selection() { return [...sel]; } };
 })();
+
+// ===== Ready-to-steer light (feature/bedienung-1) =============================================
+// A traffic light in the status bar, left of the steer chip: display only, from states the
+// client already has; it never sends a command and the steering logic is untouched.
+// Red = something steering needs is missing (no data, no RTK fix as the host reports it, steer
+// module not heard, no line). Yellow = steering works but check first: no IMU heard, or with one
+// antenna the direction not yet confirmed on the card "Does the vehicle face the way it drives?"
+// (TabletSteerConfirm; driving forward can't be told from backing with one antenna, so only the
+// confirmation counts). The module flags are the host's own (gpsOk / autoSteerOk / imuOk); RTK
+// fix = NMEA fix quality 4, the host's default minimum (MinFixQuality, not sent to the client).
+// Tap it for the list. In the demo mode (TabletDemo) it says "Demo" instead.
+const TabletReady = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); fn(e); });
+  const pill = el('button'); pill.id = 'tui-sb-ready'; pill.setAttribute('translate', 'no');
+  pill.innerHTML = '<span class="rd-dot"></span><span class="rd-t"></span>';
+  const pop = el('div'); pop.id = 'tui-ready'; pop.hidden = true; pop.setAttribute('translate', 'no');
+  pop.addEventListener('pointerdown', e => e.stopPropagation());
+  document.body.appendChild(pop);
+  const sb = document.getElementById('statusbar'), steer = document.getElementById('tui-sb-steer');
+  if (sb) sb.insertBefore(pill, steer && steer.parentNode === sb ? steer : document.getElementById('sb-fs'));
+  onTap(pill, () => { pop.hidden = !pop.hidden; last = ''; render(); });
+  let last = '';
+
+  const live = () => connState === 'connected' && !!lastTick && performance.now() - lastTick.t < 2000;
+  // [level, label, detail]: level 2 = ok, 1 = check, 0 = missing.
+  function checks() {
+    const s = statusBar || {}, op = tick && tick.op, gps = config && config.gps;
+    if (!live()) return [[0, tr('Connection'), connState === 'connected' ? tr('No current data from the guidance computer.') : tr('No connection to the guidance computer.')]];
+    const out = [];
+    if (s.gpsSentence === 'SIM') out.push([1, tr('GPS'), tr('Simulator: not a real position')]);
+    else if (s.gpsLost || !s.gpsOk) out.push([0, tr('GPS'), tr('No GPS data')]);
+    else out.push([s.fixQuality === 4 ? 2 : 0, tr('GPS'), (s.fixText || '') + (s.fixQuality === 4 ? '' : ' – ' + T(tr('steering needs RTK Fix')))]);
+    out.push([s.autoSteerOk ? 2 : 0, tr('Steer module'), s.autoSteerOk ? tr('connected') : tr('not heard')]);
+    // An IMU module's hello (imuOk), or the steer module's IMU heading in PGN 253 (AiO boards).
+    const sd = s.systemData, imu = !!s.imuOk || !!(sd && typeof sd.imuHeading === 'number' && Number.isFinite(sd.imuHeading));
+    out.push([imu ? 2 : 1, tr('IMU'), imu ? tr('connected') : tr('not heard')]);
+    out.push([op && scene && scene.hasField && op.autoSteerAvail ? 2 : 0, tr('Line'), op && op.autoSteerAvail ? tr('selected') : tr('No line')]);
+    const dual = !!(gps && gps.isDualGps && !s.dualHeadingMissing);
+    const conf = dual || (typeof TabletSteerConfirm !== 'undefined' && TabletSteerConfirm.confirmed);
+    out.push([conf ? 2 : 1, tr('Direction'), dual ? tr('dual antenna') : conf ? tr('confirmed') : tr('not confirmed since the start')]);
+    return out;
+  }
+  function render() {
+    const demo = typeof TabletDemo !== 'undefined' && TabletDemo.active;
+    const cs = checks(), lvl = Math.min(...cs.map(c => c[0]));
+    const word = demo ? tr('Demo') : lvl === 2 ? tr('Ready') : lvl === 1 ? tr('Check') : tr('Not ready');
+    const key = JSON.stringify([demo, cs, pop.hidden, I18n.language]);
+    if (key === last) return;
+    last = key;
+    pill.dataset.lv = demo ? 'demo' : String(lvl);
+    // A symbol in the light as well as the word (moritz.31, point 6): readable without colour.
+    pill.querySelector('.rd-dot').textContent = demo ? '' : lvl === 2 ? '✓' : lvl === 1 ? '!' : '✕';
+    pill.querySelector('.rd-t').textContent = T(word);
+    pill.title = T(tr('Ready to steer')) + ': ' + T(word);
+    if (pop.hidden) return;
+    pop.innerHTML = '';
+    pop.appendChild(el('div', 'rd-h', T(tr('Ready to steer')) + ': ' + T(word)));
+    if (demo) pop.appendChild(el('div', 'rd-n', T(tr('Demo: simulator only, no real outputs.'))));
+    for (const [l, k, v] of cs) {
+      const r = el('div', 'rd-r'); r.dataset.lv = String(l);
+      r.append(el('span', 'rd-i', l === 2 ? '✓' : l === 1 ? '!' : '✗'), el('span', 'rd-k', T(k)), el('span', 'rd-v', T(v)));
+      pop.appendChild(r);
+    }
+    pop.appendChild(el('div', 'rd-n', T(tr('Display only. Steering is switched on with the Steer button as before.'))));
+  }
+  setInterval(render, 300);
+  return { render, get level() { return Math.min(...checks().map(c => c[0])); } };
+})();
+
+// ===== Demo mode (feature/bedienung-1) ========================================================
+// For showing the app: the existing simulator as the GPS source, with a striped "DEMO" band that
+// can't be missed. It only starts while no module is heard (GPS, steer, machine): with a module
+// on the network a simulated drive could switch real outputs (the host sends steer and section
+// PGNs in the simulator too). If a module turns up while it runs, the demo ends with a warning
+// to check steering and sections. Stops with "End demo"; the flag lives in this tab only.
+// Ending never sends a command that switches steering or sections: the host only has toggles
+// for them (autosteer.toggle, section.master, section.manual), and a toggle sent from a stale
+// tick could switch them on. Explicit off commands would need a host change (docs/).
+// demo:begin
+const TabletDemo = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); fn(e); });
+  const KEY = 'aow.demo';
+  let active = false, simBefore = false; // simBefore: the simulator was already on; ending leaves it on
+  try { const v = sessionStorage.getItem(KEY); active = !!v; simBefore = v === 'sim'; } catch (_) { /* blocked storage: off */ }
+  const band = el('div'); band.id = 'tui-demo'; band.hidden = true; band.setAttribute('translate', 'no');
+  band.addEventListener('pointerdown', e => e.stopPropagation());
+  const bt = el('span', 'dm-t'), stop = el('button', 'tp-btn');
+  band.append(bt, stop);
+  document.body.appendChild(band);
+  onTap(stop, () => end(''));
+  const save = () => { try { if (active) sessionStorage.setItem(KEY, simBefore ? 'sim' : '1'); else sessionStorage.removeItem(KEY); } catch (_) { /* ignore */ } };
+  // Real GPS = data that isn't the simulator's (as TabletSimGuard); steer and machine modules by the host's flags.
+  const modules = () => { const s = statusBar || {}; return !!((s.gpsOk && s.gpsSentence && s.gpsSentence !== 'SIM') || s.autoSteerOk || s.machineOk); };
+  function start() {
+    if (connState !== 'connected' || !statusBar) { showToast(T(tr('No connection to the guidance computer.'))); return; }
+    if (!iHoldControl) { showToast(T(tr('Only the device that has control can start the demo.'))); return; }
+    if (modules()) { showToast(T(tr('A module is connected: the demo only runs without modules, so nothing real is switched.'))); return; }
+    active = true; simBefore = !!statusBar.simEnabled; save();
+    if (!statusBar.simEnabled) transport.send('sim.toggleEnable');
+    if (!statusBar.simPanelVisible) transport.send('sim.togglePanel');
+    render();
+  }
+  function end(why) {
+    if (!active) return;
+    if (statusBar && statusBar.simEnabled && !simBefore) transport.send('sim.toggleEnable');
+    active = false; save();
+    if (why) showToast(T(why), 15000);
+    render();
+  }
+  function render() {
+    // A module heard while the demo runs: end at once and tell the operator to check.
+    if (active && connState === 'connected' && modules()) end(tr('Demo ended – kit detected. Check steering and sections.'));
+    if (band.hidden === active) band.hidden = !active;
+    document.documentElement.toggleAttribute('data-tui-demo', active);
+    if (!active) return;
+    bt.textContent = T(tr('DEMO – simulator only, no real outputs'));
+    stop.textContent = T(tr('End demo'));
+  }
+  setInterval(render, 250);
+
+  // --- Menu tile (setup) --------------------------------------------------------------------
+  const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M10 8l4 2-4 2z" fill="currentColor"/><path d="M8 20h8M12 16v4"/></svg>';
+  setInterval(() => {
+    const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
+    const s = m.querySelector('.tui-tiles.tui-s'); if (!s) return;
+    let t = s.querySelector('[data-tile="demo"]');
+    if (!t) {
+      t = el('button', 'tui-tile setup'); t.dataset.tile = 'demo'; t.innerHTML = IC + '<span></span>';
+      onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); if (active) end(''); else start(); });
+      s.appendChild(t);
+    }
+    const lbl = T(active ? tr('End demo') : tr('Demo mode'));
+    if (t.querySelector('span').textContent !== lbl) t.querySelector('span').textContent = lbl;
+  }, 300);
+  return { start, end, get active() { return active; } };
+})();
+// demo:end
