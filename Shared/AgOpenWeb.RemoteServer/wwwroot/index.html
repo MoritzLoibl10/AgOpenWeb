@@ -380,6 +380,14 @@
 :root[data-tui-demo] body::after { content: ''; position: fixed; inset: 0; z-index: 28; pointer-events: none;
   border: 6px solid transparent; border-image: repeating-linear-gradient(-45deg, var(--tui-warn) 0 14px, #1e1500 14px 28px) 6; }
 /* Long press = explanation (feature/bedienung-2). */
+/* Steering off over every layer (TabletSteerOff): above the loading screen and the keyboard. */
+#tui-steeroff { position: fixed; z-index: 2147483647; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; margin: 0; padding: 4px; box-sizing: border-box; border: 3px solid #fff; border-radius: 10px;
+  background: var(--tui-stop, #e5484d); color: var(--tui-stop-ink, #fff); font: 900 16px/1.1 system-ui, sans-serif; text-align: center;
+  box-shadow: 0 0 0 3px var(--tui-stop, #e5484d), 0 6px 18px rgba(0,0,0,0.5); touch-action: none; -webkit-user-select: none; user-select: none; }
+#tui-steeroff[hidden] { display: none; }
+#tui-steeroff .so-ic { font-size: 26px; line-height: 1; }
+#tui-steeroff.done { background: #4b5563; box-shadow: 0 0 0 3px #4b5563, 0 6px 18px rgba(0,0,0,0.5); }
 #tui-explain { position: fixed; z-index: 40; padding: 10px 14px; border-radius: 12px; background: var(--tui-card, #fff); color: var(--tui-ink, #111);
   border: 2px solid var(--tui-acc); box-shadow: 0 8px 24px rgba(0,0,0,0.3); font: 600 var(--tui-fs-lbl)/1.4 system-ui, sans-serif; pointer-events: auto; }
 #tui-explain[hidden] { display: none; }

@@ -59,6 +59,8 @@ verkehrt herum, und die Lenkung arbeitet dann für die falsche Richtung.
 
 ## 6. Lenkung ausschalten
 - Knopf **„Lenken“** noch einmal antippen. Er wirkt sofort beim Antippen.
+- Ist gerade das Menü, eine Einstellungsseite oder ein Fenster offen, liegt an derselben Stelle ein
+  roter Knopf **„Lenkung aus“** über allem: ein Tipp dort schaltet aus, sonst nichts.
 - Je nach Einrichtung schaltet auch Drehen am Lenkrad oder ein Schalter am Kit die Lenkung aus.
 - Zeigt die Statuszeile rot **„Lenkt nicht“**, ist die Lenkung an, aber der Motor lenkt nicht:
   selbst lenken und das Lenkmodul prüfen.
