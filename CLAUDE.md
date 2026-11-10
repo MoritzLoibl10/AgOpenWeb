@@ -11,6 +11,12 @@ This file provides guidance to Claude Code when working with this repository.
 - **[Docs/WEB_CLIENT.md](Docs/WEB_CLIENT.md)** - The web client's files (`js/`, `css/`), how the scripts load, adding a panel
 - **[Docs/FIELD_FILE_FORMATS.md](Docs/FIELD_FILE_FORMATS.md)** - `field.geojson`, sidecars and coverage tiles: the spec for tools that read or write fields
 
+## Fork: report format (owner's rule, every session)
+
+The final report of a task is exactly ONE fenced code block: one opening ``` line, all report
+lines, one closing ``` line. No line outside the block, no inline code per line, no progress
+messages while working.
+
 ## Project Overview
 
 AgOpenWeb3 is a cross-platform agricultural GPS guidance application: a .NET guidance host

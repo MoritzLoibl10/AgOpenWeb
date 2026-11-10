@@ -26,12 +26,12 @@ Host ausliefert) und keine Datei auswählen (kein Datei-Dialog im WebView).
 | Farbige Symbole der linken Leiste und der Einrichtungsdialoge | upstream-Bilder `icons/*.png` | ja, aber viele; bleiben vorerst |
 
 ### Vorschlag Umsetzung
-- **Eine Stelle:** `const BRAND = { name: '[PRODUKTNAME]', claim, farbwelt, quelle: 'https://github.com/MoritzLoibl10/AgOpenWeb', … }`
+- **Eine Stelle:** `const BRAND = { name: 'LM Steering Solutions', claim, farbwelt, quelle: 'https://github.com/MoritzLoibl10/AgOpenWeb', … }`
   am Anfang eines neuen tablet-ui-Abschnitts in `app.js`. Daraus: Titel, Info-Seite, Logo,
   Farben, Hilfe-Links.
   - Das PWA-Manifest ist eine eigene Datei. Vorschlag: zur Laufzeit aus `BRAND` erzeugen
     (`<link rel="manifest">` auf eine erzeugte Adresse), sonst wäre es eine zweite Stelle.
-- **Umschaltbar:** Einrichtung → Info: „Darstellung: [PRODUKTNAME] / AgOpenWeb“, pro Gerät
+- **Umschaltbar:** Einrichtung → Info: „Darstellung: LM Steering Solutions / AgOpenWeb“, pro Gerät
   gemerkt. Aus = heutiges Aussehen.
 - **Android/iOS-App-Name und -Symbol** liegen außerhalb von wwwroot. Sie brauchen deine
   Freigabe als Ausnahme (nur `Label`, `ApplicationTitle`, Symboldateien; Paket-ID und Signierung
@@ -133,7 +133,7 @@ Vorschlag Host-Änderung (nur Vorschlag, nicht gebaut):
 | Punkt | Entscheidung | Umsetzung |
 |---|---|---|
 | Farbwelt | B Pflaume | Akzentfarben aus `BRAND` (`app.js`, Abschnitt „Phase 4a“), als `<style id="tb-style">` für `html[data-tb]` |
-| Name | Platzhalter „[PRODUKTNAME]“ | `BRAND.name`; Titel, Info-Seite, PWA-Manifest daraus |
+| Name | „LM Steering Solutions“ (vorher Platzhalter) | `BRAND.name`; Titel, Info-Seite, PWA-Manifest daraus |
 | Lizenz | Info-Seite nennt die Lizenz und liefert den Text mit | heute: Apache 2.0, Text aus `LICENSE.md` als `<script type="text/plain">` in `index.html`, offline lesbar unter Einrichtung → Info (bis zur Klärung bei upstream waren es zwei Texte) |
 | App-Name, App-Symbol, Paket-ID (Android) | Ausnahme genehmigt, Paket-ID `at.loibl.lenksystem` | `Brand.cs`, `MainActivity.cs`, `BackendService.cs`, `.csproj`, `Resources/drawable/icon.xml`; Signierung und Secrets unverändert |
 | PWA-Manifest | aus `BRAND` erzeugen | `<link rel="manifest">` zeigt bei eingeschalteter Darstellung auf ein erzeugtes Manifest (data:-Adresse), Symbole `icons/brand-192.png` / `brand-512.png` |

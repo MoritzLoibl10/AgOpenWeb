@@ -171,9 +171,11 @@ public class CodePathContinuityTests
         var hub = Path.Combine(RepoRoot(), "Shared", "AgOpenWeb.RemoteServer", "WebSocketHub.cs");
         var lines = File.ReadAllLines(hub);
         var textUses = lines.Select((l, i) => (l, i)).Where(x => x.l.Contains("WebSocketMessageType.Text")).ToList();
-        Assert.That(textUses.Select(x => x.l.Trim()), Is.EqualTo(new[]
+        // The one use, with the line after it: a text message goes whole to the command path
+        // (fork, host-paket D: pieces joined by CommandAssembler, run once at the message's end).
+        Assert.That(textUses.Select(x => x.l.Trim() + " " + lines[x.i + 1].Trim()), Is.EqualTo(new[]
         {
-            "if (res.MessageType == WebSocketMessageType.Text && res.Count > 0)",
+            "if (res.MessageType == WebSocketMessageType.Text && cmd.Add(buf.AsSpan(0, res.Count), res.EndOfMessage) is { } msg)",
         }), "WebSocketHub uses WebSocketMessageType.Text somewhere new. Host → client goes out " +
             "as binary frames encoded by WireCodec (add a DTO in Contracts.cs, encode it in " +
             "WireCodec.cs, decode it in transport.js); client → host is the one id|arg text frame.");
@@ -283,6 +285,8 @@ public class CodePathContinuityTests
         "gps_data_log.csv", "logs.txt", "system_info.txt", "ntrip_rtcm.txt",
         "ntrip_session.txt", // what the NTRIP connection did and why it failed (Plans/Completed/NTRIP_MAIN_FALLBACK_PLAN.md, Phase 2)
         "contact.txt", // the reporter's email, maintainers only (#407 follow-up)
+        "worklog.json", // fork (host-paket B): the work log, WorkLog/worklog.json in the data root
+        "agopenweb-startup.log", // fork (feature/installer, start time): StartupTrace, in %TEMP%, not the data root
         "appsettings_error.txt", "configuration_error.txt", "field_error.txt", "job_error.txt",
         "logs_error.txt", "save_error.txt", "screenshot_error.txt", "state_error.txt",
         "turn_path_error.txt", "gps_data_log_error.txt",

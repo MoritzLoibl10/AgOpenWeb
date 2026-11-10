@@ -25,11 +25,11 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 | 4 | Zwei Geräte speichern gleichzeitig: Befehle mischen sich, fremdes Profil wird beschrieben | hoch | ja | Issue-Text an upstream |
 | 5 | NTRIP-Passwörter und AgShare-Schlüssel gehen an jeden Browser im LAN | hoch | ja | Issue-Text an upstream |
 | 6 | Lizenz uneinheitlich (`LICENSE.md`, README, Dateiköpfe, Info-Seite) | hoch | nein | erledigt: upstream Apache 2.0 (#360, #363), der Fork folgt (sync/upstream-2) |
-| 7 | Host liest Befehle in 1-KB-Stücken (WebSocket) | mittel | ja | offen |
+| 7 | Host liest Befehle in 1-KB-Stücken (WebSocket) | mittel | ja | erledigt in feature/host-paket (`docs/Host-Aenderungen.md` 17) |
 | 8 | Unvollständiges Speichern lässt sich nicht verwerfen | mittel | nein | erledigt (sync/upstream: Verwerfen in Sackgassen) |
 | 9 | Speicher-Merker gilt pro Adresse, nicht pro Lenkrechner | mittel | ja | offen |
 | 10 | Deutsch als Standard überstimmt eine bewusste Sprachwahl | mittel | ja | offen |
-| 11 | Host-Meldungen als Toast bleiben englisch, auch sicherheitsnahe | mittel | nein | erledigt (tablet-feedback-1): 62 feste Host-Meldungen deutsch; Meldungen mit Werten bleiben englisch |
+| 11 | Host-Meldungen als Toast bleiben englisch, auch sicherheitsnahe | mittel | nein | Fix-Texte im Client; Texte mit Werten als Schlüssel vom Host (feature/host-paket, `docs/Host-Aenderungen.md` 17) |
 | 12 | Bei Verbindungsverlust frieren upstream-Anzeigen ein (Fix-Chip, Lichtleiste, Rollanzeige) | mittel | nein | erledigt (tablet-feedback-1): Fix „Keine Daten“, Lichtleiste, Rollanzeige und Ein/Aus-Zustände ausgeblendet, solange keine Daten kommen |
 | 13 | `GpsService.CurrentData` veraltet nie, wenn das GPS verstummt | mittel | ja | offen |
 | 14 | Neues Feld ohne GPS bekommt den Ursprung New York | mittel | ja | offen |
@@ -53,7 +53,7 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 | 32 | IMU-Kurs aus PGN 253: eine 0 der AiO-Firmware gilt als gültiger Kurs (upstream #357) | hoch | ja | Firmware geprüft: v4 (auch v4.5) sendet 9999, v26 sendet 0; Anzeige im Einrichtungsmodus; Issue-Text an upstream |
 | 33 | Eine Antenne: rückwärts zuerst gefahren → Richtung verkehrt gelernt; Lenkung rechnet falsch herum, Simulator pendelt | hoch | ja | Fork: Hinweis im Simulator, Richtungskarte vor dem ersten Lenken, Hinweis „Echtes GPS aktiv“, Hilfe; Issue-Text an upstream (dringend) (fix/simulator-richtung) |
 | 34 | Gezogene Geräte: Drehpunkt-Abstand wirkt umgekehrt zur Beschriftung; TBT: „Arbeitsmitte“ wirkt nicht | mittel | ja | Fork: Anzeige an das Host-Verhalten angepasst (`docs/Host-Aenderungen.md` Punkt 7); Host offen |
-| 35 | Vorführmodus: Host hat keine eindeutigen Aus-Befehle für Lenkung und Teilbreiten | hoch | ja | Fork: Vorführung sendet beim Beenden keine Umschaltbefehle mehr, nur Warnung (feature/bedienung-1); Host offen |
+| 35 | Vorführmodus: Host hat keine eindeutigen Aus-Befehle für Lenkung und Teilbreiten | hoch | ja | Erledigt in feature/host-paket: `autosteer.off`, `sections.alloff` (`docs/Host-Aenderungen.md` 14) |
 
 ---
 
@@ -313,6 +313,8 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
   Photino (Apache 2.0) und SkiaSharp (MIT) fehlen; das ist auch upstream so.
 - **Vorschlag:** `COPYING` und `SOURCE.txt` ins Windows-ZIP; eine Seite „Drittkomponenten“ in
   der Info-Seite.
+- **Stand (Auslieferung):** Seite „Drittkomponenten“ unter Einrichtung → Info; offene Punkte in
+  `docs/Drittkomponenten.md`.
 - **Nachtrag (eAMA-Import):** Mitgeliefert wird jetzt auch das BEV-Gitter `at_bev_AT_GIS_GRID.tif`
   (BEV, CC BY 4.0, aus dem GitHub-Spiegel von PROJ-data). Die Namensnennung gehört auf die Seite
   „Drittkomponenten“; Herkunft und SHA-256 stehen in `docs/Geodaten-Herkunft.md`.
@@ -412,12 +414,12 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 - **Vorschlag:** Upstream-Schlüssel wiederverwenden; „Current: “ als upstream-PR.
 - **Host-Änderung nötig:** nein
 
-### 29. Name auf Desktop/iOS und in den Artefakten weiter „AgOpenWeb“
+### 29. Name auf iOS und in den Artefakten weiter „AgOpenWeb“
 - **Priorität:** niedrig
 - **Dateien:** `Platforms/AgOpenWeb.Desktop/Launcher/LauncherEntry.cs` 38, `Platforms/AgOpenWeb.iOS/Info.plist`, Workflow-Artefakte `agopenweb-*.zip/.apk`.
-- **Beschreibung:** Nur Android ist umbenannt (genehmigte Ausnahme). Die Weboberfläche zeigt
-  überall den Markennamen. Der Produktname ist noch der Platzhalter `[PRODUKTNAME]`; der
-  Workflow warnt jetzt.
+- **Beschreibung:** Produktname „LM Steering Solutions“ (Oktober 2026): Weboberfläche, Android, Desktop-Fenster
+  und Windows-Installer zeigen ihn. iOS und die Dateinamen der Artefakte heißen weiter AgOpenWeb.
+- **Stand:** Desktop erledigt (Ausnahme im Auftrag).
 - **Vorschlag:** Nach der Namenswahl entscheiden, ob Desktop und Artefakte mitziehen (neue
   Ausnahme).
 - **Host-Änderung nötig:** ja (Desktop-Kopf)
@@ -499,3 +501,4 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
 - **Im Fork (nur `wwwroot`):** Beim Beenden geht kein Umschaltbefehl mehr raus. Wird ein Modul erkannt, endet die Vorführung mit der Meldung „Vorführung beendet – Kit erkannt. Lenkung und Teilbreiten prüfen.“ Test: `Tests/web/demo.test.mjs`.
 - **Vorschlag Host:** eindeutige Befehle `autosteer.off` (Lenkung aus, wenn an; sonst nichts) und `section.allOff` (Automatik und Handbetrieb aus); die Vorführung würde dann nur diese senden.
 - **Host-Änderung nötig:** ja
+- **Stand:** erledigt in `feature/host-paket` (`docs/Host-Aenderungen.md` Abschnitt 14); die Vorführung sendet beim Beenden nur diese Befehle.

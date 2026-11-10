@@ -124,6 +124,10 @@ Uhrzeit 24 h (13:15), Fläche in ha. IP-Adressen und Versionen behalten ihre Pun
 | NTRIP status | NTRIP-Status | Connected to … → Verbunden mit …, Connecting to … → Verbinde mit …, Connection failed: … → Verbindung fehlgeschlagen: …, Rejected: … → Abgelehnt: …, … — reconnecting… → … – neuer Versuch…; Adressen und Caster-Antworten bleiben wörtlich, unbekannte Texte englisch |
 | Correction age | Korrekturalter | |
 | Mount point | Mountpoint | |
+| Main service / fallback service (NTRIP) | Hauptdienst / Fallback-Dienst | upstream-Abgleich Nov. 2026 |
+| Aerial imagery | Luftbild | |
+| Water pivot | Kreisberegner | Spuren als Kreise um den Beregner |
+| Web card | Web-Karte | Erweiterungsseite in einer Karte |
 | Caster | Caster | |
 | Broadcast corrections | Korrekturen an alle senden | |
 | Sentence (NMEA) | Datensatz | ⚠ Alternative „NMEA-Satz“ |
@@ -144,7 +148,7 @@ Uhrzeit 24 h (13:15), Fläche in ha. IP-Adressen und Versionen behalten ihre Pun
 | Terminal layout / Classic layout | Terminal-Ansicht / Klassische Ansicht | |
 | On / Off | Ein / Aus | auf Knöpfen in Großbuchstaben |
 | Language | Sprache | Kachel zeigt „Sprache · Language“ |
-| Look (branding) | Darstellung | Einrichtung → Info: [PRODUKTNAME] / AgOpenWeb |
+| Look (branding) | Darstellung | Einrichtung → Info: LM Steering Solutions / AgOpenWeb |
 | Short guide | Kurzanleitung | Menü → Hilfe |
 | Diagnosis for support | Diagnose für Support | Datei für den Support (Fehlerbericht mit Zusammenfassung) |
 | Licence text | Lizenztext | |

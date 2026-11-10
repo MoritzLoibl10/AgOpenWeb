@@ -49,6 +49,10 @@ public sealed class RemoteServerHost
     public void ShowToast(string message)
         => _ = _ws?.BroadcastAsync(WireCodec.EncodeToast(message));
 
+    /// <summary>Fork (host-paket D, #11): the same with a translation key and its values as JSON.</summary>
+    public void ShowToast(string message, string key, string argsJson)
+        => _ = _ws?.BroadcastAsync(WireCodec.EncodeToast(message, key, argsJson));
+
     /// <summary>Broadcast a module hardware message (PGN 221, #110).</summary>
     public void ShowHardwareMessage(string text, int seconds, bool warning)
         => _ = _ws?.BroadcastAsync(WireCodec.EncodeHardwareMessage(text, seconds, warning));
@@ -335,15 +339,19 @@ public sealed class RemoteServerHost
         // stale copy in the WebView's HTTP cache silently runs old code after an app update.
         // Force a fresh fetch every load.
         var noStore = new[] { ("Cache-Control", "no-store") };
-        server.MapGet("/", () => SimpleWebServer.Response.Text(ReadAsset("index.html"), "text/html", noStore));
-        server.MapGet("/transport.js", () => SimpleWebServer.Response.Text(ReadAsset("transport.js"), "text/javascript", noStore));
+        // Fork (start time): the page, its scripts and styles go out with an ETag (hash of this
+        // build's file) and "no-cache": the web view asks on every load, so an update is never
+        // stale, but an unchanged file comes back as 304 and the browser reuses the code it
+        // compiled last time (the scripts, the CanvasKit wasm) instead of compiling it again.
+        server.MapGet("/", () => Validated("index.html", "text/html"));
+        server.MapGet("/transport.js", () => Validated("transport.js", "text/javascript"));
         // The client's scripts and styles, one file per feature (Docs/WEB_CLIENT.md).
         // Filename-only (no path traversal); unknown names 404.
         server.MapGetPrefix("/js/", file => ClientFile(file, ".js", "js.", "text/javascript", noStore));
         server.MapGetPrefix("/css/", file => ClientFile(file, ".css", "css.", "text/css", noStore));
         // Translations (#143): the loader, and one JSON file per language (en.json is the
         // source Weblate reads). Filename-only (no path traversal); unknown names 404.
-        server.MapGet("/i18n.js", () => SimpleWebServer.Response.Text(ReadAsset("i18n.js"), "text/javascript", noStore));
+        server.MapGet("/i18n.js", () => Validated("i18n.js", "text/javascript"));
         server.MapGetPrefix("/i18n/", file =>
         {
             if (file.Contains('/') || file.Contains('\\') || file.Contains("..")
@@ -357,8 +365,8 @@ public sealed class RemoteServerHost
 
         // CanvasKit (WASM Skia) — bundled locally for offline in-cab use. The wasm is
         // served as application/wasm so the browser can streaming-compile it.
-        server.MapGet("/vendor/canvaskit.js", () => SimpleWebServer.Response.Text(ReadAsset("vendor.canvaskit.js"), "text/javascript"));
-        server.MapGet("/vendor/canvaskit.wasm", () => SimpleWebServer.Response.Bytes(ReadAssetBytes("vendor.canvaskit.wasm"), "application/wasm"));
+        server.MapGet("/vendor/canvaskit.js", () => Validated("vendor.canvaskit.js", "text/javascript"));
+        server.MapGet("/vendor/canvaskit.wasm", () => Validated("vendor.canvaskit.wasm", "application/wasm", binary: true));
 
         // Right-nav toolbar icons (PNG/GIF), embedded from wwwroot/icons. Filename-only
         // (no path traversal); unknown names 404.
@@ -367,7 +375,7 @@ public sealed class RemoteServerHost
             if (file.Contains('/') || file.Contains('\\') || file.Contains(".."))
                 return SimpleWebServer.Response.NotFound;
             var mime = file.EndsWith(".gif", StringComparison.OrdinalIgnoreCase) ? "image/gif" : "image/png";
-            try { return SimpleWebServer.Response.Bytes(ReadAssetBytes("icons." + file), mime); }
+            try { return Validated("icons." + file, mime, binary: true); } // fork: ETag, see "/"
             catch (FileNotFoundException) { return SimpleWebServer.Response.NotFound; }
         });
 
@@ -378,7 +386,7 @@ public sealed class RemoteServerHost
         {
             if (file.Contains('/') || file.Contains('\\') || file.Contains(".."))
                 return SimpleWebServer.Response.NotFound;
-            try { return SimpleWebServer.Response.Bytes(ReadAssetBytes("sounds." + file), "audio/wav"); }
+            try { return Validated("sounds." + file, "audio/wav", binary: true); } // fork: ETag, see "/"
             catch (FileNotFoundException) { return SimpleWebServer.Response.NotFound; }
         });
 
@@ -453,6 +461,30 @@ public sealed class RemoteServerHost
             if (!File.Exists(path)) return SimpleWebServer.Response.NotFound;
             return SimpleWebServer.Response.Bytes(File.ReadAllBytes(path), "application/zip",
                 new[] { ("Content-Disposition", "attachment"), ("Cache-Control", "no-store") });
+        });
+
+        // Work log on the guidance computer (fork, feature/host-paket): GET reads it, like
+        // everything else observers see; POST merges the tablet's copy in (only the screen
+        // holding control, like any change) and replies with the merged log.
+        server.MapGet("/worklog", () => SimpleWebServer.Response.Text(
+            AgOpenWeb.Services.WorkLog.WorkLogStore.Read(AgOpenWeb.Services.AppDataRoot.Documents).ToJsonString(),
+            "application/json", new[] { ("Cache-Control", "no-store") }));
+        server.MapPost("/worklog", AgOpenWeb.Services.WorkLog.WorkLogStore.MaxBytes, req =>
+        {
+            if (!req.Query.TryGetValue("client", out var c) || !Guid.TryParse(c, out var client) || !authority.HoldsFresh(client))
+                return Task.FromResult(new SimpleWebServer.Response(403, "text/plain", "view only"u8.ToArray()));
+            var doc = AgOpenWeb.Services.WorkLog.WorkLogStore.Parse(req.Body);
+            if (doc is null) return Task.FromResult(new SimpleWebServer.Response(400, "text/plain", "not a work log"u8.ToArray()));
+            try
+            {
+                var merged = AgOpenWeb.Services.WorkLog.WorkLogStore.MergeInto(AgOpenWeb.Services.AppDataRoot.Documents, doc);
+                return Task.FromResult(SimpleWebServer.Response.Text(merged.ToJsonString(), "application/json",
+                    new[] { ("Cache-Control", "no-store") }));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return Task.FromResult(new SimpleWebServer.Response(503, "text/plain", "busy"u8.ToArray()));
+            }
         });
 
         await server.StartAsync().ConfigureAwait(false);
@@ -560,13 +592,26 @@ public sealed class RemoteServerHost
         catch { return null; }
     }
 
+    // Fork (start time): embedded assets read once, with their ETag (SHA-256 of the bytes).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (byte[] Body, string ETag)> ValidatedAssets = new();
+
+    private static SimpleWebServer.Response Validated(string name, string mime, bool binary = false)
+    {
+        var (body, etag) = ValidatedAssets.GetOrAdd(name, n =>
+        {
+            var bytes = binary ? ReadAssetBytes(n) : System.Text.Encoding.UTF8.GetBytes(ReadAsset(n));
+            return (bytes, "\"" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes))[..32] + "\"");
+        });
+        return SimpleWebServer.Response.Bytes(body, mime, new[] { ("Cache-Control", "no-cache"), ("ETag", etag) });
+    }
+
     private static SimpleWebServer.Response ClientFile(string file, string ext, string folder,
         string contentType, (string, string)[] headers)
     {
         if (file.Contains('/') || file.Contains('\\') || file.Contains("..")
             || !file.EndsWith(ext, StringComparison.OrdinalIgnoreCase))
             return SimpleWebServer.Response.NotFound;
-        try { return SimpleWebServer.Response.Text(ReadAsset(folder + file), contentType, headers); }
+        try { return Validated(folder + file, contentType); } // fork: ETag, see "/"
         catch (FileNotFoundException) { return SimpleWebServer.Response.NotFound; }
     }
 

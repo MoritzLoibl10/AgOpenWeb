@@ -67,15 +67,17 @@ public sealed class WebSocketHub
             foreach (var frame in SeedProvider?.Invoke() ?? Array.Empty<byte[]>())
                 await SendToAsync(client, frame, ct).ConfigureAwait(false);
 
-            var buf = new byte[1024];
+            var buf = new byte[4096];
+            var cmd = new CommandAssembler();
             while (socket.State == WebSocketState.Open && !ct.IsCancellationRequested)
             {
                 var res = await socket.ReceiveAsync(buf, ct).ConfigureAwait(false);
                 if (res.MessageType == WebSocketMessageType.Close) break;
-                // Commands are short single-frame text messages: "id" or "id|arg".
-                if (res.MessageType == WebSocketMessageType.Text && res.Count > 0)
+                // Commands are text messages: "id" or "id|arg". A long one arrives in pieces; it is
+                // run once, whole, at its end (fork, host-paket D, #7), never piece by piece.
+                if (res.MessageType == WebSocketMessageType.Text
+                    && cmd.Add(buf.AsSpan(0, res.Count), res.EndOfMessage) is { } msg)
                 {
-                    var msg = System.Text.Encoding.UTF8.GetString(buf, 0, res.Count);
                     try { Dispatch(id, msg); } catch { /* a bad command must not drop the client */ }
                 }
             }

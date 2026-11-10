@@ -191,7 +191,7 @@ public partial class MainViewModel
             }
             catch (Exception ex)
             {
-                ReportFailure($"Save failed: {ex.Message}");
+                ReportFailure("Save failed: {error}", ("error", ex.Message));
             }
         });
 
@@ -255,7 +255,7 @@ public partial class MainViewModel
                 var points = Services.GeoJson.GeoJsonFieldService.LoadRecordedPath(activeField.DirectoryPath, fileName);
                 if (points == null || points.Count < 2)
                 {
-                    ReportFailure($"Failed to load: {fileName}");
+                    ReportFailure("Failed to load: {file}", ("file", fileName));
                     return;
                 }
                 Services.GeoJson.GeoJsonFieldService.SaveCurrentRecordedPath(activeField.DirectoryPath, points);
@@ -265,7 +265,7 @@ public partial class MainViewModel
             }
             catch (Exception ex)
             {
-                ReportFailure($"Failed to load: {ex.Message}");
+                ReportFailure("Failed to load: {error}", ("error", ex.Message));
             }
         });
 

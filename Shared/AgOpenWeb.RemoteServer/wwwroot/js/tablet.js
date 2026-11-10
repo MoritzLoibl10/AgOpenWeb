@@ -39,12 +39,27 @@ if (typeof HOTKEY_UI !== 'undefined') {
 // functions wrapped below keep their behaviour; the wrappers only recolour/restyle the map
 // in the sun theme and shift the canvas light bar under a taller status bar.
 let tuiBarDy = null; // canvas light bar offset, set by the Phase 2 layout (null = Phase 1 offset)
+// scale-default:begin
+// First start on a device: the glove size, for gloved hands in the cab. A device that used the
+// app before (it has its own keys in the browser storage) keeps the size it had, normal; a stored
+// choice always wins. Automated browsers (the CI layout checks) keep normal and store nothing.
+function tuiInitialScale(stored, keys, automated) {
+  if (stored !== null && stored !== undefined) return { scale: stored, store: false };
+  if (automated) return { scale: 'normal', store: false };
+  const used = keys.some(k => typeof k === 'string' && (k.startsWith('aow.') || k.startsWith('agopenweb.')));
+  return { scale: used ? 'normal' : 'glove', store: true };
+}
+// scale-default:end
 const TabletUi = (() => {
   const SCALES = ['normal', 'large', 'glove'];
   const DY = { normal: 0, large: 10, glove: 18 }; // = --tui-dy in index.html
   const lsGet = (k, d) => { try { const v = window.localStorage.getItem(k); return v === null ? d : v; } catch (_) { return d; } };
   const lsSet = (k, v) => { try { window.localStorage.setItem(k, v); } catch (_) { /* private / blocked */ } };
-  let scale = SCALES.includes(lsGet('aow.ui.scale', 'normal')) ? lsGet('aow.ui.scale', 'normal') : 'normal';
+  const first = tuiInitialScale(lsGet('aow.ui.scale', null),
+    (() => { try { return Array.from({ length: window.localStorage.length }, (_, i) => window.localStorage.key(i)); } catch (_) { return []; } })(),
+    !!navigator.webdriver);
+  if (first.store) lsSet('aow.ui.scale', first.scale);
+  let scale = SCALES.includes(first.scale) ? first.scale : 'normal';
   let sun = lsGet('aow.ui.sun', '0') === '1';
   const root = document.documentElement;
 
@@ -2759,8 +2774,32 @@ const TabletHostText = (() => {
     tr('Select a boundary to delete'),
     tr('Steer module stopped steering (kickout, switch or button)'),
     tr('This track has no ends to adjust'),
-    tr('Too few points to smooth (need at least 5)')]);
-  showToast = (orig => function (msg, ms) { return orig(typeof msg === 'string' && tuiIsDe() && TOASTS.has(msg) ? I18n.text(msg) : msg, ms); })(showToast);
+    tr('Too few points to smooth (need at least 5)'),
+    // Why the app turned the steering off (upstream #442) and other plain host toasts.
+    tr('AutoSteer disengaged - outside boundary'), tr('AutoSteer disengaged - RTK fix lost'),
+    tr('AutoSteer disengaged'), tr('Guidance stopped: track changed'), tr('No aerial imagery: no internet?')]);
+  // Toasts with a value inside: the value stays as the host wrote it.
+  const TOAST_RX = [
+    [/^AutoSteer disengaged - above maximum steering speed \((.+)\)$/s, s => tr('AutoSteer disengaged - above maximum steering speed ({s})', { s })],
+    [/^AutoSteer disengaged - below minimum steering speed \((.+)\)$/s, s => tr('AutoSteer disengaged - below minimum steering speed ({s})', { s })],
+  ];
+  const toastDe = msg => { for (const [rx, f] of TOAST_RX) { const m = rx.exec(msg); if (m) return I18n.text(f(m[1])); } return msg; };
+  // Host-paket D (#11): the host's failure texts with values, sent as a key with {name}
+  // placeholders and the values; the sentence is translated, the values (error messages, file
+  // names, counts) stay as they are. Listed so the extractor finds the keys.
+  const KEYED = new Set([
+    tr('Error creating boundary: {error}'), tr('Error deleting field: {error}'), tr('Error creating field: {error}'),
+    tr('Error importing KML: {error}'), tr('Error importing ISO-XML: {error}'), tr('Debug dump failed: {error}'),
+    tr('Bug report capture failed: {error}'), tr('Bug report saved (no details): {path}'), tr('Bug report failed: {error}'),
+    tr('Need at least 3 points for a curve (have {n})'), tr('Need at least 2 points (have {n})'), tr('Save failed: {error}'),
+    tr('Failed to load: {file}'), tr('Failed to load: {error}'), tr('Import failed: {error}'),
+    tr('Need at least 3 points for contour (have {n})'), tr('Failed to open field: {error}'), tr('Error parsing KML: {error}'),
+    tr('Error importing KML boundary: {error}')]);
+  function keyed(msg, key, args) {
+    let a = null; try { a = JSON.parse(args); } catch (_) { /* no values */ }
+    return KEYED.has(key) && a && typeof a === 'object' ? tr(key, a) : msg;
+  }
+  showToast = (orig => function (msg, ms) { return orig(typeof msg !== 'string' || !tuiIsDe() ? msg : TOASTS.has(msg) ? I18n.text(msg) : toastDe(msg), ms); })(showToast);
   function de(s) {
     if (!tuiIsDe()) return s;
     for (const [re, f] of PAT) { const m = s.match(re); if (m) return f(m[1]); }
@@ -2784,7 +2823,7 @@ const TabletHostText = (() => {
   // Where the host's texts are shown: status bar, GPS popup, Network IO, System Data, NTRIP test.
   const IDS = ['sb-fix', 'sb-gps-d', 'gc-fix', 'nio-ntrip-status', 'nio-ntrip-rx', 'sd-fix', 'nte-teststatus', 'nte-fb-teststatus'];
   for (const id of IDS) { const e = document.getElementById(id); if (e) obs.observe(e, { subtree: true, childList: true, characterData: true }); }
-  return { de };
+  return { de, keyed };
 })();
 // hosttext:end
 
@@ -2794,7 +2833,7 @@ const TabletHostText = (() => {
 // Look only: switched per device under Setup → Info (aow.ui.brand = on | off, default on);
 // off = the AgOpenWeb look. Warning, stop and steer-direction colours never change.
 const BRAND = {
-  name: '[PRODUKTNAME]',
+  name: 'LM Steering Solutions',
   claim: tr('GPS steering aid for tractor and tool'),
   // Colour world B "Pflaume": accent per theme, [colour, text on it, r,g,b]
   night: ['#c995e0', '#1d0b26', '201,149,224'],
@@ -2850,7 +2889,8 @@ const TabletBrand = (() => {
   apply();
 
   // --- Setup → Info: name, version, origin, licence, source --------------------------------
-  const LIC = { apache: ['tui-lic-apache', 'Apache License 2.0'] }; // LICENSE.md, embedded in index.html
+  const LIC = { apache: ['tui-lic-apache', 'Apache License 2.0'], // LICENSE.md, embedded in index.html
+    third: ['tui-lic-third', tr('Third-party components')] }; // fork: index.html, block third-party:begin/end (English, -de German)
   const sheet = el('div', 'tui-sheet tb-sheet', '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>');
   sheet.id = 'tb-sheet';
   const scrim = el('div', 'tp-scrim');
@@ -2867,8 +2907,8 @@ const TabletBrand = (() => {
     sheet.classList.add('open'); scrim.classList.add('open');
   }
   function showLicense(k) {
-    const [id, name] = LIC[k], src = $(id);
-    openSheet(name, b => {
+    const [id, name] = LIC[k], src = (k === 'third' && tuiIsDe() && $(id + '-de')) || $(id); // third-party page: German headings and notes, licence texts as is
+    openSheet(T(name), b => {
       const back = el('button', 'tp-btn'); back.textContent = '← Info'; onTap(back, () => openInfo());
       b.appendChild(back);
       const pre = el('pre', 'tb-lic'); pre.setAttribute('translate', 'no');
@@ -2899,7 +2939,8 @@ const TabletBrand = (() => {
     ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Provided “as is”, without warranties or conditions of any kind (see the licence text).')) }));
     const lr = el('div', 'tb-row');
     const ba = el('button', 'tp-btn'); ba.textContent = T(tr('Licence text (Apache 2.0)')); onTap(ba, () => showLicense('apache'));
-    lr.append(ba); ori.appendChild(lr);
+    const b3 = el('button', 'tp-btn'); b3.textContent = T(tr('Third-party components')); onTap(b3, () => showLicense('third'));
+    lr.append(ba, b3); ori.appendChild(lr);
     box.appendChild(ori);
     const src = el('div', 'tb-box');
     src.appendChild(Object.assign(el('div', 'tb-lbl'), { textContent: T(tr('Source code of this version')) }));
@@ -2908,6 +2949,7 @@ const TabletBrand = (() => {
     src.appendChild(link('AgOpenWeb', BRAND.upstream));
     src.appendChild(link('AgOpenGPS', BRAND.agopengps));
     box.appendChild(src);
+    try { box.appendChild(TabletUpdate.box()); } catch (_) { /* not loaded yet */ } // fork: update check
     const sw = el('div', 'tb-box');
     sw.appendChild(Object.assign(el('div', 'tb-lbl'), { textContent: T(tr('Look')) }));
     const seg = el('div', 'tp-seg');
@@ -3013,7 +3055,7 @@ const TabletBrand = (() => {
     { id: 'demo', t: tr('Demo mode'), steps: [
       tr('Demo only without the kit connected.'),
       tr('Menu → "Demo mode" starts the simulator; a striped "DEMO" band shows it runs.'),
-      tr('If a module is detected, the demo ends: then check steering and sections yourself.'),
+      tr('If a module is detected, the demo ends and steering and sections are switched off: check them anyway.'),
       tr('"End demo" on the band or in the menu stops it.')] },
     { id: 'usb', t: tr('Back up profiles by USB copy'), warn: tr('Not checked on a real tablet yet.'), steps: [
       tr('Easier: Setup → Menu → "Back up and restore" makes one file and restores it from the Import folder.'),
@@ -3666,7 +3708,7 @@ const TabletBackup = (() => {
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
   const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
   const STILL_MPS = 0.15;
-  const KIND = { vehicle: tr('Vehicle'), tool: tr('Tool'), field: tr('Field'), ntrip: tr('NTRIP profile') };
+  const KIND = { vehicle: tr('Vehicle'), tool: tr('Tool'), field: tr('Field'), ntrip: tr('NTRIP profile'), worklog: tr('Work log') };
   const STATE = { new: tr('new'), overwrites: tr('overwrites'), same: tr('same') };
   const ERR = {
     notzip: tr('The file is not a readable ZIP file.'),
@@ -3867,9 +3909,11 @@ const TabletBackup = (() => {
 // module not heard, no line). Yellow = steering works but check first: no IMU heard, or with one
 // antenna the direction not yet confirmed on the card "Does the vehicle face the way it drives?"
 // (TabletSteerConfirm; driving forward can't be told from backing with one antenna, so only the
-// confirmation counts). The module flags are the host's own (gpsOk / autoSteerOk / imuOk); RTK
-// fix = NMEA fix quality 4, the host's default minimum (MinFixQuality, not sent to the client).
-// Tap it for the list. In the demo mode (TabletDemo) it says "Demo" instead.
+// confirmation counts). The module flags are the host's own (gpsOk / autoSteerOk / imuOk); the
+// fix is judged against the host's MinFixQuality (fixOk below), never looser than the host.
+// Tap it for the list. In the demo mode (TabletDemo) it says "Demo" instead. Tested by
+// Tests/web/ready.test.mjs (block ready:begin/end).
+// ready:begin
 const TabletReady = (() => {
   const T = k => I18n.text(k);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
@@ -3885,6 +3929,17 @@ const TabletReady = (() => {
   let last = '';
 
   const live = () => connState === 'connected' && !!lastTick && performance.now() - lastTick.t < 2000;
+  // Fix quality by goodness, not by its NMEA number: RTK Fix (4) > RTK Float (5) > DGPS (2) and
+  // PPS (3) > GPS (1); 0 and the estimated/manual/simulated kinds (6, 7, 8) count as no fix. Green
+  // needs both: the host's own gate (GpsFixQualityValidator: number < MinFixQuality is refused)
+  // and at least the goodness of the minimum, so the light is never looser than the host and
+  // RTK Float is not green when the minimum is RTK Fix. No minimum known (older host): RTK Fix.
+  const RANK = { 4: 4, 5: 3, 2: 2, 3: 2, 1: 1 };
+  const rank = q => RANK[q] || 0;
+  function fixOk(q, minQ) {
+    if (minQ == null) return q === 4;
+    return q >= minQ && rank(q) >= rank(minQ) && rank(q) > 0;
+  }
   // [level, label, detail]: level 2 = ok, 1 = check, 0 = missing.
   function checks() {
     const s = statusBar || {}, op = tick && tick.op, gps = config && config.gps;
@@ -3892,7 +3947,12 @@ const TabletReady = (() => {
     const out = [];
     if (s.gpsSentence === 'SIM') out.push([1, tr('GPS'), tr('Simulator: not a real position')]);
     else if (s.gpsLost || !s.gpsOk) out.push([0, tr('GPS'), tr('No GPS data')]);
-    else out.push([s.fixQuality === 4 ? 2 : 0, tr('GPS'), (s.fixText || '') + (s.fixQuality === 4 ? '' : ' – ' + T(tr('steering needs RTK Fix')))]);
+    else {
+      const minQ = gps && Number.isInteger(gps.minFixQuality) ? gps.minFixQuality : null, q = s.fixQuality | 0;
+      const ok = fixOk(q, minQ);
+      out.push([ok ? 2 : 0, tr('GPS'), (s.fixText || '') + (ok ? '' : ' – ' + (minQ != null
+        ? tr('the guidance computer needs fix quality {n} or higher (now {q})', { n: minQ, q }) : T(tr('steering needs RTK Fix'))))]);
+    }
     out.push([s.autoSteerOk ? 2 : 0, tr('Steer module'), s.autoSteerOk ? tr('connected') : tr('not heard')]);
     // An IMU module's hello (imuOk), or the steer module's IMU heading in PGN 253 (AiO boards).
     const sd = s.systemData, imu = !!s.imuOk || !!(sd && typeof sd.imuHeading === 'number' && Number.isFinite(sd.imuHeading));
@@ -3907,7 +3967,7 @@ const TabletReady = (() => {
     const demo = typeof TabletDemo !== 'undefined' && TabletDemo.active;
     const cs = checks(), lvl = Math.min(...cs.map(c => c[0]));
     const word = demo ? tr('Demo') : lvl === 2 ? tr('Ready') : lvl === 1 ? tr('Check') : tr('Not ready');
-    const key = JSON.stringify([demo, cs, pop.hidden, I18n.language]);
+    const key = JSON.stringify([demo, cs, pop.hidden, I18n.language, T(word)]); // T(word): the dictionary may arrive after the language
     if (key === last) return;
     last = key;
     pill.dataset.lv = demo ? 'demo' : String(lvl);
@@ -3927,8 +3987,9 @@ const TabletReady = (() => {
     pop.appendChild(el('div', 'rd-n', T(tr('Display only. Steering is switched on with the Steer button as before.'))));
   }
   setInterval(render, 300);
-  return { checks, get level() { return Math.min(...checks().map(c => c[0])); } };
+  return { checks, fixOk, get level() { return Math.min(...checks().map(c => c[0])); } };
 })();
+// ready:end
 
 // ===== Demo mode (feature/bedienung-1) ========================================================
 // For showing the app: the existing simulator as the GPS source, with a striped "DEMO" band that
@@ -3936,9 +3997,9 @@ const TabletReady = (() => {
 // on the network a simulated drive could switch real outputs (the host sends steer and section
 // PGNs in the simulator too). If a module turns up while it runs, the demo ends with a warning
 // to check steering and sections. Stops with "End demo"; the flag lives in this tab only.
-// Ending never sends a command that switches steering or sections: the host only has toggles
-// for them (autosteer.toggle, section.master, section.manual), and a toggle sent from a stale
-// tick could switch them on. Explicit off commands would need a host change (docs/).
+// Ending switches steering and sections off with the host's explicit off commands
+// (autosteer.off, sections.alloff: off only, harmless when nothing is on), never with a toggle,
+// which sent from a stale tick could switch them on.
 // demo:begin
 const TabletDemo = (() => {
   const T = k => I18n.text(k);
@@ -3967,6 +4028,7 @@ const TabletDemo = (() => {
   }
   function end(why) {
     if (!active) return;
+    transport.send('autosteer.off'); transport.send('sections.alloff');
     if (statusBar && statusBar.simEnabled && !simBefore) transport.send('sim.toggleEnable');
     active = false; save();
     if (why) showToast(T(why), 15000);
@@ -4000,6 +4062,60 @@ const TabletDemo = (() => {
   return { start, end, get active() { return active; } };
 })();
 // demo:end
+
+// ===== Simulator only for test versions, demo and experts (feature/installer) =====================
+// In the customer version the simulator switch is not in the normal menu: App & Files shows it
+// under "Expert" (collapsed), and the demo mode switches it on as before. Test versions keep the
+// menu entry and the SIM button on the map. Test version = this build was found as a pre-release
+// at the last update check (Setup → Info), or, before any check, the device's update channel is
+// "Test". A running simulator keeps its bar, so it can always be switched off. Display only: the
+// host's simulator, its commands and the demo are unchanged.
+// simaccess:begin
+function tuiSimInMenu(buildKind, hash, channel) {
+  const h = String(hash || '').replace(/-dirty$/, '');
+  if (buildKind && h && buildKind.hash === h) return !!buildKind.pre; // known from the last check
+  return channel === 'test';
+}
+// simaccess:end
+const TabletSimAccess = (() => {
+  const T = k => I18n.text(k);
+  const $ = id => document.getElementById(id);
+  const lsGet = k => { try { return localStorage.getItem(k); } catch (_) { return null; } };
+  const kind = () => { try { return JSON.parse(lsGet('aow.build.kind') || 'null'); } catch (_) { return null; } };
+  const testVersion = () => tuiSimInMenu(kind(), appInfo && appInfo.gitHash, lsGet('aow.update.channel') === 'test' ? 'test' : 'stable');
+  // "Expert" in App & Files: the simulator switch (the same command as the upstream entry).
+  const fm = $('filemenu');
+  let exp = null;
+  if (fm) {
+    exp = document.createElement('details'); exp.className = 'tui-expert';
+    exp.innerHTML = '<summary></summary><div class="fo-grid"><button class="fo-btn" id="fm-sim-expert"></button></div><div class="tui-exp-n"></div>';
+    fm.appendChild(exp);
+    $('fm-sim-expert').addEventListener('pointerdown', e => { e.stopPropagation(); transport.send('sim.togglePanel'); if (typeof lnCloseAll === 'function') lnCloseAll(); });
+  }
+  let wasOn = false, demoAt = -1e9;
+  const upEntry = $('fm-simulator'), upGrid = upEntry && upEntry.parentElement, upLabel = upGrid && upGrid.previousElementSibling;
+  function render() {
+    const inMenu = testVersion() || (typeof TabletDemo !== 'undefined' && TabletDemo.active);
+    for (const n of [upGrid, upLabel]) if (n) n.style.display = inMenu ? '' : 'none'; // .fo-grid's display beats [hidden]
+    // The map's SIM button (opens the bar): test versions, or while the simulator runs.
+    const simOn = !!(statusBar && statusBar.simEnabled);
+    document.documentElement.toggleAttribute('data-tui-nosim', !inMenu && !simOn);
+    // Switched off here, the SIM button goes with it: say where it is (moritz.31, point 5: "with a
+    // field open the simulator can't be switched on" was this, with or without a field).
+    const demo = typeof TabletDemo !== 'undefined' && TabletDemo.active;
+    if (statusBar && wasOn && !simOn && !inMenu && performance.now() - demoAt > 5000) showToast(T(tr('Simulator off. To switch it on again: Menu → App & Files → Expert → Simulator.')), 8000);
+    if (statusBar) wasOn = simOn;
+    if (demo) demoAt = performance.now(); // the demo's end has its own message
+    if (exp) {
+      exp.querySelector('summary').textContent = T(tr('Expert'));
+      $('fm-sim-expert').textContent = T(tr('Simulator'));
+      exp.querySelector('.tui-exp-n').textContent = T(tr('Simulator: for tests and demos. While it runs, the guidance computer uses no real position.'));
+    }
+  }
+  setInterval(render, 1000);
+  render();
+  return { render, testVersion };
+})();
 
 // ===== Long press = explanation (feature/bedienung-2) =========================================
 // Holding one of the main buttons or tiles for LONG_MS shows a short explanation instead of
@@ -4046,6 +4162,7 @@ const TabletExplain = (() => {
     ['[data-tile="tbk"]', tr('Back up and restore: one file with vehicles, tools, fields and NTRIP profiles.')],
     ['[data-tile="eama"]', tr('Fields from eAMA: import field boundaries from an eAMA Shapefile export.')],
     ['[data-tile="work"]', tr('Start work: step by step to field, track, direction and the ready light.')],
+    ['[data-tile="worklog"]', tr('Work log: one entry per working session with time, area from the guidance computer, tool and your notes.')],
     ['[data-tile="setup1"]', tr('First setup: language, vehicle, tool, NTRIP, kit check and the direction trap.')],
   ];
   const SEL = TEXT.map(t => t[0]).join(',');
@@ -4101,6 +4218,8 @@ const TabletExplain = (() => {
 // Each step only opens what exists (Fields and Jobs, the track manager, the direction card's
 // own two answers) and moves on by itself when the state is there. It finishes only on a green
 // ready light and never switches steering on: that stays the operator's Steer button.
+// Tested by Tests/web/work.test.mjs (block work:begin/end).
+// work:begin
 const TabletWork = (() => {
   const T = k => I18n.text(k);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
@@ -4206,8 +4325,9 @@ const TabletWork = (() => {
     onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); start(); });
     f.insertBefore(t, f.firstChild);
   }, 300);
-  return { start };
+  return { start, steps, finish };
 })();
+// work:end
 
 // ===== First setup (feature/bedienung-2) ======================================================
 // A guide through the first setup: language, vehicle, tool and working width (the existing
@@ -4216,13 +4336,26 @@ const TabletWork = (() => {
 // direction trap. It enters no values itself: everything is typed in the existing dialogs, an
 // empty field stays empty. Shown by itself once, while no vehicle profile exists (on the device
 // that has control), skippable at every step, and again any time from the menu ("First setup").
+// Tested by Tests/web/firstsetup.test.mjs (block firstsetup:begin/end).
+// firstsetup:begin
 const TabletFirstSetup = (() => {
   const T = k => I18n.text(k);
   const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
   const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
   const KEY = 'aow.firstSetup';
-  const lsOk = () => { try { return localStorage.getItem(KEY); } catch (_) { return 'blocked'; } };
-  const mark = v => { try { localStorage.setItem(KEY, v); } catch (_) { /* ignore */ } };
+  // Kept on the guidance computer too (host-paket D: appInfo.firstSetup, command setup.first), so
+  // another tablet or a cleared browser doesn't start the guide again; this browser's copy stays.
+  const local = () => { try { return localStorage.getItem(KEY); } catch (_) { return 'blocked'; } };
+  const lsOk = () => (appInfo && appInfo.firstSetup) || local();
+  const mark = v => {
+    try { localStorage.setItem(KEY, v); } catch (_) { /* ignore */ }
+    if (iHoldControl) transport.send('setup.first|' + v);
+  };
+  // A host that doesn't know yet what this browser already did learns it (once it can tell).
+  setInterval(() => {
+    const l = local();
+    if (iHoldControl && appInfo && appInfo.firstSetup === '' && (l === 'shown' || l === 'done')) transport.send('setup.first|' + l);
+  }, 5000);
   const sheet = el('div', 'tui-sheet tb-sheet tbk-sheet'); sheet.id = 'tui-setup1'; sheet.setAttribute('translate', 'no');
   sheet.innerHTML = '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>';
   const scrim = el('div', 'tp-scrim');
@@ -4342,12 +4475,13 @@ const TabletFirstSetup = (() => {
   }
   // First start on this device: once, on the device that has control, not during a demo.
   const auto = setInterval(() => {
-    if (lsOk()) { clearInterval(auto); return; }
+    if (lsOk() || navigator.webdriver) { clearInterval(auto); return; } // not in automated browsers (CI layout check)
     // Only while no vehicle is set up: no vehicle profile, or only the host's untouched "Default".
     const none = noVehicleYet();
     if (none === false) { clearInterval(auto); return; }
     if (none !== true) return;
-    if (connState === 'connected' && iHoldControl && appInfo && config && profiles && !(typeof TabletDemo !== 'undefined' && TabletDemo.active)) {
+    let legal = true; try { legal = TabletLegal.done; } catch (_) { legal = false; } // the notice at first start comes first
+    if (legal && connState === 'connected' && iHoldControl && appInfo && config && profiles && !(typeof TabletDemo !== 'undefined' && TabletDemo.active)) {
       clearInterval(auto); mark('shown'); open(0);
     }
   }, 1000);
@@ -4361,6 +4495,932 @@ const TabletFirstSetup = (() => {
     t.querySelector('span').textContent = T(tr('First setup'));
     onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(0); });
     sBox.insertBefore(t, sBox.firstChild);
+  }, 300);
+  return { open, get isOpen() { return isOpen(); } };
+})();
+// firstsetup:end
+
+// ===== Update check (feature/auslieferung) ====================================================
+// Asks GitHub for the releases of this fork (BRAND.source) and says whether a newer one exists:
+// a hint with a link, nothing is downloaded or installed. Runs from the browser (GitHub's API
+// allows any origin), so the host is not involved; it needs internet on this device. "Newer" is
+// only claimed when this build's commit (appInfo.gitHash) is itself one of the releases and a
+// later one exists; otherwise the newest release is shown without comparing. On demand (Info) or
+// at start, if switched on for this device.
+// update:begin
+const TabletUpdate = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
+  const KEY = 'aow.update.onStart', CH = 'aow.update.channel';
+  // Channels: "stable" = releases published as full releases (approved with the "Fork Stable
+  // Release" workflow), the default; "test" = also the pre-releases (test versions). Per device.
+  const channel = () => { try { return localStorage.getItem(CH) === 'test' ? 'test' : 'stable'; } catch (_) { return 'stable'; } };
+  const api = () => BRAND.source.replace('https://github.com/', 'https://api.github.com/repos/') + '/releases?per_page=30';
+  let state = { busy: false, res: null };
+  const onStart = () => { try { return localStorage.getItem(KEY) === '1'; } catch (_) { return false; } };
+
+  // releases (GitHub JSON) + this build's hash + channel →
+  // { kind: 'newer'|'current'|'ahead'|'unknown'|'none', latest, mine }. This build is looked up
+  // among all published releases (it may be a test version); the newest is taken from the channel
+  // only. 'ahead': this test version is newer than the newest stable release.
+  function compare(releases, hash, ch = 'stable') {
+    const all = (releases || []).filter(r => r && !r.draft && r.published_at)
+      .sort((a, b) => String(b.published_at).localeCompare(String(a.published_at)));
+    const list = ch === 'test' ? all : all.filter(r => !r.prerelease);
+    if (!list.length) return { kind: 'none' };
+    const h = String(hash || '').replace(/-dirty$/, '').toLowerCase();
+    const mine = h.length >= 7 ? all.find(r => String(r.target_commitish || '').toLowerCase().startsWith(h)) : null;
+    const latest = list[0];
+    if (!mine) return { kind: 'unknown', latest };
+    if (mine === latest) return { kind: 'current', latest, mine };
+    return { kind: String(latest.published_at) > String(mine.published_at) ? 'newer' : 'ahead', latest, mine };
+  }
+  async function check() {
+    state = { busy: true, res: null }; refresh();
+    try {
+      const r = await fetch(api(), { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      state = { busy: false, res: compare(await r.json(), appInfo && appInfo.gitHash, channel()) };
+      // Remember whether this build is a test version (pre-release) or a stable release
+      // (TabletSimAccess shows the simulator switch in test versions only).
+      try { if (state.res && state.res.mine) localStorage.setItem('aow.build.kind', JSON.stringify({ hash: String(appInfo.gitHash || '').replace(/-dirty$/, ''), pre: !!state.res.mine.prerelease })); } catch (_) { /* ignore */ }
+    } catch (e) { state = { busy: false, res: { kind: 'error', why: String(e && e.message || e) } }; }
+    refresh();
+    return state.res;
+  }
+  let host = null;
+  function refresh() { if (host && host.isConnected) fill(host); }
+  const day = s => { try { return new Date(s).toLocaleDateString(I18n.language || undefined); } catch (_) { return s; } };
+  function fill(b) {
+    b.innerHTML = '';
+    b.appendChild(el('div', 'tb-lbl', T(tr('Updates'))));
+    const r = state.res;
+    if (state.busy) b.appendChild(el('div', 'tp-note', T(tr('Checking GitHub…'))));
+    else if (r && r.kind === 'error') b.appendChild(el('div', 'tp-note warn', tr('No answer from GitHub ({f}). Internet on this device?', { f: r.why })));
+    else if (r && r.kind === 'none') b.appendChild(el('div', 'tp-note', T(channel() === 'test' ? tr('No release published yet.') : tr('No stable release published yet.'))));
+    else if (r) {
+      const L = r.latest, name = L.name || L.tag_name;
+      const txt = r.kind === 'newer' ? tr('A newer version is available: {n} ({d}).', { n: name, d: day(L.published_at) })
+        : r.kind === 'current' ? tr('This is the newest version ({n}).', { n: name })
+        : r.kind === 'ahead' ? tr('This test version is newer than the newest stable release ({n}).', { n: name })
+          : tr('Newest published version: {n} ({d}). This build is not one of the published ones, so it is not compared.', { n: name, d: day(L.published_at) });
+      b.appendChild(el('div', 'tp-note' + (r.kind === 'newer' ? ' warn' : ''), txt));
+      if (r.kind !== 'current' && r.kind !== 'ahead') {
+        const a = el('button', 'tp-btn', T(tr('Open the release page')) + ' ↗'); onTap(a, () => openExternal(L.html_url)); b.appendChild(a);
+      }
+      b.appendChild(el('div', 'tp-note', T(tr('Installing stays with you: download and install the new version yourself.'))));
+    }
+    const cr = el('div', 'tb-row');
+    cr.appendChild(el('span', 'tp-note', T(tr('Channel'))));
+    for (const [c, t] of [['stable', tr('Stable')], ['test', tr('Test (pre-releases)')]]) {
+      const cb = el('button', 'tp-btn' + (channel() === c ? ' pri' : ''), T(t));
+      onTap(cb, () => { try { localStorage.setItem(CH, c); } catch (_) { /* ignore */ } state = { busy: false, res: null }; refresh(); });
+      cr.appendChild(cb);
+    }
+    b.appendChild(cr);
+    b.appendChild(el('div', 'tp-note', T(channel() === 'test'
+      ? tr('Test: also test versions, which may have faults. Only on this device.')
+      : tr('Stable: only versions released as stable. Only on this device.'))));
+    const row = el('div', 'tb-row');
+    const go = el('button', 'tp-btn pri', T(tr('Check for updates'))); go.disabled = state.busy; onTap(go, check); row.appendChild(go);
+    const tg = el('button', 'tp-btn' + (onStart() ? ' pri' : ''), (onStart() ? '✓ ' : '') + T(tr('Check at start')));
+    onTap(tg, () => { try { localStorage.setItem(KEY, onStart() ? '0' : '1'); } catch (_) { /* ignore */ } refresh(); });
+    row.appendChild(tg);
+    b.appendChild(row);
+  }
+  function box() { host = el('div', 'tb-box'); fill(host); return host; }
+  // At start (opt-in): once appInfo is there; only a newer version is announced.
+  const auto = setInterval(() => {
+    if (!onStart()) { clearInterval(auto); return; }
+    if (!appInfo) return;
+    clearInterval(auto);
+    check().then(r => { if (r && r.kind === 'newer') showToast(T(tr('A newer version is available: {n} ({d}).', { n: r.latest.name || r.latest.tag_name, d: day(r.latest.published_at) })) + ' ' + T(tr('Setup → Info')), 8000); });
+  }, 1000);
+  return { check, box, compare };
+})();
+// update:end
+
+// ===== Notice at first start (feature/auslieferung) ===========================================
+// The liability notice from docs/Rechtliches-Entwurf.md (section A, a DRAFT, not legally checked),
+// shown once per device and text version until "Read and understood". Stored only in this
+// browser. It switches nothing; the first setup waits for it.
+// legal:begin
+const TabletLegal = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const KEY = 'aow.legal', VERSION = '2026-10-draft2'; // a changed text is shown and confirmed again
+  const TEXT = [
+    tr('This app is a steering aid. It does not replace the driver.'),
+    tr('You stay responsible for the vehicle, the tool and your surroundings at all times. Stay at the wheel and step in when something is wrong.'),
+    tr('The app comes without any warranty. It can have faults; GPS, correction data, modules and settings can give wrong values.'),
+    tr('Do not use on public roads. Switch steering off as soon as people are in the driving area.'),
+    tr('Before the first use, check everything calmly: dimensions, steering direction, switching the steering off. This version is a test version.'),
+    tr('The app is licensed under the Apache License 2.0. It is a changed version of AgOpenWeb; the source code is open.'),
+  ];
+  const acked = () => { try { return localStorage.getItem(KEY) === VERSION; } catch (_) { return false; } };
+  const scrim = el('div', 'tp-scrim'), box = el('div'); box.id = 'tui-legal'; box.setAttribute('translate', 'no'); box.hidden = true;
+  document.body.append(scrim, box);
+  for (const n of [scrim, box]) n.addEventListener('pointerdown', e => e.stopPropagation());
+  function show() {
+    box.innerHTML = '';
+    box.appendChild(el('div', 'lg-n', BRAND.name)); // product name, never translated (box is translate=no)
+    box.appendChild(el('div', 'lg-t', T(tr('Please read before use'))));
+    const ol = el('ol', 'lg-l'); for (const t of TEXT) ol.appendChild(el('li', '', T(t))); box.appendChild(ol);
+    const ok = el('button', 'tp-btn pri big', T(tr('Read and understood')));
+    ok.addEventListener('pointerdown', e => {
+      e.stopPropagation(); e.preventDefault();
+      try { localStorage.setItem(KEY, VERSION); } catch (_) { /* blocked storage: shown again next time */ }
+      box.hidden = true; scrim.classList.remove('open'); done = true;
+    });
+    box.appendChild(ok);
+    box.hidden = false; scrim.classList.add('open');
+  }
+  // Automated browsers (CI's layout check, tests) get no notice: it would cover what they measure.
+  let done = acked() || !!navigator.webdriver;
+  // The language is set at once, its dictionary arrives a moment later; the box is translate=no,
+  // so the page never translates it afterwards: drawn again when the translation is there
+  // (moritz.31 sweep: the notice stayed English on a German tablet).
+  const title = () => T(tr('Please read before use'));
+  const since = performance.now();
+  const ready = () => String(I18n.language).startsWith('en') || title() !== 'Please read before use' || performance.now() - since > 5000;
+  const t = setInterval(() => {
+    if (done) { clearInterval(t); return; }
+    if (box.hidden && typeof I18n !== 'undefined' && appInfo && ready()) show();
+    else if (!box.hidden && box.querySelector('.lg-t').textContent !== title()) show();
+  }, 500);
+  return { get done() { return done || acked(); }, show };
+})();
+// legal:end
+
+// ===== Work log (feature/arbeitsdoku) =========================================================
+// One entry per working session: from the moment this device (holding control) sees a job open
+// on a field until the job closes, the field changes or the connection is gone. The numbers are
+// the host's: worked area of the job (Status.workedAreaSqM), ground covered once
+// (fieldData.actualAreaSqM), trip distance (fieldData.tripDistanceM), each at the start and at
+// the end of the session; the session's own share is the difference. Times are this tablet's
+// clock. Activity, product, amount and note are free text the operator types. Kept in this
+// browser (localStorage) and on the guidance computer (/worklog, WorkLog/worklog.json), merged by
+// entry id: the later change wins (mod, then end), a deleted id stays deleted (host-paket B). The
+// pure part (step, merge, csv, sums) is tested by Tests/web/worklog.test.mjs.
+// worklog:begin
+const WorkLogCore = (() => {
+  const GAP_MS = 5 * 60 * 1000; // a reload or a short drop within this continues the session
+  const num = v => typeof v === 'number' && Number.isFinite(v) ? v : null;
+  // state: { entries: [...], open: entry|null }; s: snapshot of what the client sees; now: ms.
+  function step(state, s, now) {
+    const st = { entries: state.entries, open: state.open, deleted: state.deleted || [] };
+    const active = !!(s && s.live && s.control && s.field && s.job);
+    const o = st.open;
+    if (o && (!active || o.field !== s.field || o.job !== s.job || now - o.seenAt > GAP_MS)) {
+      // Closed because the job or field was closed or changed (not a lost link or control):
+      // the host's job end can stand in for this tablet's clock (ended()).
+      const byJob = !!(s && s.live && s.control) && now - o.seenAt <= GAP_MS && (!s.field || !s.job || o.field !== s.field || o.job !== s.job);
+      st.entries = st.entries.concat([{ ...o, open: false, byJob }]); st.open = null;
+    }
+    if (!active) return st;
+    const vals = { worked: num(s.worked), actual: num(s.actual), trip: num(s.trip) };
+    if (!st.open) {
+      st.open = { id: 'w' + now.toString(36) + Math.random().toString(36).slice(2, 6), field: s.field, job: s.job,
+        workType: s.workType || '', start: now, end: now, seenAt: now,
+        workedStart: vals.worked, workedEnd: vals.worked, actualStart: vals.actual, actualEnd: vals.actual,
+        tripStart: vals.trip, tripEnd: vals.trip, tool: s.tool || '', vehicle: s.vehicle || '', widthM: num(s.widthM),
+        // A job newly started on the host while this tablet watched: its start is the host's.
+        hostStart: s.jobNew && num(s.jobStart) > 0 ? s.jobStart : null, hostEnd: null,
+        activity: '', product: '', amount: '', note: '', open: true };
+      return st;
+    }
+    const e = { ...st.open, end: now, seenAt: now };
+    if (vals.worked != null) { if (e.workedStart == null) e.workedStart = vals.worked; e.workedEnd = vals.worked; }
+    if (vals.actual != null) { if (e.actualStart == null) e.actualStart = vals.actual; e.actualEnd = vals.actual; }
+    if (vals.trip != null) { if (e.tripStart == null) e.tripStart = vals.trip; e.tripEnd = vals.trip; }
+    if (num(s.widthM) != null) e.widthM = s.widthM;
+    if (s.tool) e.tool = s.tool;
+    if (s.vehicle) e.vehicle = s.vehicle;
+    if (s.workType) e.workType = s.workType;
+    st.open = e;
+    return st;
+  }
+  // Session share of a host counter; null when it went down during the session (area deleted,
+  // trip reset): then only the host's job totals are shown, nothing is made up.
+  const delta = (a, b) => a == null || b == null || b < a ? null : b - a;
+  const sessionArea = e => delta(e.workedStart, e.workedEnd);
+  const overlap = e => e.workedEnd != null && e.actualEnd != null && e.workedEnd >= e.actualEnd ? e.workedEnd - e.actualEnd : null;
+  // Host-paket C: the host's job start and end (Job.StartedAt / EndedAt) where they mark this
+  // session's start or end, else this tablet's clock; both from one clock if they disagree.
+  function ended(e, job) {
+    if (!e.byJob || e.hostEnd != null || !job || !(num(job.endedMs) > 0)) return e;
+    return { ...e, hostEnd: job.endedMs, byJob: false };
+  }
+  const hostOk = e => (e.hostEnd != null ? e.hostEnd : e.end) >= (e.hostStart != null ? e.hostStart : e.start);
+  const t0 = e => e.hostStart != null && hostOk(e) ? e.hostStart : e.start;
+  const t1 = e => e.hostEnd != null && hostOk(e) ? e.hostEnd : e.end;
+  const season = e => new Date(t0(e)).getFullYear();
+  function sums(entries) {
+    const out = new Map();
+    for (const e of entries) {
+      const k = e.field + '\u0000' + season(e);
+      const r = out.get(k) || { field: e.field, season: season(e), count: 0, ms: 0, areaSqM: 0, areaMissing: 0 };
+      r.count++; r.ms += Math.max(0, t1(e) - t0(e));
+      const a = sessionArea(e); if (a == null) r.areaMissing++; else r.areaSqM += a;
+      out.set(k, r);
+    }
+    return [...out.values()].sort((a, b) => a.field.localeCompare(b.field) || b.season - a.season);
+  }
+  // CSV for Excel: ";" between fields, German decimal comma, UTF-8 with BOM, CRLF. Areas in ha
+  // with 2 decimals and distance in m without decimals, as the app shows them.
+  const p2 = n => String(n).padStart(2, '0');
+  const dDate = ms => { const d = new Date(ms); return p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '.' + d.getFullYear(); };
+  const dTime = ms => { const d = new Date(ms); return p2(d.getHours()) + ':' + p2(d.getMinutes()); };
+  const dur = ms => { const m = Math.round(Math.max(0, ms) / 60000); return Math.floor(m / 60) + ':' + p2(m % 60); };
+  const ha = m2 => m2 == null ? '' : (m2 * 0.0001).toFixed(2).replace('.', ',');
+  const metres = m => m == null ? '' : m.toFixed(0);
+  const widthTxt = w => w == null ? '' : w.toFixed(2).replace('.', ',');
+  const cell = v => { const t = String(v == null ? '' : v); return /[;"\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; };
+  function csv(entries, head) {
+    const rows = [head];
+    for (const e of entries) rows.push([e.field, e.job, e.workType, dDate(t0(e)), dTime(t0(e)), dTime(t1(e)), dur(t1(e) - t0(e)),
+      ha(sessionArea(e)), ha(e.workedEnd), ha(e.actualEnd), ha(overlap(e)), metres(delta(e.tripStart, e.tripEnd)),
+      e.tool, widthTxt(e.widthM), e.vehicle, e.activity, e.product, e.amount, e.note]);
+    return '﻿' + rows.map(r => r.map(cell).join(';')).join('\r\n') + '\r\n';
+  }
+  // Same rule as WorkLogStore.Merge on the host: union by id, the later change wins, deleted
+  // ids removed, open sessions not taken (each device keeps its own until it closes).
+  function merge(a, b) {
+    const deleted = [...new Set([...(a.deleted || []), ...(b.deleted || [])].filter(x => typeof x === 'string' && x))].sort();
+    const gone = new Set(deleted), byId = new Map();
+    const newer = (x, y) => (num(x.mod) || 0) !== (num(y.mod) || 0) ? (num(x.mod) || 0) > (num(y.mod) || 0) : (num(x.end) || 0) > (num(y.end) || 0);
+    for (const d of [a, b]) for (const e of d.entries || []) {
+      if (!e || typeof e.id !== 'string' || !e.id || num(e.start) == null || gone.has(e.id) || e.open === true) continue;
+      const h = byId.get(e.id); if (!h || newer(e, h)) byId.set(e.id, e);
+    }
+    const entries = [...byId.values()].sort((x, y) => x.start - y.start || (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+    return { entries, deleted };
+  }
+  return { step, merge, ended, t0, t1, sums, csv, sessionArea, overlap, season, delta, dDate, dTime, dur, ha, GAP_MS };
+})();
+// worklog:end
+
+// Recorder + overview sheet for WorkLogCore (feature/arbeitsdoku). Tested by
+// Tests/web/worklog-ui.test.mjs (block worklog-ui:begin/end).
+// worklog-ui:begin
+const TabletWorkLog = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
+  const KEY = 'aow.worklog.v1';
+  const C = WorkLogCore;
+  let state = { entries: [], open: null, deleted: [] }, storeOk = true, dirty = false, lastSave = 0;
+  try { const v = JSON.parse(localStorage.getItem(KEY) || 'null'); if (v && Array.isArray(v.entries)) state = { entries: v.entries, open: v.open || null, deleted: Array.isArray(v.deleted) ? v.deleted : [] }; }
+  catch (_) { storeOk = false; }
+  function save(force) {
+    const now = Date.now();
+    if (!force && now - lastSave < 10000) { dirty = true; return; }
+    try { localStorage.setItem(KEY, JSON.stringify(state)); storeOk = true; dirty = false; lastSave = now; } catch (_) { storeOk = false; }
+  }
+  window.addEventListener('pagehide', () => save(true));
+
+  // --- Guidance computer -------------------------------------------------------------------------
+  // The tablet holding control sends its copy and takes the merged log back; an observer only
+  // reads. Every 30 s and soon after a change; the local copy stays the buffer when the host is away.
+  // unsent: this tablet has entries the host's copy hasn't (e.g. a session left open when the
+  // ignition went off, closed at the next start): sent as soon as this tablet holds control,
+  // not only at the next 30 s round (an observer's read doesn't deliver them).
+  let hostAt = 0, hostErr = false, syncing = false, syncSoon = false, unsent = true;
+  async function sync() {
+    if (syncing || connState !== 'connected') return;
+    syncing = true; syncSoon = false;
+    try {
+      const mine = { format: 'aow-worklog', version: 1, entries: state.entries, deleted: state.deleted };
+      const r = iHoldControl && myClientId
+        ? await fetch('/worklog?client=' + encodeURIComponent(myClientId), { method: 'POST', body: JSON.stringify(mine) })
+        : await fetch('/worklog', { cache: 'no-store' });
+      if (!r.ok) throw new Error(String(r.status));
+      const v = await r.json();
+      if (!v || v.format !== 'aow-worklog' || !Array.isArray(v.entries)) throw new Error('format');
+      const m = C.merge({ entries: state.entries, deleted: state.deleted }, v); // changes made meanwhile stay
+      state = { entries: m.entries, deleted: m.deleted, open: state.open && !m.deleted.includes(state.open.id) ? state.open : null };
+      const onHost = new Set(v.entries.map(e => e && e.id));
+      unsent = state.entries.some(e => !onHost.has(e.id));
+      save(true); hostAt = Date.now(); hostErr = false;
+    } catch (_) { hostErr = true; }
+    syncing = false; last = ''; if (isOpen()) render();
+  }
+  const changed = () => { save(true); syncSoon = true; };
+  setInterval(() => { if (syncSoon || (unsent && iHoldControl) || Date.now() - hostAt > 30000) sync(); }, 3000);
+
+  // --- Recording -------------------------------------------------------------------------------
+  function snapshot() {
+    const s = statusBar || {}, fd = s.fieldData || {};
+    const field = fieldOps && fieldOps.activeField || '', job = s.jobName || '';
+    const j = fieldOps && (fieldOps.jobs || []).find(x => x.fieldName === field && x.taskName === job);
+    // A job started on the host while this tablet watched: the previous tick (live, with control)
+    // had no job or another one, and the job is new (opened in the minute it started; a resumed
+    // job was opened later). Then its start is the session's start.
+    const live = connState === 'connected' && !!lastTick && performance.now() - lastTick.t < 2000;
+    const key = field && job ? field + '\u0000' + job : '';
+    const jobNew = !!(j && key && prevKey !== null && prevKey !== key && j.status === 0 && j.startedMs > 0 && j.lastOpened === hostMinute(j.startedMs));
+    prevKey = live && iHoldControl ? key : null;
+    return {
+      live,
+      control: !!iHoldControl, field, job, workType: j ? j.workType : '', jobStart: j ? j.startedMs : null, jobNew,
+      worked: s.workedAreaSqM, actual: fd.actualAreaSqM, trip: fd.tripDistanceM,
+      tool: profiles ? profiles.activeTool : '', vehicle: profiles ? profiles.activeVehicle : '',
+      widthM: typeof sectionsWidthM === 'function' && sectionsWidthM() > 0 ? sectionsWidthM() : null,
+    };
+  }
+  let prevKey = null; // field+job of the previous tick while live with control; null = not watched
+  const p2 = n => String(n).padStart(2, '0');
+  const hostMinute = ms => { const d = new Date(ms); return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes()); };
+  setInterval(() => {
+    let before = state.entries.length; const wasOpen = !!state.open;
+    state = C.step(state, snapshot(), Date.now());
+    // The host's end for a session closed with its job, once the job list shows it (a few s later).
+    const jobs = fieldOps && fieldOps.jobs || [];
+    if (state.entries.some(e => e.byJob)) {
+      const now = Date.now();
+      state = { ...state, entries: state.entries.map(e => {
+        if (!e.byJob) return e;
+        const x = C.ended(e, jobs.find(j => j.fieldName === e.field && j.taskName === e.job));
+        return x.byJob && now - e.end > 60000 ? { ...x, byJob: false } : x; // not reported within a minute: tablet clock
+      }) };
+      before = -1;
+    }
+    const moved = state.entries.length !== before || wasOpen !== !!state.open;
+    save(moved); if (moved) { syncSoon = true; if (state.entries.length > Math.max(0, before)) unsent = true; }
+    if (isOpen()) render();
+  }, 2000);
+
+  // --- Sheet -----------------------------------------------------------------------------------
+  const sheet = el('div', 'tui-sheet tb-sheet tbk-sheet'); sheet.id = 'tui-worklog'; sheet.setAttribute('translate', 'no');
+  sheet.innerHTML = '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>';
+  const scrim = el('div', 'tp-scrim');
+  const fileIn = el('input'); fileIn.type = 'file'; fileIn.accept = '.json,application/json'; fileIn.style.display = 'none';
+  const printBox = el('div'); printBox.id = 'tui-print';
+  document.body.append(scrim, sheet, fileIn, printBox);
+  for (const n of [sheet, scrim]) n.addEventListener('pointerdown', e => e.stopPropagation());
+  const shT = sheet.querySelector('.t'), shB = sheet.querySelector('.tui-sh-body');
+  const isOpen = () => sheet.classList.contains('open');
+  const close = () => { sheet.classList.remove('open'); scrim.classList.remove('open'); edit = null; };
+  onTap(sheet.querySelector('.x'), close); onTap(scrim, close);
+  let fField = '', fSeason = '', fText = '', edit = null, last = '', msg = '';
+  function open() { if (typeof lnCloseAll === 'function') lnCloseAll(); sheet.classList.add('open'); scrim.classList.add('open'); last = ''; render(); }
+
+  // Entries with a kind (the acceptance records, TabletAcceptance) share the store and its sync
+  // with the guidance computer but are not working sessions.
+  const all = () => (state.open ? state.entries.concat([state.open]) : state.entries).filter(e => !e.kind);
+  function filtered() {
+    const q = fText.trim().toLowerCase();
+    return all().filter(e => (!fField || e.field === fField) && (!fSeason || String(C.season(e)) === fSeason)
+      && (!q || [e.field, e.job, e.workType, e.tool, e.vehicle, e.activity, e.product, e.amount, e.note].join(' ').toLowerCase().includes(q)))
+      .sort((a, b) => a.field.localeCompare(b.field) || C.t0(b) - C.t0(a));
+  }
+  const HEAD = () => [tr('Field'), tr('Job'), tr('Work type'), tr('Date'), tr('Start'), tr('End'), tr('Duration (h:mm)'), tr('Area this session (ha)'),
+    tr('Job area total (ha)'), tr('Covered once, job total (ha)'), tr('Overlap, job total (ha)'), tr('Distance (m)'), tr('Tool'), tr('Working width (m)'), tr('Vehicle'),
+    tr('Activity'), tr('Product / variety'), tr('Amount'), tr('Note')].map(T);
+  const NOTE = tr('Records of this app; whether they meet legal record-keeping duties is not checked.');
+
+  function selectBox(val, opts, onChange) {
+    const s = el('select', 'tp-in wl-sel'); s.style.cssText = 'width:auto;text-align:left;font:inherit';
+    for (const [v, t] of opts) { const o = el('option', '', t); o.value = v; if (v === val) o.selected = true; s.appendChild(o); }
+    s.addEventListener('change', () => { onChange(s.value); last = ''; render(); });
+    s.addEventListener('pointerdown', e => e.stopPropagation());
+    return s;
+  }
+  function render() {
+    if (!isOpen()) return;
+    const list = filtered(), key = JSON.stringify([list.map(e => [e.id, e.end, e.hostEnd, e.activity, e.product, e.amount, e.note]), fField, fSeason, fText, edit, msg, storeOk, hostAt, hostErr, I18n.language]);
+    if (key === last) return;
+    if (document.activeElement && sheet.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // don't rebuild under the cursor
+    last = key;
+    shT.textContent = T(tr('Work log'));
+    const top = shB.scrollTop; shB.innerHTML = '';
+    if (edit) { renderEdit(); return; }
+    const box = el('div', 'tb-box');
+    box.appendChild(el('div', 'tp-note', T(tr('One entry per working session, recorded on this tablet while it has control and a job is open. Areas and distance come from the guidance computer.'))));
+    box.appendChild(el('div', hostAt && !hostErr ? 'tp-note' : 'tp-note warn', hostAt && !hostErr
+      ? T(tr('Also stored on the guidance computer (last at {t}). A running session is stored when it ends.', { t: C.dTime(hostAt) }))
+      : T(tr('Not stored on the guidance computer yet: kept on this tablet until it can be. "Save as file" makes an extra copy.'))));
+    if (!storeOk) box.appendChild(el('div', 'tp-note bad', T(tr('This browser does not store data: entries are lost when the page is closed.'))));
+    if (msg) box.appendChild(el('div', 'tp-note', T(msg)));
+    // Filters
+    const fields = [...new Set(all().map(e => e.field))].sort(), seasons = [...new Set(all().map(e => String(C.season(e))))].sort().reverse();
+    const fr = el('div', 'tb-row');
+    fr.appendChild(selectBox(fField, [['', T(tr('All fields'))], ...fields.map(f => [f, f])], v => { fField = v; }));
+    fr.appendChild(selectBox(fSeason, [['', T(tr('All seasons'))], ...seasons.map(y => [y, y])], v => { fSeason = v; }));
+    const q = el('input', 'tp-in'); q.placeholder = T(tr('Search')); q.value = fText; q.style.cssText = 'width:12em;text-align:left;font:inherit';
+    q.addEventListener('input', () => { fText = q.value; }); q.addEventListener('change', () => { last = ''; render(); });
+    fr.appendChild(q);
+    box.appendChild(fr);
+    // Sums per field and season (calendar year)
+    const sm = C.sums(list);
+    if (sm.length) {
+      const t = el('div', 'wl-sums');
+      for (const r of sm) t.appendChild(el('div', 'wl-sum', r.field + ' · ' + r.season + ': ' + tr('Sessions: {n}', { n: r.count }) + ' · ' + C.dur(r.ms) + ' h · '
+        + fmtArea(r.areaSqM) + (r.areaMissing ? ' (' + tr('without area: {n}', { n: r.areaMissing }) + ')' : '')));
+      box.appendChild(t);
+    }
+    // Entries
+    const ul = el('div', 'tbk-list');
+    if (!list.length) ul.appendChild(el('div', 'tp-note', T(tr('No entries yet.'))));
+    for (const e of list) {
+      const r = el('button', 'tbk-it wl-it' + (e.open ? ' on' : ''));
+      const nm = el('span', 'tbk-nm');
+      nm.appendChild(el('small', '', C.dDate(C.t0(e)) + ' · ' + C.dTime(C.t0(e)) + '–' + (e.open ? T(tr('running')) : C.dTime(C.t1(e))) + ' · ' + C.dur(C.t1(e) - C.t0(e)) + ' h'));
+      nm.appendChild(el('b', '', e.field + ' · ' + e.job));
+      const a = C.sessionArea(e);
+      nm.appendChild(el('small', '', [a == null ? T(tr('area: —')) : fmtArea(a), e.tool, e.widthM != null ? fmtUnit(e.widthM, 'm') : '', e.activity, e.product, e.amount].filter(Boolean).join(' · ')));
+      if (e.note) nm.appendChild(el('small', 'tbk-ch', e.note));
+      r.append(el('span', ''), nm, el('span', 'tbk-st', '✎')); // the list's three columns
+      onTap(r, () => { edit = e.id; last = ''; render(); });
+      ul.appendChild(r);
+    }
+    box.appendChild(ul);
+    // Export, print, file
+    const er = el('div', 'tb-row');
+    const btn = (label, fn, pri) => { const b = el('button', 'tp-btn' + (pri ? ' pri' : ''), T(label)); onTap(b, fn); er.appendChild(b); return b; };
+    btn(tr('Export CSV'), () => download('arbeitsprotokoll.csv', 'text/csv;charset=utf-8', C.csv(list, HEAD())), true);
+    btn(tr('Copy CSV'), () => copy(C.csv(list, HEAD()).replace(/^﻿/, '')));
+    btn(tr('Print page per field'), () => printFields(list));
+    btn(tr('Save as file'), () => download('arbeitsprotokoll.json', 'application/json', JSON.stringify({ format: 'aow-worklog', version: 1, entries: all() }, null, 1)));
+    btn(tr('Load from file'), () => fileIn.click());
+    box.appendChild(er);
+    box.appendChild(el('div', 'tp-note', T(NOTE)));
+    shB.appendChild(box);
+    shB.scrollTop = top;
+  }
+  function renderEdit() {
+    const e = all().find(x => x.id === edit); if (!e) { edit = null; render(); return; }
+    const box = el('div', 'tb-box');
+    box.appendChild(el('div', 'tb-lbl', e.field + ' · ' + e.job + ' · ' + C.dDate(C.t0(e))));
+    const a = C.sessionArea(e), ov = C.overlap(e), tr0 = C.delta(e.tripStart, e.tripEnd);
+    const src = (e.hostStart != null || e.hostEnd != null) && C.t0(e) === (e.hostStart != null ? e.hostStart : e.start) && C.t1(e) === (e.hostEnd != null ? e.hostEnd : e.end)
+      ? ' · ' + T(e.hostStart != null && e.hostEnd != null ? tr('start and end from the guidance computer') : e.hostStart != null ? tr('start from the guidance computer') : tr('end from the guidance computer')) : '';
+    for (const [k, v] of [[tr('Time'), C.dTime(C.t0(e)) + '–' + (e.open ? T(tr('running')) : C.dTime(C.t1(e))) + ' (' + C.dur(C.t1(e) - C.t0(e)) + ' h)' + src],
+      [tr('Area this session'), a == null ? '—' : fmtArea(a)], [tr('Job area total'), e.workedEnd == null ? '—' : fmtArea(e.workedEnd)],
+      [tr('Overlap, job total'), ov == null ? '—' : fmtArea(ov)], [tr('Distance'), tr0 == null ? '—' : fmtUnit(tr0, 'm', 0)],
+      [tr('Tool'), e.tool || '—'], [tr('Working width'), e.widthM == null ? '—' : fmtUnit(e.widthM, 'm')], [tr('Vehicle'), e.vehicle || '—'], [tr('Work type'), e.workType || '—']])
+      box.appendChild(el('div', 'tp-note', T(k) + ': ' + v));
+    const inputs = {};
+    for (const [k, label] of [['activity', tr('Activity')], ['product', tr('Product / variety')], ['amount', tr('Amount')], ['note', tr('Note')]]) {
+      const row = el('label', 'wl-f'); row.appendChild(el('span', '', T(label)));
+      const i = el('input', 'tp-in'); i.value = e[k] || ''; i.style.cssText = 'width:100%;text-align:left;font:inherit'; i.maxLength = 500;
+      inputs[k] = i; row.appendChild(i); box.appendChild(row);
+    }
+    const r = el('div', 'tb-row');
+    const ok = el('button', 'tp-btn pri big', T(tr('Save'))); onTap(ok, () => {
+      const upd = x => x.id === e.id ? { ...x, ...Object.fromEntries(Object.entries(inputs).map(([k, i]) => [k, i.value.trim()])), mod: Date.now() } : x;
+      state = { entries: state.entries.map(upd), open: state.open ? upd(state.open) : null, deleted: state.deleted }; changed(); edit = null; last = ''; render();
+    });
+    const back = el('button', 'tp-btn', '← ' + T(tr('Back'))); onTap(back, () => { edit = null; last = ''; render(); });
+    const del = el('button', 'tp-btn quiet', T(tr('Delete entry'))); del.disabled = !!e.open;
+    let armed = false;
+    onTap(del, () => {
+      if (!armed) { armed = true; del.textContent = T(tr('Tap again to delete')); return; }
+      state = { entries: state.entries.filter(x => x.id !== e.id), open: state.open, deleted: state.deleted.concat([e.id]) }; changed(); edit = null; last = ''; render();
+    });
+    r.append(ok, back, del); box.appendChild(r);
+    shB.appendChild(box);
+  }
+
+  // --- Files -----------------------------------------------------------------------------------
+  // Browser download. The Android/iOS app views have no download or print hook (see
+  // docs/Arbeitsdoku.md); "Copy CSV" is the way there.
+  function download(name, type, text) {
+    try {
+      const url = URL.createObjectURL(new Blob([text], { type }));
+      const a = el('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      msg = tr('File created: {f}. If nothing is downloaded on this tablet, use "Copy CSV".', { f: name });
+    } catch (_) { msg = tr('Download not possible here. Use "Copy CSV".'); }
+    last = ''; render();
+  }
+  async function copy(text) {
+    try { await navigator.clipboard.writeText(text); msg = tr('CSV copied. Paste it into a spreadsheet or an e-mail.'); }
+    catch (_) { msg = tr('Copying is not possible in this browser.'); }
+    last = ''; render();
+  }
+  fileIn.addEventListener('change', async () => {
+    const f = fileIn.files && fileIn.files[0]; fileIn.value = ''; if (!f) return;
+    try {
+      const v = JSON.parse(await f.text());
+      if (!v || v.format !== 'aow-worklog' || !Array.isArray(v.entries)) throw new Error('format');
+      const have = new Set(all().map(e => e.id));
+      const add = v.entries.filter(e => e && e.id && !have.has(e.id) && typeof e.field === 'string' && typeof e.start === 'number').map(e => ({ ...e, open: false }));
+      const m = C.merge({ entries: state.entries, deleted: state.deleted }, { entries: add });
+      state = { entries: m.entries, open: state.open, deleted: m.deleted }; changed();
+      msg = tr('{n} entries loaded; entries already here are kept.', { n: add.length });
+    } catch (_) { msg = tr('Not a work log file of this app.'); }
+    last = ''; render();
+  });
+
+  // --- Print: one page per field, through the browser's print (save as PDF there) -------------
+  const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  function printFields(list) {
+    const by = new Map(); for (const e of list) { if (!by.has(e.field)) by.set(e.field, []); by.get(e.field).push(e); }
+    let h = '';
+    for (const [field, es] of by) {
+      const s = C.sums(es);
+      h += '<section class="wl-page"><h1>' + esc(T(tr('Work log'))) + ': ' + esc(field) + '</h1>'
+        + '<p>' + s.map(r => esc(r.season + ': ' + tr('Sessions: {n}', { n: r.count }) + ' · ' + C.dur(r.ms) + ' h · ' + fmtArea(r.areaSqM))).join('<br>') + '</p>'
+        + '<table><tr>' + [tr('Date'), tr('Time'), tr('Job'), tr('Area this session'), tr('Tool'), tr('Working width'), tr('Activity'), tr('Product / variety'), tr('Amount'), tr('Note')]
+          .map(k => '<th>' + esc(T(k)) + '</th>').join('') + '</tr>'
+        + es.slice().sort((a, b) => a.start - b.start).map(e => '<tr>' + [C.dDate(C.t0(e)), C.dTime(C.t0(e)) + '–' + C.dTime(C.t1(e)), e.job,
+          C.sessionArea(e) == null ? '—' : fmtArea(C.sessionArea(e)), e.tool, e.widthM == null ? '' : fmtUnit(e.widthM, 'm'), e.activity, e.product, e.amount, e.note]
+          .map(v => '<td>' + esc(v) + '</td>').join('') + '</tr>').join('') + '</table>'
+        + '<p class="wl-n">' + esc(T(NOTE)) + '</p></section>';
+    }
+    printBox.innerHTML = h;
+    document.documentElement.setAttribute('data-print', 'worklog');
+    const done = () => { document.documentElement.removeAttribute('data-print'); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    try { window.print(); } catch (_) { done(); }
+    setTimeout(() => { if (document.documentElement.hasAttribute('data-print')) { msg = tr('If no print dialog opened, this app view cannot print; use a browser on a PC.'); last = ''; render(); } }, 1500);
+  }
+
+  // --- Menu tile (in the field) ---------------------------------------------------------------
+  const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5M9 12h7M9 16h7M9 8h2"/></svg>';
+  setInterval(() => {
+    const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
+    const f = m.querySelector('.tui-tiles.tui-f'); if (!f || f.querySelector('[data-tile="worklog"]')) return;
+    const t = el('button', 'tui-tile field'); t.dataset.tile = 'worklog'; t.innerHTML = IC + '<span></span>';
+    t.querySelector('span').textContent = T(tr('Work log'));
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
+    f.appendChild(t);
+  }, 300);
+  // Other records kept in the same store (kind set): read, add or replace, delete.
+  const records = kind => state.entries.filter(e => e.kind === kind);
+  function put(rec) {
+    const r = { ...rec, mod: Date.now(), open: false };
+    state = { ...state, entries: state.entries.some(e => e.id === r.id) ? state.entries.map(e => e.id === r.id ? r : e) : state.entries.concat([r]) };
+    unsent = true; changed();
+  }
+  function remove(id) { state = { ...state, entries: state.entries.filter(e => e.id !== id), deleted: state.deleted.concat([id]) }; changed(); }
+  return { open, records, put, remove, get entries() { return all(); }, get unsent() { return unsent; },
+    get hostAt() { return hostErr ? 0 : hostAt; } };
+})();
+// worklog-ui:end
+
+// ===== Acceptance record (feature/abnahme) =====================================================
+// A guided handover of a fitted kit to the customer: kit data (tractor, customer, date, the
+// antenna and dual settings as they are set), time to RTK Fix, a straight run with steering
+// (cross-track error as the host reports it: mean, maximum, spread), a run on a slope (the same,
+// plus the host's roll), a U-turn, the steering-off checks (button; overriding at the wheel) and
+// the direction check or dual heading. Each step: passed, failed or skipped, with a remark. The
+// limits are the fitter's own (typed, none given by the app); a measured value is only compared
+// with a limit the fitter entered. Printable (browser print, PDF there) and CSV. Kept like the
+// work log: on this tablet and on the guidance computer (TabletWorkLog's store, kind
+// 'acceptance', /worklog). Only data the host already sends; docs/Abnahme.md lists what is missing.
+// acceptance:begin
+const AcceptCore = (() => {
+  const num = v => typeof v === 'number' && Number.isFinite(v) ? v : null;
+  // Steps in the order they are done. kind: what is measured.
+  const STEPS = [
+    { k: 'kit', kind: 'kit', t: tr('Kit data') },
+    { k: 'rtk', kind: 'timer', t: tr('Time to RTK Fix') },
+    { k: 'straight', kind: 'run', t: tr('Straight run with steering') },
+    { k: 'slope', kind: 'run', roll: true, t: tr('Run on a slope') },
+    { k: 'uturn', kind: 'run', turn: true, t: tr('U-turn') },
+    { k: 'offButton', kind: 'off', t: tr('Steering off: button') },
+    { k: 'offWheel', kind: 'off', t: tr('Steering off: overriding at the wheel') },
+    { k: 'direction', kind: 'direction', t: tr('Direction check / dual heading') },
+  ];
+  // A sample of a run: only while the host steers on a line (engaged, guidance active, the module
+  // not reporting "not steering"); for straight and slope also not in a U-turn. One per host tick.
+  function sample(rec, t, turn) {
+    if (!t || !t.op || num(t.hostMs) == null || t.hostMs === rec.lastMs) return rec;
+    const r = { ...rec, lastMs: t.hostMs };
+    if (turn && t.op.executing) r.turned = true;
+    const steering = t.op.autoSteer && t.guidanceActive && !t.op.moduleNotSteering && (turn || !t.op.executing);
+    if (!steering || num(t.crossTrackError) == null) return r;
+    r.xte = (rec.xte || []).concat([t.crossTrackError]);
+    if (num(t.roll) != null) r.roll = (rec.roll || []).concat([t.roll]);
+    return r;
+  }
+  // Mean (signed: the side it keeps to), maximum of the amount, spread (standard deviation).
+  function stats(xs) {
+    const a = (xs || []).filter(x => num(x) != null);
+    if (!a.length) return null;
+    const mean = a.reduce((s, x) => s + x, 0) / a.length;
+    const sd = Math.sqrt(a.reduce((s, x) => s + (x - mean) * (x - mean), 0) / a.length);
+    return { n: a.length, mean, max: Math.max(...a.map(Math.abs)), sd };
+  }
+  // The fitter's limits (m) against the measured values; null where no limit was entered.
+  function within(st, lim) {
+    if (!st || !lim) return null;
+    const checks = [['mean', Math.abs(st.mean)], ['max', st.max], ['sd', st.sd]].filter(([k]) => num(lim[k]) != null);
+    if (!checks.length) return null;
+    return checks.every(([k, v]) => v <= lim[k]);
+  }
+  // Steering off: armed while the host steers; seen when it stops (engaged → off, or the module
+  // reports not steering).
+  function off(rec, t, now) {
+    if (!t || !t.op || rec.seenAt != null) return rec;
+    if (t.op.autoSteer && !t.op.moduleNotSteering) return rec.armed != null ? rec : { ...rec, armed: now };
+    if (rec.armed != null) return { ...rec, seenAt: now, how: t.op.autoSteer ? 'module' : 'off' };
+    return rec;
+  }
+  const RES = { pass: tr('passed'), fail: tr('failed'), skip: tr('skipped') };
+  const cm = m => m == null ? '' : (m * 100).toFixed(1).replace('.', ',');
+  const p2 = n => String(n).padStart(2, '0');
+  const dDate = ms => { const d = new Date(ms); return p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + '.' + d.getFullYear(); };
+  const cell = v => { const x = String(v == null ? '' : v); return /[;"\r\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
+  // One row per step: step; result; measured; limits; remark. Lengths in cm with a decimal comma.
+  const dec1 = v => v.toFixed(1).replace('.', ',');
+  function values(step, d) {
+    if (!d) return '';
+    if (step.kind === 'timer') return d.seconds == null ? '' : tr('{s} s', { s: d.seconds });
+    if (step.kind === 'run') {
+      const st = stats(d.xte), parts = [];
+      if (st) parts.push(tr('cross-track: mean {m} cm, maximum {x} cm, spread {s} cm ({n} values)', { m: cm(st.mean), x: cm(st.max), s: cm(st.sd), n: st.n }));
+      const rl = stats(d.roll); if (step.roll && rl) parts.push(tr('roll: mean {m}°, maximum {x}°', { m: dec1(rl.mean), x: dec1(rl.max) }));
+      if (step.turn) parts.push(d.turned ? tr('U-turn driven') : tr('no U-turn seen'));
+      return parts.join('; ');
+    }
+    if (step.kind === 'off') return d.seenAt ? tr('steering stopped {s} s after it was armed', { s: dec1((d.seenAt - d.armed) / 1000) })
+      + (d.how === 'module' ? ' (' + tr('module reports not steering') + ')' : '') : '';
+    if (step.kind === 'direction') return d.dual == null ? '' : d.dual ? (d.dualOk ? tr('dual heading present') : tr('dual heading missing'))
+      : d.confirmed ? tr('one antenna, direction confirmed') : tr('one antenna, direction not confirmed');
+    return '';
+  }
+  const LIM = { mean: tr('mean'), max: tr('maximum'), sd: tr('spread') };
+  const limits = d => d && d.lim ? ['mean', 'max', 'sd'].filter(k => num(d.lim[k]) != null).map(k => tr('{what} ≤ {v} cm', { what: I18n.text(LIM[k]), v: cm(d.lim[k]) })).join(', ') : '';
+  // head: translated column names; name: translates a step's title or a result word.
+  function csv(rec, head, name = x => x) {
+    const k = rec.kit || {};
+    const rows = [head.kit, [k.customer, k.tractor, k.vehicleProfile, dDate(rec.start), k.antennaHeight, k.antennaPivot, k.antennaOffset, k.wheelbase, k.dual ? 'dual' : 'single', k.dualHeadingOffset],
+      [], head.steps];
+    for (const s of STEPS.filter(x => x.kind !== 'kit')) {
+      const d = (rec.steps || {})[s.k] || {};
+      rows.push([name(s.t), d.res ? name(RES[d.res]) : '', values(s, d), limits(d), d.note || '']);
+    }
+    return '﻿' + rows.map(r => r.map(cell).join(';')).join('\r\n') + '\r\n';
+  }
+  return { STEPS, sample, stats, within, off, values, limits, csv, cm, dDate, RES };
+})();
+// acceptance:end
+
+const TabletAcceptance = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
+  const A = AcceptCore, KIND = 'acceptance';
+  const sheet = el('div', 'tui-sheet tb-sheet tbk-sheet'); sheet.id = 'tui-accept'; sheet.setAttribute('translate', 'no');
+  sheet.innerHTML = '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>';
+  const scrim = el('div', 'tp-scrim');
+  document.body.append(scrim, sheet);
+  for (const n of [sheet, scrim]) n.addEventListener('pointerdown', e => e.stopPropagation());
+  const shT = sheet.querySelector('.t'), shB = sheet.querySelector('.tui-sh-body');
+  const isOpen = () => sheet.classList.contains('open');
+  const close = () => { sheet.classList.remove('open'); scrim.classList.remove('open'); stopAll(); };
+  onTap(sheet.querySelector('.x'), close); onTap(scrim, close);
+  let cur = null, step = null, last = '', msg = '';   // cur: the record being edited; step: its open step key
+  let running = null;                                 // { k, kind } of a measurement in progress
+  function open() { if (typeof lnCloseAll === 'function') lnCloseAll(); sheet.classList.add('open'); scrim.classList.add('open'); last = ''; render(); }
+  const list = () => (typeof TabletWorkLog !== 'undefined' ? TabletWorkLog.records(KIND) : []).slice().sort((a, b) => b.start - a.start);
+  const save = () => { if (cur) TabletWorkLog.put(cur); };
+  const sd = k => (cur.steps || {})[k] || {};
+  const setStep = (k, d) => { cur = { ...cur, steps: { ...(cur.steps || {}), [k]: { ...sd(k), ...d } }, end: Date.now() }; };
+  function stopAll() { if (running) { running = null; save(); } }
+
+  // What the host has set now: copied into the record when the kit step is saved.
+  function kitNow() {
+    const v = config && config.vehicle || {}, g = config && config.gps || {};
+    return { vehicleProfile: profiles ? profiles.activeVehicle || '' : '', antennaHeight: v.antennaHeight, antennaPivot: v.antennaPivot,
+      antennaOffset: v.antennaOffset, wheelbase: v.wheelbase, dual: !!g.isDualGps, dualHeadingOffset: g.isDualGps ? g.dualHeadingOffset : null };
+  }
+  function newRecord() {
+    const now = Date.now();
+    cur = { id: 'a' + now.toString(36) + Math.random().toString(36).slice(2, 6), kind: KIND, start: now, end: now,
+      kit: { customer: '', tractor: '', ...kitNow() }, steps: {} };
+    step = 'kit'; save();
+  }
+
+  // Measurements, fed from the host's ticks and status.
+  setInterval(() => {
+    if (!running || !cur) return;
+    const s = A.STEPS.find(x => x.k === running.k), d = sd(running.k), now = Date.now();
+    if (running.kind === 'timer') {
+      if (statusBar && statusBar.fixQuality === 4 && !statusBar.gpsLost) { setStep(running.k, { seconds: Math.round((now - d.t0) / 1000) }); running = null; save(); }
+    } else if (running.kind === 'run') {
+      const r = A.sample(d, tick, !!s.turn); if (r !== d) setStep(running.k, r);
+    } else if (running.kind === 'off') {
+      const r = A.off(d, tick, now); if (r !== d) { setStep(running.k, r); if (r.seenAt) { running = null; save(); } }
+    }
+    if (isOpen()) render();
+  }, 100);
+
+  function render() {
+    if (!isOpen()) return;
+    const key = JSON.stringify([cur, step, running, msg, I18n.language, list().length, statusBar && statusBar.fixQuality,
+      tick && tick.op && [tick.op.autoSteer, tick.op.moduleNotSteering]]);
+    if (key === last) return;
+    if (document.activeElement && sheet.contains(document.activeElement) && /^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+    last = key;
+    shT.textContent = T(tr('Acceptance record'));
+    shB.innerHTML = '';
+    const box = el('div', 'tb-box'); shB.appendChild(box);
+    if (msg) box.appendChild(el('div', 'tp-note', T(msg)));
+    if (!cur) return renderList(box);
+    if (step) return renderStep(box);
+    renderRecord(box);
+  }
+  const btn = (row, label, fn, cls) => { const b = el('button', 'tp-btn' + (cls ? ' ' + cls : ''), T(label)); onTap(b, fn); row.appendChild(b); return b; };
+
+  function renderList(box) {
+    box.appendChild(el('div', 'tp-note', T(tr('Handing over a fitted kit: work through the steps with the customer. The limits are yours to enter; the app gives none.'))));
+    const r = el('div', 'tb-row'); btn(r, tr('New acceptance record'), () => { msg = ''; newRecord(); last = ''; render(); }, 'pri'); box.appendChild(r);
+    const ul = el('div', 'tbk-list');
+    const recs = list();
+    if (!recs.length) ul.appendChild(el('div', 'tp-note', T(tr('No acceptance records yet.'))));
+    for (const a of recs) {
+      const it = el('button', 'tbk-it'), nm = el('span', 'tbk-nm');
+      nm.appendChild(el('small', '', A.dDate(a.start)));
+      nm.appendChild(el('b', '', [a.kit && a.kit.customer, a.kit && a.kit.tractor].filter(Boolean).join(' · ') || T(tr('(no name)'))));
+      const res = A.STEPS.filter(s => s.kind !== 'kit').map(s => ((a.steps || {})[s.k] || {}).res);
+      nm.appendChild(el('small', '', T(tr('passed: {p}, failed: {f}, skipped: {s}, open: {o}', { p: res.filter(x => x === 'pass').length,
+        f: res.filter(x => x === 'fail').length, s: res.filter(x => x === 'skip').length, o: res.filter(x => !x).length }))));
+      it.append(el('span', ''), nm, el('span', 'tbk-st', '›'));
+      onTap(it, () => { cur = a; step = null; msg = ''; last = ''; render(); });
+      ul.appendChild(it);
+    }
+    box.appendChild(ul);
+  }
+
+  function renderRecord(box) {
+    const k = cur.kit || {};
+    box.appendChild(el('div', 'tb-lbl', [k.customer, k.tractor, A.dDate(cur.start)].filter(Boolean).join(' · ')));
+    const ul = el('div', 'tbk-list');
+    for (const s of A.STEPS) {
+      const d = sd(s.k), it = el('button', 'tbk-it'), nm = el('span', 'tbk-nm');
+      nm.appendChild(el('b', '', T(s.t)));
+      const v = s.kind === 'kit' ? [k.customer, k.tractor].filter(Boolean).join(' · ') : A.values(s, d);
+      if (v) nm.appendChild(el('small', '', v));
+      if (d.note) nm.appendChild(el('small', 'tbk-ch', d.note));
+      it.append(el('span', ''), nm, el('span', 'tbk-st', s.kind === 'kit' ? '›' : d.res ? T(A.RES[d.res]) : '—'));
+      onTap(it, () => { step = s.k; msg = ''; last = ''; render(); });
+      ul.appendChild(it);
+    }
+    box.appendChild(ul);
+    const r = el('div', 'tb-row');
+    btn(r, tr('Print / PDF'), () => print(cur), 'pri');
+    btn(r, tr('Export CSV'), () => download(cur));
+    btn(r, '← ' + T(tr('All records')), () => { stopAll(); cur = null; last = ''; render(); });
+    let armed = false;
+    const del = btn(r, tr('Delete record'), () => {
+      if (!armed) { armed = true; del.textContent = T(tr('Tap again to delete')); return; }
+      TabletWorkLog.remove(cur.id); cur = null; last = ''; render();
+    }, 'quiet');
+    box.appendChild(r);
+    box.appendChild(el('div', 'tp-note', T(tr('Kept on this tablet and on the guidance computer, like the work log.'))));
+  }
+
+  const field = (box, label, value, onInput, type) => {
+    const row = el('label', 'wl-f'); row.appendChild(el('span', '', T(label)));
+    const i = el('input', 'tp-in'); i.value = value == null ? '' : String(value); if (type) i.inputMode = type;
+    i.style.cssText = 'width:100%;text-align:left;font:inherit'; i.maxLength = 200;
+    i.addEventListener('change', () => onInput(i.value.trim()));
+    row.appendChild(i); box.appendChild(row); return i;
+  };
+  const shown = (v, u) => v == null || !Number.isFinite(v) ? '—' : fmtUnit(v, u);
+  const parseCm = v => { const n = parseFloat(String(v).replace(',', '.')); return Number.isFinite(n) && n >= 0 ? n / 100 : null; };
+
+  function renderStep(box) {
+    const s = A.STEPS.find(x => x.k === step), d = sd(step);
+    box.appendChild(el('div', 'tb-lbl', T(s.t)));
+    if (s.kind === 'kit') {
+      const k = cur.kit || {};
+      field(box, tr('Customer'), k.customer, v => { cur = { ...cur, kit: { ...cur.kit, customer: v } }; save(); });
+      field(box, tr('Tractor'), k.tractor, v => { cur = { ...cur, kit: { ...cur.kit, tractor: v } }; save(); });
+      box.appendChild(el('div', 'tp-note', T(tr('Date')) + ': ' + A.dDate(cur.start)));
+      box.appendChild(el('div', 'tp-note', T(tr('As set in the app (vehicle profile "{p}"):', { p: k.vehicleProfile || '—' }))));
+      for (const [l, v, u] of [[tr('Antenna height'), k.antennaHeight, 'm'], [tr('Antenna pivot'), k.antennaPivot, 'm'],
+        [tr('Antenna offset'), k.antennaOffset, 'm'], [tr('Wheelbase'), k.wheelbase, 'm']])
+        box.appendChild(el('div', 'tp-note', T(l) + ': ' + shown(v, u)));
+      box.appendChild(el('div', 'tp-note', T(tr('Dual antenna')) + ': ' + (k.dual ? T(tr('yes')) + ', ' + T(tr('heading offset')) + ' ' + (k.dualHeadingOffset == null ? '—' : k.dualHeadingOffset + '°') : T(tr('no')))));
+      const r = el('div', 'tb-row');
+      btn(r, tr('Take the current settings'), () => { cur = { ...cur, kit: { ...cur.kit, ...kitNow() } }; save(); last = ''; render(); });
+      btn(r, tr('Done'), () => { step = null; save(); last = ''; render(); }, 'pri');
+      box.appendChild(r);
+      return;
+    }
+    const isRunning = running && running.k === step;
+    if (s.kind === 'timer') {
+      box.appendChild(el('div', 'tp-note', T(tr('Start when the receiver is switched on; it stops by itself at RTK Fix (fix quality 4 from the guidance computer).'))));
+      box.appendChild(el('div', 'tp-note', T(tr('Now')) + ': ' + ((statusBar && statusBar.fixText) || '—')
+        + (isRunning ? ' · ' + Math.round((Date.now() - d.t0) / 1000) + ' s' : d.seconds != null ? ' · ' + T(tr('Time to RTK Fix')) + ': ' + d.seconds + ' s' : '')));
+      const r = el('div', 'tb-row');
+      if (!isRunning) btn(r, tr('Start'), () => { setStep(step, { t0: Date.now(), seconds: null }); running = { k: step, kind: s.kind }; save(); last = ''; render(); }, 'pri');
+      else btn(r, tr('Stop'), () => { running = null; save(); last = ''; render(); });
+      box.appendChild(r);
+    } else if (s.kind === 'run') {
+      box.appendChild(el('div', 'tp-note', T(s.turn
+        ? tr('Engage steering on a line with U-turns on, start, let it turn and come back onto the next line, then stop.')
+        : s.roll ? tr('Engage steering on a line across the slope, start, drive, stop.') : tr('Engage steering on a straight line, start, drive, stop.'))));
+      box.appendChild(el('div', 'tp-note', T(tr('Counted only while the guidance computer steers on the line (engaged, not "not steering"){x}.', { x: s.turn ? '' : T(tr(', not in a U-turn')) }))));
+      const st = A.stats(d.xte);
+      box.appendChild(el('div', 'tp-note', st ? T(tr('Cross-track error: mean {m} cm, maximum {x} cm, spread {s} cm ({n} values)', { m: A.cm(st.mean), x: A.cm(st.max), s: A.cm(st.sd), n: st.n })) : T(tr('No values yet.'))));
+      const rl = A.stats(d.roll);
+      if (s.roll && rl) box.appendChild(el('div', 'tp-note', T(tr('Roll from the guidance computer: mean {m}°, maximum {x}°', { m: rl.mean.toFixed(1), x: rl.max.toFixed(1) }))));
+      if (s.turn) box.appendChild(el('div', 'tp-note', T(d.turned ? tr('U-turn driven.') : tr('No U-turn seen yet.'))));
+      box.appendChild(el('div', 'tp-note', T(tr('Your limits in cm (empty = not checked):'))));
+      const lim = d.lim || {}, lr = el('div', ''); lr.style.cssText = 'display:flex;gap:12px';
+      for (const [k2, l] of [['mean', tr('Mean, amount')], ['max', tr('Maximum')], ['sd', tr('Spread')]]) {
+        const c = el('div', ''); c.style.cssText = 'flex:1;min-width:0'; lr.appendChild(c);
+        field(c, l, lim[k2] == null ? '' : A.cm(lim[k2]), v => { setStep(step, { lim: { ...(sd(step).lim || {}), [k2]: parseCm(v) } }); save(); last = ''; render(); }, 'decimal');
+      }
+      box.appendChild(lr);
+      const w = A.within(st, d.lim);
+      if (w != null) box.appendChild(el('div', 'tp-note' + (w ? '' : ' warn'), T(w ? tr('Within your limits.') : tr('Outside your limits.'))));
+      const r = el('div', 'tb-row');
+      if (!isRunning) btn(r, d.xte && d.xte.length ? tr('Measure again') : tr('Start'), () => { setStep(step, { xte: [], roll: [], turned: false, lastMs: null }); running = { k: step, kind: s.kind }; last = ''; render(); }, 'pri');
+      else btn(r, tr('Stop'), () => { running = null; save(); last = ''; render(); });
+      box.appendChild(r);
+    } else if (s.kind === 'off') {
+      box.appendChild(el('div', 'tp-note', T(step === 'offButton'
+        ? tr('Engage steering, start, then switch it off with the button (on the screen or the steer switch).')
+        : tr('Engage steering, start, then turn the steering wheel by hand until the steering lets go.'))));
+      box.appendChild(el('div', 'tp-note', T(tr('The guidance computer reports only that steering stopped, not why; whether it was this action is your call.'))));
+      box.appendChild(el('div', 'tp-note', d.seenAt ? T(tr('Steering stopped {s} s after it was armed.', { s: ((d.seenAt - d.armed) / 1000).toFixed(1) }))
+        : isRunning ? T(d.armed ? tr('Armed: steering is on. Now switch it off.') : tr('Waiting for steering to be engaged…')) : T(tr('Not measured yet.'))));
+      const r = el('div', 'tb-row');
+      if (!isRunning) btn(r, tr('Start'), () => { setStep(step, { armed: null, seenAt: null, how: null }); running = { k: step, kind: s.kind }; last = ''; render(); }, 'pri');
+      else btn(r, tr('Stop'), () => { running = null; save(); last = ''; render(); });
+      box.appendChild(r);
+    } else if (s.kind === 'direction') {
+      const g = config && config.gps || {}, dual = !!g.isDualGps;
+      const now = { dual, dualOk: dual && !!statusBar && !statusBar.dualHeadingMissing,
+        confirmed: typeof TabletSteerConfirm !== 'undefined' && TabletSteerConfirm.confirmed };
+      box.appendChild(el('div', 'tp-note', T(dual ? (now.dualOk ? tr('Dual antenna: the dual heading arrives.') : tr('Dual antenna: no dual heading.'))
+        : now.confirmed ? tr('One antenna: the direction was confirmed on the card since the start.') : tr('One antenna: the direction is not confirmed yet. Drive forward a few metres and confirm it on the card.'))));
+      const r = el('div', 'tb-row');
+      btn(r, tr('Take this state'), () => { setStep(step, now); save(); last = ''; render(); }, 'pri');
+      box.appendChild(r);
+      if (d.dual != null) box.appendChild(el('div', 'tp-note', T(tr('Taken')) + ': ' + A.values(s, d)));
+    }
+    // Result and remark
+    const rr = el('div', 'tb-row');
+    for (const res of ['pass', 'fail', 'skip']) {
+      const b = btn(rr, A.RES[res], () => { setStep(step, { res: d.res === res ? '' : res }); save(); last = ''; render(); }, d.res === res ? 'pri' : '');
+      b.setAttribute('aria-pressed', d.res === res ? 'true' : 'false');
+    }
+    box.appendChild(rr);
+    field(box, tr('Note'), d.note, v => { setStep(step, { note: v }); save(); });
+    const nav = el('div', 'tb-row');
+    const i = A.STEPS.findIndex(x => x.k === step);
+    btn(nav, '← ' + T(tr('Back')), () => { stopAll(); step = null; last = ''; render(); });
+    if (i < A.STEPS.length - 1) btn(nav, tr('Next step'), () => { stopAll(); step = A.STEPS[i + 1].k; last = ''; render(); });
+    box.appendChild(nav);
+  }
+
+  // --- Export ------------------------------------------------------------------------------------
+  const HEAD = () => ({ kit: [tr('Customer'), tr('Tractor'), tr('Vehicle profile'), tr('Date'), tr('Antenna height (m)'), tr('Antenna pivot (m)'),
+    tr('Antenna offset (m)'), tr('Wheelbase (m)'), tr('Antenna'), tr('Dual heading offset (°)')].map(T),
+    steps: [tr('Step'), tr('Result'), tr('Measured'), tr('Limits'), tr('Note')].map(T) });
+  function download(rec) {
+    const out = A.csv(rec, HEAD(), T);
+    try {
+      const url = URL.createObjectURL(new Blob([out], { type: 'text/csv;charset=utf-8' }));
+      const a = el('a'); a.href = url; a.download = 'abnahme-' + A.dDate(rec.start).split('.').reverse().join('-') + '.csv';
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+      msg = tr('File created. If nothing is downloaded on this tablet, print it as a PDF from a browser on a PC.');
+    } catch (_) { msg = tr('Download not possible here.'); }
+    last = ''; render();
+  }
+  const esc = x => String(x == null ? '' : x).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+  function print(rec) {
+    const box = document.getElementById('tui-print'); if (!box) return;
+    const k = rec.kit || {}, H = HEAD();
+    const kv = H.kit.map((h, i) => [h, [k.customer, k.tractor, k.vehicleProfile, A.dDate(rec.start), k.antennaHeight, k.antennaPivot, k.antennaOffset, k.wheelbase,
+      k.dual ? T(tr('dual')) : T(tr('single')), k.dualHeadingOffset][i]]);
+    // Product name and version under the heading; origin and licence (Apache 2.0) at the foot.
+    const ver = (typeof appInfo !== 'undefined' && appInfo && appInfo.version) || '';
+    box.innerHTML = '<section class="wl-page"><h1>' + esc(T(tr('Acceptance record'))) + '</h1>'
+      + '<p class="wl-n">' + esc(BRAND.name + (ver ? ' ' + ver : '')) + '</p>'
+      + '<table>' + kv.map(([h, v]) => '<tr><th>' + esc(h) + '</th><td>' + esc(v == null ? '—' : v) + '</td></tr>').join('') + '</table><p></p>'
+      + '<table><tr>' + H.steps.map(h => '<th>' + esc(h) + '</th>').join('') + '</tr>'
+      + A.STEPS.filter(s => s.kind !== 'kit').map(s => { const d = (rec.steps || {})[s.k] || {};
+        return '<tr>' + [T(s.t), d.res ? T(A.RES[d.res]) : '—', A.values(s, d), A.limits(d), d.note].map(v => '<td>' + esc(v) + '</td>').join('') + '</tr>'; }).join('')
+      + '</table><p class="wl-n">' + esc(T(tr('Cross-track error and roll as the guidance computer reports them. Limits entered by the fitter. Signatures:'))) + '</p>'
+      + '<p>' + esc(T(tr('Fitter'))) + ': ______________________ &nbsp; ' + esc(T(tr('Customer'))) + ': ______________________</p>'
+      + '<p class="wl-n">' + esc(T(tr('Changed version (fork) of AgOpenWeb, based on AgOpenWeb; changed since October 2026. AgOpenWeb builds on AgOpenGPS (Brian Tee and contributors).')))
+      + ' ' + esc(T(tr('Licensed under the Apache License 2.0. You may use, change and pass it on; the source code is open.'))) + '</p></section>';
+    document.documentElement.setAttribute('data-print', 'worklog');
+    const done = () => { document.documentElement.removeAttribute('data-print'); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    try { window.print(); } catch (_) { done(); }
+    setTimeout(() => { if (document.documentElement.hasAttribute('data-print')) { msg = tr('If no print dialog opened, this app view cannot print; use a browser on a PC.'); last = ''; render(); } }, 1500);
+  }
+
+  // --- Menu tile (setup) ------------------------------------------------------------------------
+  const IC = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6v3H9z"/><path d="M6 5h12v16H6z"/><path d="M9 13l2 2 4-4"/></svg>';
+  setInterval(() => {
+    const m = document.getElementById('tui-menu'); if (!m || !m.classList.contains('open')) return;
+    const sBox = m.querySelector('.tui-tiles.tui-s'); if (!sBox || sBox.querySelector('[data-tile="accept"]')) return;
+    const t = el('button', 'tui-tile setup'); t.dataset.tile = 'accept'; t.innerHTML = IC + '<span></span>';
+    t.querySelector('span').textContent = T(tr('Acceptance record'));
+    onTap(t, () => { const x = m.querySelector('.tui-sh-hdr .x'); if (x) tuiPress(x); open(); });
+    sBox.appendChild(t);
   }, 300);
   return { open };
 })();
@@ -5110,3 +6170,115 @@ const TabletEama = (() => {
   }, 300);
   return { open };
 })();
+
+// ===== Firewall warning (feature/installer) =======================================================
+// The desktop launcher sends "firewall|missing" when the setup was to create the Windows Firewall
+// rules and they are not there (declined, failed, deleted later). Shows how to fix it; closable,
+// back at the next start while the rules are missing. Desktop window only (Photino channel).
+const TabletFirewall = (() => {
+  const T = k => I18n.text(k);
+  let box = null;
+  function show() {
+    if (box) return;
+    box = document.createElement('div'); box.id = 'tui-fw'; box.setAttribute('role', 'alert');
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕';
+    x.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); box.remove(); });
+    const h = document.createElement('div'); h.className = 'fw-t'; h.textContent = T(tr('Windows Firewall: the release for the modules is missing'));
+    const p = document.createElement('div');
+    p.textContent = T(tr('Modules and tablets on the network may be blocked. To fix it: Start menu → {n} → “Allow through firewall” (Windows asks for administrator rights), or run the setup again and allow the prompt.', { n: BRAND.name }));
+    box.append(x, h, p);
+    box.addEventListener('pointerdown', e => e.stopPropagation());
+    document.body.appendChild(box);
+  }
+  try {
+    if (window.external && typeof window.external.receiveMessage === 'function')
+      window.external.receiveMessage(m => { if (m === 'firewall|missing') show(); });
+  } catch (_) { /* not the desktop window */ }
+  return { show };
+})();
+
+// startup:begin
+// ===== Start time (feature/installer) ===========================================================
+// Time stamps of the page's start phases, from the navigation start: HTML received, DOM ready,
+// app.js run, CanvasKit ready, first data from the host, first map frame. Logged to the console;
+// in the desktop window also sent to the launcher (startup|{json}), which writes them into its
+// start log with the host's phases. Then the loading screen (#tui-boot, index.html) goes. Reads
+// state only; changes nothing in the app.
+const TabletStartup = (() => {
+  const marks = [];
+  const nav = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || null;
+  const mark = (name, ms) => marks.push([name, Math.round(ms == null ? performance.now() : ms)]);
+  // Automated browsers (CI layout checks, tests) measure the app at once: no loading screen.
+  if (navigator.webdriver) { const b = document.getElementById('tui-boot'); if (b) b.style.display = 'none'; }
+  if (nav) { mark('page: HTML received', nav.responseEnd); }
+  mark('page: app.js run');
+  let ckAt = 0, tickAt = 0, sent = false;
+  function finish(reason) {
+    if (sent) return; sent = true;
+    const n = (performance.getEntriesByType && performance.getEntriesByType('navigation')[0]) || nav;
+    if (n && n.domContentLoadedEventEnd) marks.push(['page: DOM ready', Math.round(n.domContentLoadedEventEnd)]);
+    const w = performance.getEntriesByType ? performance.getEntriesByType('resource').find(r => /canvaskit\.wasm/.test(r.name)) : null;
+    if (w) marks.push(['page: canvaskit.wasm fetched (' + Math.round(w.duration) + ' ms)', Math.round(w.responseEnd)]);
+    marks.push(['page: loading screen off (' + reason + ')', Math.round(performance.now())]);
+    marks.sort((a, b) => a[1] - b[1]);
+    const boot = document.getElementById('tui-boot');
+    if (boot) { boot.style.opacity = '0'; setTimeout(() => boot.remove(), 300); }
+    try { console.log('[startup] ' + marks.map(m => m[1] + ' ms ' + m[0]).join(' | ')); } catch (_) { /* no console */ }
+    try {
+      if (window.external && typeof window.external.sendMessage === 'function')
+        window.external.sendMessage('startup|' + JSON.stringify({ origin: performance.timeOrigin, marks }));
+    } catch (_) { /* not the desktop window */ }
+  }
+  function poll() {
+    if (sent) return;
+    const t = performance.now();
+    if (!ckAt && (CK && skSurface || /error|missing|no WebGL/.test(ckStatus || ''))) { ckAt = t; mark('page: CanvasKit ready', t); }
+    if (!tickAt && tick) { tickAt = t; mark('page: first data from host', t); }
+    // The frame after both: the map has drawn with data.
+    if (ckAt && tickAt) { requestAnimationFrame(() => { mark('page: first map frame'); finish('map drawn'); }); return; }
+    // Never hide the app's own messages (no host, no WebGL) behind the loading screen for long.
+    if (t > 15000) { finish('15 s'); return; }
+    requestAnimationFrame(poll);
+  }
+  requestAnimationFrame(poll);
+  return { get marks() { return marks.slice(); } };
+})();
+// startup:end
+
+// preload:begin
+// ===== Images decoded after the start (moritz.31 test, point 2) ===================================
+// The page fetches all its symbols at the start, but the browser decodes an image only when it is
+// first shown: a page opened for the first time decoded its pictures then (trace: 5–26 ms per page
+// here, several times that on a tablet), the second time not. Once the loading screen is gone and
+// the page has been idle for a moment, the images are decoded one at a time in idle time, so the
+// first opening finds them ready. Changes nothing the operator sees; stops when the page is hidden.
+const TabletPreload = (() => {
+  const seen = new Set();
+  let n = 0, ms = 0, busy = false, finished = false;
+  const idle = fn => (typeof requestIdleCallback === 'function' ? requestIdleCallback(fn, { timeout: 2000 }) : setTimeout(fn, 50));
+  function pending() {
+    const out = [];
+    for (const img of document.images) {
+      const src = img.currentSrc || img.src;
+      if (!src || seen.has(src) || !img.complete || !img.naturalWidth || typeof img.decode !== 'function') continue;
+      out.push([src, img]);
+    }
+    return out;
+  }
+  function step() {
+    if (document.hidden) { busy = false; return; }
+    // Four at a time: decoding runs beside the page's own thread; on a weak tablet the page is
+    // seldom idle, and one at a time took over 90 s there (CPU limited to 0.4 of a core).
+    const next = pending().slice(0, 4);
+    if (!next.length) { busy = false; finished = true; return; }
+    const t = performance.now();
+    Promise.all(next.map(([src, img]) => { seen.add(src); return img.decode().catch(() => {}); }))
+      .then(() => { n += next.length; ms += performance.now() - t; idle(step); });
+  }
+  function start() { if (busy) return; busy = true; idle(step); }
+  // After the loading screen (#tui-boot) is gone, 2 s later; again for images added since (30 s).
+  const wait = setInterval(() => { if (!document.getElementById('tui-boot')) { clearInterval(wait); setTimeout(start, 2000); setInterval(start, 30000); } }, 500);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && seen.size) start(); });
+  return { get decoded() { return n; }, get ms() { return Math.round(ms); }, get done() { return finished && !busy; } };
+})();
+// preload:end
