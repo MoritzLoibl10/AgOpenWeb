@@ -27,7 +27,7 @@ sealed class Program
         var single = SingleInstance.TryAcquire();
         if (single == null)
         {
-            Console.Error.WriteLine("AgOpenWeb is already running on this computer. Open it at http://localhost:5174.");
+            Console.Error.WriteLine($"{Brand.ProductName} is already running on this computer. Open it at http://localhost:5174.");
             Environment.Exit(1);
             return;
         }

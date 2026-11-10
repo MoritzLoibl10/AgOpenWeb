@@ -406,6 +406,16 @@
 #tui-setup1 .fs1-v { text-align: right; }
 #tui-setup1-back { position: fixed; z-index: 36; left: 50%; transform: translateX(-50%); top: calc(var(--tui-sb-h) + 6px + var(--sat, 0px)); box-shadow: 0 6px 18px rgba(0,0,0,0.3); }
 #tui-setup1-back[hidden] { display: none; }
+/* Notice at first start (feature/auslieferung). */
+#tui-legal { position: fixed; z-index: 60; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(640px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px); overflow: auto; box-sizing: border-box; padding: 18px 20px; border-radius: 14px;
+  background: var(--tui-card, #fff); color: var(--tui-ink, #111); border: 2px solid var(--tui-warn); box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+  font: 600 var(--tui-fs-lbl)/1.45 system-ui, sans-serif; }
+#tui-legal[hidden] { display: none; }
+#tui-legal .lg-n { color: var(--tui-acc); font: 800 var(--tui-fs-lbl) system-ui, sans-serif; margin-bottom: 2px; }
+#tui-legal .lg-t { font: 900 calc(var(--tui-fs-lbl) + 4px) system-ui, sans-serif; margin-bottom: 8px; }
+#tui-legal .lg-l { margin: 0 0 14px; padding-left: 22px; }
+#tui-legal .lg-l li { margin: 6px 0; }
 #tui-sb-clock { font: 800 var(--tui-fs-val) ui-monospace, SFMono-Regular, Menlo, monospace; font-variant-numeric: tabular-nums;
   white-space: nowrap; align-items: center; }
 /* GPS/RTK: the fix quality also as a border pattern (solid = RTK fix, dashed = float,
@@ -2985,6 +2995,93 @@
   <!-- fork: the tablet UI and the other fork modules, after upstream's scripts (js/tablet.js) -->
   <script src="/js/tablet.js"></script>
   <!-- Phase 4a: the licence text shown under Setup → Info (offline): LICENSE.md, Apache 2.0. -->
+  <!-- third-party:begin -->
+  <!-- Fork (feature/auslieferung): Setup → Info → Third-party components. Gathered from the repo
+   (csproj PackageReferences, NuGet package metadata, wwwroot/vendor, docs/Geodaten-Herkunft.md);
+   docs/Drittkomponenten.md has the sources and the open points. The licence check skips only
+   this block (Tools/license-headers.py). -->
+  <script type="text/plain" id="tui-lic-third">
+Third-party components in this app
+==================================
+
+AgOpenWeb itself: Apache License 2.0 (see "Licence text").
+The components below come with the app; each keeps its own licence.
+
+Web client
+----------
+CanvasKit 0.41 (Skia for WebAssembly), wwwroot/vendor/canvaskit.js, canvaskit.wasm
+  Google / Skia project. BSD-3-Clause; text in wwwroot/vendor/canvaskit-LICENSE.txt
+  ("Copyright (c) 2011 Google Inc. All rights reserved.").
+
+Map data
+--------
+Grid AT_GIS_GRID (2014), MGI -> ETRS89, file at_bev_AT_GIS_GRID.tif (eAMA import)
+  Source: BEV – Bundesamt für Eich- und Vermessungswesen (Austria).
+  Licence: Creative Commons Attribution 4.0 International (CC BY 4.0).
+  Converted to GeoTIFF by the PROJ project (OSGeo/PROJ-data), otherwise unchanged.
+
+.NET libraries (NuGet)
+----------------------
+CommunityToolkit.Mvvm 8.4.0 ............ MIT
+Microsoft.Extensions.DependencyInjection, Hosting, Hosting.Systemd,
+  Hosting.WindowsServices, Logging, Logging.Abstractions, Logging.Console,
+  Logging.Debug 9.0.0 .................. MIT
+System.IO.Ports 9.0.0 .................. MIT
+Newtonsoft.Json 13.0.3 ................. MIT
+SkiaSharp 3.119.4 and SkiaSharp.NativeAssets (Android, iOS, Linux.NoDependencies,
+  macOS, Win32) 3.119.4 ................ MIT
+Clipper2 1.5.4 (Angus Johnson) ......... Boost Software License 1.0
+Dev4Agriculture.ISO11783.ISOXML 0.23.1.1 Apache License 2.0
+Photino.NET 4.0.16, Photino.Native ..... Apache License 2.0 (desktop window)
+StbImageSharp 2.30.15 .................. Public Domain or MIT (project README)
+
+.NET runtime
+------------
+The desktop packages (Windows, Linux, macOS) contain the .NET 10 runtime
+(self-contained). .NET Foundation and Contributors, MIT (dotnet/runtime LICENSE.TXT).
+  </script>
+  <script type="text/plain" id="tui-lic-third-de">
+Drittkomponenten in dieser App
+==============================
+
+AgOpenWeb selbst: Apache License 2.0 (siehe „Lizenztext“).
+Die folgenden Komponenten werden mit der App ausgeliefert; jede behält ihre eigene Lizenz.
+Lizenznamen und Copyright-Vermerke stehen im Original.
+
+Web-Oberfläche
+--------------
+CanvasKit 0.41 (Skia für WebAssembly), wwwroot/vendor/canvaskit.js, canvaskit.wasm
+  Google / Skia-Projekt. BSD-3-Clause; Text in wwwroot/vendor/canvaskit-LICENSE.txt
+  („Copyright (c) 2011 Google Inc. All rights reserved.“).
+
+Kartendaten
+-----------
+Gitter AT_GIS_GRID (2014), MGI -> ETRS89, Datei at_bev_AT_GIS_GRID.tif (eAMA-Import)
+  Quelle: BEV – Bundesamt für Eich- und Vermessungswesen (Österreich).
+  Lizenz: Creative Commons Attribution 4.0 International (CC BY 4.0).
+  Vom PROJ-Projekt (OSGeo/PROJ-data) nach GeoTIFF umgewandelt, sonst unverändert.
+
+.NET-Bibliotheken (NuGet)
+-------------------------
+CommunityToolkit.Mvvm 8.4.0 ............ MIT
+Microsoft.Extensions.DependencyInjection, Hosting, Hosting.Systemd,
+  Hosting.WindowsServices, Logging, Logging.Abstractions, Logging.Console,
+  Logging.Debug 9.0.0 .................. MIT
+System.IO.Ports 9.0.0 .................. MIT
+Newtonsoft.Json 13.0.3 ................. MIT
+SkiaSharp 3.119.4 und SkiaSharp.NativeAssets (Android, iOS, Linux.NoDependencies,
+  macOS, Win32) 3.119.4 ................ MIT
+Clipper2 1.5.4 (Angus Johnson) ......... Boost Software License 1.0
+Dev4Agriculture.ISO11783.ISOXML 0.23.1.1 Apache License 2.0
+Photino.NET 4.0.16, Photino.Native ..... Apache License 2.0 (Desktop-Fenster)
+StbImageSharp 2.30.15 .................. Public Domain oder MIT (README des Projekts)
+
+.NET-Laufzeit
+-------------
+Die Desktop-Pakete (Windows, Linux, macOS) enthalten die .NET-10-Laufzeit
+(eigenständig). .NET Foundation and Contributors, MIT (dotnet/runtime LICENSE.TXT).
+  </script>
+  <!-- third-party:end -->
   <script type="text/plain" id="tui-lic-apache">
                              Apache License
                        Version 2.0, January 2004

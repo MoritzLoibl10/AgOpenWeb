@@ -2794,7 +2794,7 @@ const TabletHostText = (() => {
 // Look only: switched per device under Setup → Info (aow.ui.brand = on | off, default on);
 // off = the AgOpenWeb look. Warning, stop and steer-direction colours never change.
 const BRAND = {
-  name: '[PRODUKTNAME]',
+  name: 'LM Steering Solutions',
   claim: tr('GPS steering aid for tractor and tool'),
   // Colour world B "Pflaume": accent per theme, [colour, text on it, r,g,b]
   night: ['#c995e0', '#1d0b26', '201,149,224'],
@@ -2850,7 +2850,8 @@ const TabletBrand = (() => {
   apply();
 
   // --- Setup → Info: name, version, origin, licence, source --------------------------------
-  const LIC = { apache: ['tui-lic-apache', 'Apache License 2.0'] }; // LICENSE.md, embedded in index.html
+  const LIC = { apache: ['tui-lic-apache', 'Apache License 2.0'], // LICENSE.md, embedded in index.html
+    third: ['tui-lic-third', tr('Third-party components')] }; // fork: index.html, block third-party:begin/end (English, -de German)
   const sheet = el('div', 'tui-sheet tb-sheet', '<div class="tui-sh-hdr"><span class="t"></span><button class="x">✕</button></div><div class="tui-sh-body"></div>');
   sheet.id = 'tb-sheet';
   const scrim = el('div', 'tp-scrim');
@@ -2867,8 +2868,8 @@ const TabletBrand = (() => {
     sheet.classList.add('open'); scrim.classList.add('open');
   }
   function showLicense(k) {
-    const [id, name] = LIC[k], src = $(id);
-    openSheet(name, b => {
+    const [id, name] = LIC[k], src = (k === 'third' && tuiIsDe() && $(id + '-de')) || $(id); // third-party page: German headings and notes, licence texts as is
+    openSheet(T(name), b => {
       const back = el('button', 'tp-btn'); back.textContent = '← Info'; onTap(back, () => openInfo());
       b.appendChild(back);
       const pre = el('pre', 'tb-lic'); pre.setAttribute('translate', 'no');
@@ -2899,7 +2900,8 @@ const TabletBrand = (() => {
     ori.appendChild(Object.assign(el('div'), { textContent: T(tr('Provided “as is”, without warranties or conditions of any kind (see the licence text).')) }));
     const lr = el('div', 'tb-row');
     const ba = el('button', 'tp-btn'); ba.textContent = T(tr('Licence text (Apache 2.0)')); onTap(ba, () => showLicense('apache'));
-    lr.append(ba); ori.appendChild(lr);
+    const b3 = el('button', 'tp-btn'); b3.textContent = T(tr('Third-party components')); onTap(b3, () => showLicense('third'));
+    lr.append(ba, b3); ori.appendChild(lr);
     box.appendChild(ori);
     const src = el('div', 'tb-box');
     src.appendChild(Object.assign(el('div', 'tb-lbl'), { textContent: T(tr('Source code of this version')) }));
@@ -2908,6 +2910,7 @@ const TabletBrand = (() => {
     src.appendChild(link('AgOpenWeb', BRAND.upstream));
     src.appendChild(link('AgOpenGPS', BRAND.agopengps));
     box.appendChild(src);
+    try { box.appendChild(TabletUpdate.box()); } catch (_) { /* not loaded yet */ } // fork: update check
     const sw = el('div', 'tb-box');
     sw.appendChild(Object.assign(el('div', 'tb-lbl'), { textContent: T(tr('Look')) }));
     const seg = el('div', 'tp-seg');
@@ -3907,7 +3910,7 @@ const TabletReady = (() => {
     const demo = typeof TabletDemo !== 'undefined' && TabletDemo.active;
     const cs = checks(), lvl = Math.min(...cs.map(c => c[0]));
     const word = demo ? tr('Demo') : lvl === 2 ? tr('Ready') : lvl === 1 ? tr('Check') : tr('Not ready');
-    const key = JSON.stringify([demo, cs, pop.hidden, I18n.language]);
+    const key = JSON.stringify([demo, cs, pop.hidden, I18n.language, T(word)]); // T(word): the dictionary may arrive after the language
     if (key === last) return;
     last = key;
     pill.dataset.lv = demo ? 'demo' : String(lvl);
@@ -4342,12 +4345,13 @@ const TabletFirstSetup = (() => {
   }
   // First start on this device: once, on the device that has control, not during a demo.
   const auto = setInterval(() => {
-    if (lsOk()) { clearInterval(auto); return; }
+    if (lsOk() || navigator.webdriver) { clearInterval(auto); return; } // not in automated browsers (CI layout check)
     // Only while no vehicle is set up: no vehicle profile, or only the host's untouched "Default".
     const none = noVehicleYet();
     if (none === false) { clearInterval(auto); return; }
     if (none !== true) return;
-    if (connState === 'connected' && iHoldControl && appInfo && config && profiles && !(typeof TabletDemo !== 'undefined' && TabletDemo.active)) {
+    let legal = true; try { legal = TabletLegal.done; } catch (_) { legal = false; } // the notice at first start comes first
+    if (legal && connState === 'connected' && iHoldControl && appInfo && config && profiles && !(typeof TabletDemo !== 'undefined' && TabletDemo.active)) {
       clearInterval(auto); mark('shown'); open(0);
     }
   }, 1000);
@@ -4364,3 +4368,133 @@ const TabletFirstSetup = (() => {
   }, 300);
   return { open };
 })();
+
+// ===== Update check (feature/auslieferung) ====================================================
+// Asks GitHub for the releases of this fork (BRAND.source) and says whether a newer one exists:
+// a hint with a link, nothing is downloaded or installed. Runs from the browser (GitHub's API
+// allows any origin), so the host is not involved; it needs internet on this device. "Newer" is
+// only claimed when this build's commit (appInfo.gitHash) is itself one of the releases and a
+// later one exists; otherwise the newest release is shown without comparing. On demand (Info) or
+// at start, if switched on for this device.
+// update:begin
+const TabletUpdate = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const onTap = (node, fn) => node.addEventListener('pointerdown', e => { e.stopPropagation(); e.preventDefault(); if (!node.disabled) fn(e); });
+  const KEY = 'aow.update.onStart';
+  const api = () => BRAND.source.replace('https://github.com/', 'https://api.github.com/repos/') + '/releases?per_page=30';
+  let state = { busy: false, res: null };
+  const onStart = () => { try { return localStorage.getItem(KEY) === '1'; } catch (_) { return false; } };
+
+  // releases (GitHub JSON) + this build's hash → { kind: 'newer'|'current'|'unknown', latest, mine }
+  function compare(releases, hash) {
+    const list = (releases || []).filter(r => r && !r.draft && r.published_at)
+      .sort((a, b) => String(b.published_at).localeCompare(String(a.published_at)));
+    if (!list.length) return { kind: 'none' };
+    const h = String(hash || '').replace(/-dirty$/, '').toLowerCase();
+    const mine = h.length >= 7 ? list.find(r => String(r.target_commitish || '').toLowerCase().startsWith(h)) : null;
+    const latest = list[0];
+    if (!mine) return { kind: 'unknown', latest };
+    return { kind: mine === latest ? 'current' : 'newer', latest, mine };
+  }
+  async function check() {
+    state = { busy: true, res: null }; refresh();
+    try {
+      const r = await fetch(api(), { headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      state = { busy: false, res: compare(await r.json(), appInfo && appInfo.gitHash) };
+    } catch (e) { state = { busy: false, res: { kind: 'error', why: String(e && e.message || e) } }; }
+    refresh();
+    return state.res;
+  }
+  let host = null;
+  function refresh() { if (host && host.isConnected) fill(host); }
+  const day = s => { try { return new Date(s).toLocaleDateString(I18n.language || undefined); } catch (_) { return s; } };
+  function fill(b) {
+    b.innerHTML = '';
+    b.appendChild(el('div', 'tb-lbl', T(tr('Updates'))));
+    const r = state.res;
+    if (state.busy) b.appendChild(el('div', 'tp-note', T(tr('Checking GitHub…'))));
+    else if (r && r.kind === 'error') b.appendChild(el('div', 'tp-note warn', tr('No answer from GitHub ({f}). Internet on this device?', { f: r.why })));
+    else if (r && r.kind === 'none') b.appendChild(el('div', 'tp-note', T(tr('No release published yet.'))));
+    else if (r) {
+      const L = r.latest, name = L.name || L.tag_name;
+      const txt = r.kind === 'newer' ? tr('A newer version is available: {n} ({d}).', { n: name, d: day(L.published_at) })
+        : r.kind === 'current' ? tr('This is the newest version ({n}).', { n: name })
+          : tr('Newest published version: {n} ({d}). This build is not one of the published ones, so it is not compared.', { n: name, d: day(L.published_at) });
+      b.appendChild(el('div', 'tp-note' + (r.kind === 'newer' ? ' warn' : ''), txt));
+      if (r.kind !== 'current') {
+        const a = el('button', 'tp-btn', T(tr('Open the release page')) + ' ↗'); onTap(a, () => openExternal(L.html_url)); b.appendChild(a);
+      }
+      b.appendChild(el('div', 'tp-note', T(tr('Installing stays with you: download and install the new version yourself.'))));
+    }
+    const row = el('div', 'tb-row');
+    const go = el('button', 'tp-btn pri', T(tr('Check for updates'))); go.disabled = state.busy; onTap(go, check); row.appendChild(go);
+    const tg = el('button', 'tp-btn' + (onStart() ? ' pri' : ''), (onStart() ? '✓ ' : '') + T(tr('Check at start')));
+    onTap(tg, () => { try { localStorage.setItem(KEY, onStart() ? '0' : '1'); } catch (_) { /* ignore */ } refresh(); });
+    row.appendChild(tg);
+    b.appendChild(row);
+  }
+  function box() { host = el('div', 'tb-box'); fill(host); return host; }
+  // At start (opt-in): once appInfo is there; only a newer version is announced.
+  const auto = setInterval(() => {
+    if (!onStart()) { clearInterval(auto); return; }
+    if (!appInfo) return;
+    clearInterval(auto);
+    check().then(r => { if (r && r.kind === 'newer') showToast(T(tr('A newer version is available: {n} ({d}).', { n: r.latest.name || r.latest.tag_name, d: day(r.latest.published_at) })) + ' ' + T(tr('Setup → Info')), 8000); });
+  }, 1000);
+  return { check, box, compare };
+})();
+// update:end
+
+// ===== Notice at first start (feature/auslieferung) ===========================================
+// The liability notice from docs/Rechtliches-Entwurf.md (section A, a DRAFT, not legally checked),
+// shown once per device and text version until "Read and understood". Stored only in this
+// browser. It switches nothing; the first setup waits for it.
+// legal:begin
+const TabletLegal = (() => {
+  const T = k => I18n.text(k);
+  const el = (tag, cls, txt) => { const e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; };
+  const KEY = 'aow.legal', VERSION = '2026-10-draft2'; // a changed text is shown and confirmed again
+  const TEXT = [
+    tr('This app is a steering aid. It does not replace the driver.'),
+    tr('You stay responsible for the vehicle, the tool and your surroundings at all times. Stay at the wheel and step in when something is wrong.'),
+    tr('The app comes without any warranty. It can have faults; GPS, correction data, modules and settings can give wrong values.'),
+    tr('Do not use on public roads. Switch steering off as soon as people are in the driving area.'),
+    tr('Before the first use, check everything calmly: dimensions, steering direction, switching the steering off. This version is a test version.'),
+    tr('The app is licensed under the Apache License 2.0. It is a changed version of AgOpenWeb; the source code is open.'),
+  ];
+  const acked = () => { try { return localStorage.getItem(KEY) === VERSION; } catch (_) { return false; } };
+  const scrim = el('div', 'tp-scrim'), box = el('div'); box.id = 'tui-legal'; box.setAttribute('translate', 'no'); box.hidden = true;
+  document.body.append(scrim, box);
+  for (const n of [scrim, box]) n.addEventListener('pointerdown', e => e.stopPropagation());
+  function show() {
+    box.innerHTML = '';
+    box.appendChild(el('div', 'lg-n', BRAND.name)); // product name, never translated (box is translate=no)
+    box.appendChild(el('div', 'lg-t', T(tr('Please read before use'))));
+    const ol = el('ol', 'lg-l'); for (const t of TEXT) ol.appendChild(el('li', '', T(t))); box.appendChild(ol);
+    const ok = el('button', 'tp-btn pri big', T(tr('Read and understood')));
+    ok.addEventListener('pointerdown', e => {
+      e.stopPropagation(); e.preventDefault();
+      try { localStorage.setItem(KEY, VERSION); } catch (_) { /* blocked storage: shown again next time */ }
+      box.hidden = true; scrim.classList.remove('open'); done = true;
+    });
+    box.appendChild(ok);
+    box.hidden = false; scrim.classList.add('open');
+  }
+  // Automated browsers (CI's layout check, tests) get no notice: it would cover what they measure.
+  let done = acked() || !!navigator.webdriver;
+  // The language is set at once, its dictionary arrives a moment later; the box is translate=no,
+  // so the page never translates it afterwards: drawn again when the translation is there
+  // (moritz.31 sweep: the notice stayed English on a German tablet).
+  const title = () => T(tr('Please read before use'));
+  const since = performance.now();
+  const ready = () => String(I18n.language).startsWith('en') || title() !== 'Please read before use' || performance.now() - since > 5000;
+  const t = setInterval(() => {
+    if (done) { clearInterval(t); return; }
+    if (box.hidden && typeof I18n !== 'undefined' && appInfo && ready()) show();
+    else if (!box.hidden && box.querySelector('.lg-t').textContent !== title()) show();
+  }, 500);
+  return { get done() { return done || acked(); }, show };
+})();
+// legal:end
