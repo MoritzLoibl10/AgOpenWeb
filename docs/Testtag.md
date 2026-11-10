@@ -1,4 +1,4 @@
-# Testtag: Checkliste zur Testversion 26.7.0-moritz.21 (#20–#24)
+# Testtag: Checkliste zur Testversion 26.7.0-moritz.24 (#20–#26)
 
 Reihenfolge wie beim Abarbeiten. Je Punkt: **tun** → **soll** · PR. Abhaken: ☐. Board und Motor
 sind nicht getestet; Lenkung nur mit Abstand zu Personen, auf eigenem Gelände.
@@ -14,6 +14,8 @@ sind nicht getestet; Lenkung nur mit Abstand zu Personen, auf eigenem Gelände.
 ☐ Eine Fehlermeldung auslösen (z. B. „Arbeit starten“ ohne Schlag, Spur ohne Schlag) → deutscher Text sagt, was zu tun ist · #22
 ☐ Einrichtung → Info → Drittkomponenten (Liste, BEV-Namensnennung), Aktualisierungen → „Nach Aktualisierungen suchen“ zeigt die neueste Version mit Link (nur mit Internet) · #23
 ☐ Windows-PC: Knopf ⛶ → Fenster echtes Vollbild, noch einmal → zurück · #21
+☐ Ersteinrichtung schließen, App-Daten des Browsers löschen, neu öffnen → Ersteinrichtung kommt **nicht** wieder (Stand am Lenkrechner) · #25
+☐ Einrichtung → Abnahmeprotokoll → „Neues Abnahmeprotokoll“: Kit-Daten zeigen Antennenmaße und Fahrzeugprofil wie eingestellt; Kunde/Traktor eintragen · #26
 ☐ NTRIP-Profil bearbeiten: Passwort steht als Maske, „Verbindung testen“ mit NTRIP 1 und 2 klappt, Passwort bleibt erhalten · #20
 
 ## 2. Am Prüfstand (Kit angeschlossen, Räder frei, niemand an den Rädern)
@@ -23,11 +25,16 @@ Schritte der Prüfstand-Checkliste (`docs/Pruefstand-Checkliste.md`) wie bisher,
 ☐ Ampel → Lenkmodul „verbunden“; IMU „verbunden“ (BNO085 über PGN 253); RTK Fix grün · #21
 ☐ Zweites Tablet/Browser verbinden → „Nur ansehen“, kann nichts ändern (auch keine Profile) · #20
 ☐ Lenken ein/aus wie bisher; kein Unterschied zur Vorversion beim Lenkverhalten · #20
+☐ RTK Float erzwingen (z. B. Korrekturen trennen) → Ampel GPS rot, „verlangt Fix-Qualität 4“; zurück auf RTK Fix → grün · #25
+☐ Abnahme „Zeit bis RTK Fix“: Start beim Einschalten des Empfängers → stoppt selbst bei RTK Fix, Sekunden stehen da · #26
+☐ Abnahme „Lenkung aus: Knopf“: Start, Lenkung ein, mit Knopf aus → „Lenkung … s nach dem Scharfschalten aus“ · #26
+☐ Abnahme „Lenkung aus: Lenkrad übersteuern“: Start, Lenkung ein, am Lenkrad drehen → erkannt; Grund meldet der Host nicht, selbst bewerten · #26
 
 ## 3. Auf dem Hof
 ☐ App neu starten, zuerst **rückwärts** aus der Halle → Ampel bleibt gelb „Richtung … nicht bestätigt“; Karte „Zeigt das Fahrzeug in Fahrtrichtung?“ zeigt Pfeil gegen die Spur · #21
 ☐ „Nein – Richtung neu lernen“, vorwärts fahren → Pfeil stimmt, nach „Ja“ wird die Richtung grün · #21/#22
 ☐ Menü → Arbeit starten: Schlag → Spur → Richtung → Ampel; „Zur Fahransicht“ nur bei grün; Lenkung bleibt aus · #22
+☐ Zwei Antennen (falls verbaut): Ampel „Richtung: Doppelantenne“ grün ohne Karte; Kabel einer Antenne ziehen → „kein Dual-Kurs“, Richtung gelb · #25
 
 ## 4. Im Feld
 ☐ Schlag öffnen, Auftrag starten, Linie wählen, Ampel grün, Lenkung selbst einschalten → lenkt wie vorher · #20/#22
@@ -37,5 +44,10 @@ Schritte der Prüfstand-Checkliste (`docs/Pruefstand-Checkliste.md`) wie bisher,
 ☐ „CSV kopieren“ → in Tabelle/E-Mail einfügen: Spalten mit „;“, Kommazahlen · #24
 ☐ „Als Datei sichern“ → auf dem Tablet ggf. kein Download (bekannte Grenze); am PC-Browser prüfen · #24
 ☐ Druckseite je Schlag am PC-Browser → eine Seite pro Schlag · #24
+☐ Arbeitsprotokoll: „Auch am Lenkrechner gespeichert (zuletzt …)“; zweites Tablet sieht dieselben Einträge · #25
+☐ Während eines Auftrags Zündung aus, ohne zu schließen; neu starten → Sitzung endet mit der letzten Uhrzeit und erscheint am Lenkrechner, sobald das Tablet die Bedienung hat · #25
+☐ Abnahme „Gerade Strecke“ und „Hangfahrt“: Start, lenken lassen, Stopp → Mittel/Maximum/Streuung in cm; eigene Grenzwerte eintragen → „Innerhalb/Außerhalb“ · #26
+☐ Abnahme „Wende“: mit Wende fahren → „Wende gefahren“; Ergebnis je Schritt setzen, Bemerkung · #26
+☐ Abnahme → „Drucken / PDF“ am PC-Browser (eine Seite, Unterschriften), „CSV exportieren“ · #26
 
 **Notieren:** was nicht passt, mit Uhrzeit; danach Diagnose-Datei (Menü → Diagnose für Support).
