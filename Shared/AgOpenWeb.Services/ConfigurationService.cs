@@ -469,11 +469,13 @@ public class ConfigurationService(
         // Display config (preferences only — window/camera/day-night/panel
         // STATE moved to PersistentAppState).
         store.Display.StartFullscreen = settings.StartFullscreen;
+        store.Display.ImageryVisible = settings.ImageryVisible;
         store.Display.SvennArrowVisible = settings.SvennArrowVisible;
         store.Display.KeyboardEnabled = settings.KeyboardEnabled;
         store.Display.HeadlandDistanceVisible = settings.HeadlandDistanceVisible;
         store.Display.ExtraGuidelines = settings.ExtraGuidelines;
         store.Display.ExtraGuidelinesCount = settings.ExtraGuidelinesCount;
+        store.Display.UiScale = settings.UiScale;
         store.Display.AutoTrack = settings.AutoTrack;
         store.Display.FieldTextureVisible = settings.FieldTextureVisible;
         if (!settings.HasMigratedTextureMoveable)
@@ -519,6 +521,8 @@ public class ConfigurationService(
         store.Connections.RtcmBroadcast = settings.RtcmBroadcast;
         store.Connections.SendCorrectedPosition = settings.SendCorrectedPosition;
         store.Connections.NtripEnabled = settings.NtripEnabled;
+        store.Connections.NtripProfilePerField = settings.NtripProfilePerField;
+        store.Connections.NtripModeNoticeShown = settings.NtripModeNoticeShown;
         store.Connections.GpsUpdateRate = settings.GpsUpdateRate;
         store.Connections.UseRtk = settings.UseRtk;
         store.Connections.IsGpsConfigured = settings.IsGpsConfigured;
@@ -547,11 +551,13 @@ public class ConfigurationService(
         // Display config (preferences only — window/camera/day-night/panel
         // STATE is persisted by PersistentStateService).
         settings.StartFullscreen = store.Display.StartFullscreen;
+        settings.ImageryVisible = store.Display.ImageryVisible;
         settings.SvennArrowVisible = store.Display.SvennArrowVisible;
         settings.KeyboardEnabled = store.Display.KeyboardEnabled;
         settings.HeadlandDistanceVisible = store.Display.HeadlandDistanceVisible;
         settings.ExtraGuidelines = store.Display.ExtraGuidelines;
         settings.ExtraGuidelinesCount = store.Display.ExtraGuidelinesCount;
+        settings.UiScale = store.Display.UiScale;
         settings.AutoTrack = store.Display.AutoTrack;
         settings.FieldTextureVisible = store.Display.FieldTextureVisible;
         settings.FieldTextureMoveable = store.Display.FieldTextureMoveable;
@@ -592,6 +598,8 @@ public class ConfigurationService(
         settings.RtcmBroadcast = store.Connections.RtcmBroadcast;
         settings.SendCorrectedPosition = store.Connections.SendCorrectedPosition;
         settings.NtripEnabled = store.Connections.NtripEnabled;
+        settings.NtripProfilePerField = store.Connections.NtripProfilePerField;
+        settings.NtripModeNoticeShown = store.Connections.NtripModeNoticeShown;
         settings.GpsUpdateRate = store.Connections.GpsUpdateRate;
         settings.UseRtk = store.Connections.UseRtk;
         settings.IsGpsConfigured = store.Connections.IsGpsConfigured;
@@ -643,6 +651,36 @@ public class ConfigurationService(
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"Failed to save AutoSteer config: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc/>
+    public void SaveAutoSteerDisplaySettings()
+    {
+        try
+        {
+            var path = GetAutoSteerConfigPath(Store.ActiveVehicleProfileName);
+            var a = Store.AutoSteer;
+            var saved = File.Exists(path)
+                ? JsonSerializer.Deserialize<AutoSteerConfigDto>(File.ReadAllText(path))
+                : null;
+            // No file yet: everything as it is now, as a profile save would write it.
+            var dto = (saved ?? a.ToDto()) with
+            {
+                LineWidth = a.LineWidth,
+                NudgeDistance = a.NudgeDistance,
+                RefNudgeDistance = a.RefNudgeDistance,
+                NextGuidanceTime = a.NextGuidanceTime,
+                CmPerPixel = a.CmPerPixel,
+                LightbarEnabled = a.LightbarEnabled,
+                SteerBarEnabled = a.SteerBarEnabled,
+                GuidanceBarOn = a.GuidanceBarOn,
+            };
+            File.WriteAllText(path, JsonSerializer.Serialize(dto, JsonOptions));
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to save AutoSteer display settings: {ex.Message}");
         }
     }
 
