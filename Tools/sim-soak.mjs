@@ -10,7 +10,9 @@
 // starts it again. Results as JSON (--out) and a short summary on stdout.
 //
 //   node Tools/sim-soak.mjs [--minutes 30] [--exe <AgOpenWeb.Desktop>] [--data <dir>] [--out soak.json]
-//                          [--size 1280x800] [--lang de] [--strict]
+//                          [--size 1280x800] [--lang de] [--strict] [--sample-every 300] [--no-ignition]
+// --sample-every SEC: memory of host and page every SEC seconds as well (not only once a cycle).
+// --no-ignition: no host restart in the middle, so a long run shows one host's memory curve.
 // --strict: exit code 1 when a step failed, the page threw or the host ended by itself (CI).
 // Needs Playwright (Chromium) and a built Desktop head (default: the Debug build). Kills nothing
 // but the host it started. Port 5174 must be free.
@@ -30,6 +32,7 @@ const OUT = arg('out', 'sim-soak.json');
 const [W, H] = arg('size', '1280x800').split('x').map(Number);
 const LANG = arg('lang', 'de');
 const URL0 = 'http://localhost:5174/';
+const EVERY = +arg('sample-every', '0') * 1000, IGNITION = !process.argv.includes('--no-ignition');
 const { chromium } = createRequire(import.meta.url)('playwright');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const t0 = Date.now();
@@ -135,10 +138,12 @@ async function sample(label) {
   const pm = await ev(() => (performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null)).catch(() => null);
   const g = await ev(() => { const G = window.__soak && window.__soak.gaps; if (!G) return null; const r = { ticks: G.n, avgMs: G.n ? Math.round(G.sum / G.n) : null, maxMs: Math.round(G.max), over1s: G.over1s, over15s: G.over15s }; window.__soak.gaps = { n: 0, over1s: 0, over15s: 0, max: 0, sum: 0 }; return r; }).catch(() => null);
   if (g) R.tickGaps.push({ at: ts(), label, ...g });
-  const m = { at: ts(), label, pageHeapMb: pm, hostRssMb: hostRssMb(), tickGaps: g };
+  const m = { at: ts(), label, pageHeapMb: pm, hostRssMb: hostRssMb(), hostPid: host && host.pid, job: await ev(() => statusBar && statusBar.jobName).catch(() => null), tickGaps: g };
   R.memory.push(m); log('MEM', JSON.stringify(m));
 }
-const drive = async (secs, label) => { const end = Date.now() + secs * 1000; while (Date.now() < end) { await sleep(5000); await drain(); } if (label) log('DRIVE', label); };
+let lastSample = Date.now();
+const timed = async () => { if (EVERY && Date.now() - lastSample >= EVERY) { lastSample += EVERY; await sample('every ' + EVERY / 1000 + ' s'); } };
+const drive = async (secs, label) => { const end = Date.now() + secs * 1000; while (Date.now() < end) { await sleep(5000); await drain(); await timed(); } if (label) log('DRIVE', label); };
 const deadline = t0 + MINUTES * 60000;
 
 // ---- the run -------------------------------------------------------------------------------
@@ -219,7 +224,7 @@ while (Date.now() < deadline) {
     return { job: (await st()).job, entries: await ev(() => TabletWorkLog.entries.filter(e => !e.kind).length) };
   });
   // Ignition off once, after about two thirds: the host dies mid-job and starts again.
-  if (!ignitionDone && Date.now() - t0 > MINUTES * 60000 * 0.6) {
+  if (IGNITION && !ignitionDone && Date.now() - t0 > MINUTES * 60000 * 0.6) {
     ignitionDone = true;
     await step('ignition off mid-job (kill -9) and restart', async () => {
       const before = await ev(() => ({ open: !!TabletWorkLog.entries.find(e => !e.kind && !e.end), n: TabletWorkLog.entries.length }));
