@@ -2,12 +2,17 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// Shared stubs for the web tests that run a block of wwwroot/js/tablet.js in node (vm): a DOM node that
+// Shared stubs for the web tests that run a block of the fork's client files (wwwroot/js/tablet-*.js) in node (vm): a DOM node that
 // remembers classes and children, a block cutter and a context with timers to run by hand.
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-export const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/js/tablet.js', import.meta.url), 'utf8');
+const WWW = new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/', import.meta.url);
+// The fork's client files (js/tablet-*.js), in the order index.html loads them, joined: the blocks
+// marked `// name:begin` / `// name:end` are cut out of this, whichever file holds them.
+export const forkFiles = [...readFileSync(new URL('index.html', WWW), 'utf8').matchAll(/<script src="\/js\/(tablet-[\w-]+\.js)"><\/script>/g)].map(m => m[1]);
+export const app = forkFiles.map(f => readFileSync(new URL('js/' + f, WWW), 'utf8')).join('\n');
+export const forkCss = readFileSync(new URL('css/tablet.css', WWW), 'utf8');
 export const cut = (begin, end) => app.slice(app.indexOf(begin), app.indexOf(end));
 export const fill = (k, p) => p ? k.replace(/\{(\w+)\}/g, (m, n) => (n in p ? String(p[n]) : m)) : k;
 

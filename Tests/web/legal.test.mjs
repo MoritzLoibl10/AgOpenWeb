@@ -2,10 +2,11 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// TabletLegal (wwwroot/js/tablet.js, legal:begin/end): the notice at first start in the page's
+// TabletLegal (wwwroot/js/tablet-*.js, legal:begin/end): the notice at first start in the page's
 // language. The language is set at once and its dictionary arrives later; the notice (translate=no)
 // waits for it (at most 5 s) and is drawn again if it changes while shown.
 // Run: node --test Tests/web/legal.test.mjs
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cut, run, node } from './stubs.mjs';

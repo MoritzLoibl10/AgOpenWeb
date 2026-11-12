@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Steering off with one tap, on every layer of the real app (review 10.11.2026, measure 1;
-// TabletSteerOff in wwwroot/js/tablet.js). Needs a running host (simulator on, any data folder)
+// TabletSteerOff in wwwroot/js/tablet-steeroff.js). Needs a running host (simulator on, any data folder)
 // and Playwright. With steering on, each layer is opened (every menu tile by touch, every dialog,
 // fly-out, popup, the keyboard, the notice, a stand-in for the loading screen and for a future
 // layer), then one finger tap goes to the place of the Steer button. Passed when steering is off,
@@ -91,6 +91,8 @@ await tapSel('#tui-menu-btn'); await sleep(600);
 const tiles = await ev(() => [...document.querySelectorAll('#tui-menu [data-tile]')].map(e => e.dataset.tile).filter(t => !t.startsWith('#') && t !== 'demo'));
 // A tile on a deeper menu page (docs/Menue-Aufteilung.md): its page's entry first, as a finger does.
 async function toTilePage(t) {
+  // a module adds its tile a moment after the menu opens; wait until it sits on its page
+  await page.waitForFunction(t => { const e = document.querySelector('#tui-menu [data-tile="' + t + '"]'); return !!e && !!e.closest('.tui-mpage'); }, t, { timeout: 5000 }).catch(() => {});
   const pg = await ev(t => { const e = document.querySelector('#tui-menu [data-tile="' + t + '"]'); const d = e && e.closest('.tui-mpage');
     return d && d.hidden ? d.dataset.mpage : ''; }, t);
   if (pg) await tapSel(`#tui-menu [data-tile="page:${pg}"]`);

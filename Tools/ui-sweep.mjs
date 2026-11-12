@@ -50,7 +50,7 @@ const SURFACES = () => {
   for (const f of document.querySelectorAll('.bn-flyout[id]'))
     s.push([f.id, `wzClose(true); lnCloseAll(); closeDialog(); document.getElementById('${f.id}').classList.add('open');`, '#' + f.id]);
   // Fork sheets and menus
-  // Presses by code go through tuiPress (js/tablet.js): each with its own pointerId, which the
+  // Presses by code go through tuiPress (js/tablet-base.js): each with its own pointerId, which the
   // ghost-press filter (#465) lets through every time (a bare pointerId 0 only every second time).
   const fire = sel => `tuiPress(document.querySelector('${sel}'));`;
   // The fork's sheets are opened from the menu in setup mode; in drive mode they close again.
@@ -213,6 +213,8 @@ async function openAndWatch(sel) {
 }
 // A tile on a deeper menu page: tap that page's entry first, as a finger does.
 async function toTilePage(t) {
+  // a module adds its tile a moment after the menu opens; wait until it sits on its page
+  await page.waitForFunction(t => { const e = document.querySelector('#tui-menu [data-tile="' + t + '"]'); return !!e && !!e.closest('.tui-mpage'); }, t, { timeout: 5000 }).catch(() => {});
   const pg = await page.evaluate(t => { const e = document.querySelector('#tui-menu [data-tile="' + t + '"]'); const d = e && e.closest('.tui-mpage');
     return d && d.hidden ? d.dataset.mpage : ''; }, t);
   if (pg) { await tapEl(`#tui-menu [data-tile="page:${pg}"]`); await page.waitForTimeout(400); }

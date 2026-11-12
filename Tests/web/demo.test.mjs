@@ -2,17 +2,17 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// TabletDemo (wwwroot/js/tablet.js, between demo:begin/end): ending the demo, by "End demo" or because
+// TabletDemo (wwwroot/js/tablet-*.js, between demo:begin/end): ending the demo, by "End demo" or because
 // a module was detected, switches steering and sections off with the explicit off commands
 // (autosteer.off, sections.alloff) and never sends a toggle: one sent from a stale tick could
 // switch them on.
 // Run: node --test Tests/web/demo.test.mjs
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
+import { app } from './stubs.mjs';
 
-const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/js/tablet.js', import.meta.url), 'utf8');
 const block = app.slice(app.indexOf('// demo:begin'), app.indexOf('// demo:end'));
 const TOGGLES = ['autosteer.toggle', 'section.master', 'section.manual', 'section.toggle', 'section.toggleZone'];
 

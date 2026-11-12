@@ -458,7 +458,7 @@ const transport = RemoteTransport.create({
   onWebCards(list) { WebCards.setBookmarks(list); },
   onSound(id) { Sounds.play(id); },
   onPrompt(p) { hostPrompt = p; renderHostPrompt(); },
-  onToast(msg, key, args) { showToast(key ? TabletHostText.keyed(msg, key, args) : msg); },
+  onToast(msg, key, args) { showToast(key && typeof TabletHostText !== 'undefined' ? TabletHostText.keyed(msg, key, args) : msg); }, // fork: js/tablet-hosttext.js may not be loaded yet
   onHardwareMessage(text, seconds, warning) { showHardwareMessage(text, seconds, warning); },
   onDrivePick(fields) { showDrivePick(fields); },
   onVt(m, t) { Vt.message(m, t); },

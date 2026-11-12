@@ -17,6 +17,13 @@ The final report of a task is exactly ONE fenced code block: one opening ``` lin
 lines, one closing ``` line. No line outside the block, no inline code per line, no progress
 messages while working.
 
+## Fork: client files
+
+The fork's web client code is `wwwroot/js/tablet-*.js` (one file per area, after upstream's scripts, before `js/frame.js`)
+and `wwwroot/css/tablet.css`; see `Docs/WEB_CLIENT.md`, section "The fork's files". The checks that
+drive the app as on the tablet run in CI: `Tools/ui-sweep.mjs --touch`, `Tools/steer-off-check.mjs`,
+`Tools/i18n-late-check.mjs`, `Tools/sim-soak.mjs --minutes 5`.
+
 ## Project Overview
 
 AgOpenWeb3 is a cross-platform agricultural GPS guidance application: a .NET guidance host

@@ -2,10 +2,11 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// The fork's language signal (wwwroot/js/tablet.js, i18n:begin/end): tuiLang() changes, and
+// The fork's language signal (wwwroot/js/tablet-*.js, i18n:begin/end): tuiLang() changes, and
 // onI18n handlers run, when the language changes and again when its dictionary arrives later
 // (review 10.11.2026, measure 3; the whole app: Tools/i18n-late-check.mjs).
 // Run: node --test Tests/web/i18n-signal.test.mjs
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cut, run } from './stubs.mjs';

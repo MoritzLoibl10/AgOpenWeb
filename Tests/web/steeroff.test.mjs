@@ -2,20 +2,20 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// TabletSteerOff (wwwroot/js/tablet.js, steeroff:begin/end) in a real browser: while steering is
+// TabletSteerOff (wwwroot/js/tablet-*.js, steeroff:begin/end) in a real browser: while steering is
 // on and something covers the Steer button, an off button lies over it, above every layer; one
 // tap sends only autosteer.off and reaches nothing underneath (neither the press nor the click
 // that follows a touch). Uncovered, hidden (the Steer button is upstream's own). The whole app,
 // every layer: Tools/steer-off-check.mjs. Needs Playwright with Chromium; skipped where it isn't
 // installed, except with AOW_REQUIRE_BROWSER=1 (CI).
 // Run: node --test Tests/web/steeroff.test.mjs
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { app, forkCss } from './stubs.mjs';
 
-const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/js/tablet.js', import.meta.url), 'utf8');
-const html = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/index.html', import.meta.url), 'utf8');
+const html = forkCss; // the off button's rules live in css/tablet.css
 const block = app.slice(app.indexOf('// steeroff:begin'), app.indexOf('// steeroff:end'));
 const css = html.slice(html.indexOf('#tui-steeroff {'), html.indexOf('#tui-steeroff.done')) + '#tui-steeroff.done { background: #4b5563; }';
 let chromium = null;

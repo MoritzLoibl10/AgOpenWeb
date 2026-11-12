@@ -2,20 +2,22 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// Presses made by code (wwwroot/js/tablet.js, between press:begin/end) against upstream's
+// Presses made by code (wwwroot/js/tablet-*.js, between press:begin/end) against upstream's
 // ghost-press filter (wwwroot/js/map-input.js, #465), both taken from the files as they are.
 // The filter drops a pointerdown from a pointer that is already down; a press made by code has no
 // release, so with the default pointerId 0 every second one was dropped and a menu tile acted only
 // on the second tap (tablet test moritz.31, point 1). Each press made by code has its own id.
 // Needs Playwright with Chromium; skipped where it isn't installed, except with AOW_REQUIRE_BROWSER=1.
 // Run: node --test Tests/web/press.test.mjs
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { app } from './stubs.mjs';
 
 const read = f => readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/js/' + f, import.meta.url), 'utf8');
-const app = read('tablet.js'), mi = read('map-input.js');
+const mi = read('map-input.js');
 const press = app.slice(app.indexOf('// press:begin'), app.indexOf('// press:end'));
 const END = '_pointersDown.add(e.pointerId);\n}, true);';
 const filter = mi.slice(mi.indexOf('const GHOST_PRESS_MS'), mi.indexOf(END) + END.length);

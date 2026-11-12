@@ -2,10 +2,11 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// TabletReady (wwwroot/js/tablet.js, between ready:begin/end): the ready light in every state. The fix
+// TabletReady (wwwroot/js/tablet-*.js, between ready:begin/end): the ready light in every state. The fix
 // quality is judged by goodness, never looser than the host's gate (GpsFixQualityValidator:
 // number < MinFixQuality is refused); dual antenna and the demo mode included.
 // Run: node --test Tests/web/ready.test.mjs
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cut, run, node } from './stubs.mjs';

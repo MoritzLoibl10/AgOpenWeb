@@ -2,13 +2,13 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// WorkLogCore (wwwroot/js/tablet.js, worklog:begin/end): sessions from what the client sees, the
+// WorkLogCore (wwwroot/js/tablet-*.js, worklog:begin/end): sessions from what the client sees, the
 // session's share of the host's counters, sums, and the CSV for Excel.
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { app } from './stubs.mjs';
 
-const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/js/tablet.js', import.meta.url), 'utf8');
 const C = new Function(app.slice(app.indexOf('// worklog:begin'), app.indexOf('// worklog:end')) + '\nreturn WorkLogCore;')();
 
 const T0 = new Date(2026, 9, 27, 8, 0).getTime(), MIN = 60000;

@@ -2,9 +2,10 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// tuiInitialScale (wwwroot/js/tablet.js, scale-default:begin/end): new devices start with the glove
+// tuiInitialScale (wwwroot/js/tablet-*.js, scale-default:begin/end): new devices start with the glove
 // size, devices that used the app before keep theirs, a stored choice always wins.
 // Run: node --test Tests/web/scale.test.mjs
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cut } from './stubs.mjs';
