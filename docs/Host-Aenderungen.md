@@ -292,6 +292,32 @@ und Steuerlogik ist nicht berührt.
 `AppInfoDto` und `transport.js` haben ein angehängtes Feld. Hängt upstream dort selbst etwas an,
 muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
 
+## 9. eAMA-Import: Route für das BEV-Gitter (feature/eama-import, Oktober 2026)
+- **Datei:** `Shared/AgOpenWeb.RemoteServer/RemoteServerHost.cs`, eine Zeile `MapGet`:
+  `/geo/at_bev_AT_GIS_GRID.tif` liefert `wwwroot/geo/at_bev_AT_GIS_GRID.tif` (eingebettete Ressource,
+  `image/tiff`), nur Lesen.
+- **Grund:** Der Host liefert aus wwwroot nur fest eingetragene Pfade aus. Das Gitter (217 KB) wird
+  nur beim Import geladen, statt `index.html` bei jedem Laden zu vergrößern.
+- **Beim Rebase auf upstream:** Die Zeile steht vor der Route `/backpic.png`; sonst unabhängig.
+
+## 10. eAMA-Import: Befehl `field.fromGeo` (feature/eama-import, Oktober 2026)
+- **Dateien:**
+  - `Shared/AgOpenWeb.ViewModels/MainViewModel.Commands.Fields.cs`: `RemoteFromGeo` (≈ 33 Zeilen).
+  - `Shared/AgOpenWeb.RemoteWiring/RemoteServerWiring.Helpers.cs`: eine Zeile in `ApplyFieldCommand`.
+  - `Shared/AgOpenWeb.RemoteWiring/RemoteServerWiring.cs`: `case "field.fromGeo":` an die vorhandene
+    Zeile der Feld-Befehle angehängt (sonst erreicht der Befehl `ApplyFieldCommand` nicht).
+- **Ablauf:** `field.fromGeo|begin`, dann `field.fromGeo|ring\t<k>\t<lat,lon;…>` (k = 0 außen, dann
+  innere Grenzen; mehrere Stücke je Ring), dann `field.fromGeo|create\t<Name>`. Stücke unter 1 KB,
+  weil der Host Befehle in 1-KB-Rahmen liest (Offene-Punkte #7). Koordinaten in ETRS89, volle
+  Genauigkeit (JS-Zahl als Text, `InvariantCulture`).
+- **Anlegen:** derselbe Weg wie „Aus KML“ (`ConfirmKmlImportDialogCommand`): Ursprung = Mittel aller
+  Grenzpunkte, Außengrenze + innere Grenzen, vorhandener Schlag wird nie überschrieben, der neue
+  Schlag wird geöffnet. Tier 1 wie „Aus KML“; der Client sperrt das Anlegen zusätzlich ohne
+  Steuerrecht, bei eingeschalteter Lenkung und in Fahrt.
+- **Keine Änderung** an Vorgewende, Teilbreiten, Lenkung oder anderer Regellogik.
+- **Beim Rebase auf upstream:** Ändert upstream den KML-Import (`_kmlParsedPolygons`,
+  `KmlCenterLatitude`, `_selectedKmlFile`), `RemoteFromGeo` anpassen.
+
 ## 11. Bedienung-1: Fenster-Vollbild im Desktop-Launcher (feature/bedienung-1, Oktober 2026)
 - **Datei:** `Platforms/AgOpenWeb.Desktop/Launcher/WebViewLauncher.cs`, `OnWebMessage`: die Nachricht
   `fullscreen|1` / `fullscreen|0` ruft `_window.SetFullScreen(true/false)`. Sonst keine Änderung.
@@ -316,8 +342,8 @@ muss `BackupStatus` danach weiter hinten bleiben (oder ganz ans Ende wandern).
   Headless-Shell ohne Systempakete, zwischengespeichert in `~/.cache/ms-playwright`, und führt
   `node --test Tests/web/*.test.mjs` mit `AOW_REQUIRE_BROWSER=1` aus: fehlt der Browser, schlägt
   `long-press.test.mjs` fehl statt übersprungen zu werden.
-- **Hinweis:** Auf diesem Branch gab es den Schritt noch nicht (er liegt sonst nur in
-  `feature/eama-import`, dort ohne Browser). Beim Zusammenführen bleibt diese Fassung.
+- **Hinweis:** Derselbe Schritt führt auch die eAMA-Tests aus (`geo-at`, `eama-shape`); beim Zusammenführen
+  mit `feature/eama-import` ist diese Fassung geblieben.
 
 ## 14. Host-Paket A: eindeutige Aus-Befehle (feature/host-paket, Oktober 2026)
 - **Dateien:** `Shared/AgOpenWeb.ViewModels/MainViewModel.SwitchOff.cs` (neu: `AutoSteerOff()`,

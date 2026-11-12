@@ -895,6 +895,40 @@ public partial class MainViewModel
         ConfirmKmlImportDialogCommand.Execute(null);
     }
 
+    // Fork (eAMA import): the client sends ETRS89 rings (0 = outer, then inner) in pieces under
+    // 1 KB, because the host reads commands in 1 KB frames (Offene-Punkte #7). "create" then runs
+    // the From KML creation with them: origin = mean of all points, never overwrites a field.
+    private readonly List<List<(double Latitude, double Longitude)>> _geoRings = new();
+    public void RemoteFromGeo(string arg)
+    {
+        var a = arg.Split('\t');
+        if (a[0] == "begin") { _geoRings.Clear(); return; }
+        if (a[0] == "ring" && a.Length >= 3 && int.TryParse(a[1], NumberStyles.None, CultureInfo.InvariantCulture, out var k)
+            && k <= _geoRings.Count)
+        {
+            if (k == _geoRings.Count) _geoRings.Add(new());
+            foreach (var p in a[2].Split(';', StringSplitOptions.RemoveEmptyEntries))
+            {
+                var ll = p.Split(',');
+                if (ll.Length == 2 && double.TryParse(ll[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var lat)
+                    && double.TryParse(ll[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var lon))
+                    _geoRings[k].Add((lat, lon));
+            }
+            return;
+        }
+        if (a[0] != "create" || a.Length < 2 || _geoRings.Count == 0 || _geoRings[0].Count < 3) return;
+        _kmlImportToExistingField = false;
+        _kmlParsedPolygons = _geoRings.Where(r => r.Count >= 3).Select(r => r.ToList()).ToList();
+        _kmlBoundaryPoints = new(_kmlParsedPolygons[0]);
+        _geoRings.Clear();
+        var all = _kmlParsedPolygons.SelectMany(r => r).ToList();
+        KmlCenterLatitude = all.Average(p => p.Latitude);
+        KmlCenterLongitude = all.Average(p => p.Longitude);
+        _selectedKmlFile ??= new KmlFileItem { Name = "eAMA" }; // the From KML command needs one; its setter would parse a file
+        KmlImportFieldName = a[1];
+        ConfirmKmlImportDialogCommand.Execute(null);
+    }
+
     /// <summary>
     /// Computes a field origin (WGS84) for an ISO-XML import as the centroid of the outer
     /// boundary ring (PLN type 1/9, LSG type 1). Falls back to the centroid of every point

@@ -315,6 +315,9 @@ ist für die nächste UI-Runde vorgemerkt. Die Einträge unten bleiben zum Nachl
   der Info-Seite.
 - **Stand (Auslieferung):** Seite „Drittkomponenten“ unter Einrichtung → Info; offene Punkte in
   `docs/Drittkomponenten.md`.
+- **Nachtrag (eAMA-Import):** Mitgeliefert wird jetzt auch das BEV-Gitter `at_bev_AT_GIS_GRID.tif`
+  (BEV, CC BY 4.0, aus dem GitHub-Spiegel von PROJ-data). Die Namensnennung gehört auf die Seite
+  „Drittkomponenten“; Herkunft und SHA-256 stehen in `docs/Geodaten-Herkunft.md`.
 - **Host-Änderung nötig:** nein
 
 ### 21. „Gespeichert“ beweist nicht, dass der Host auf die Platte geschrieben hat
