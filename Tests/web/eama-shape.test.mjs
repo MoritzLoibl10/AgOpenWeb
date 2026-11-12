@@ -2,13 +2,13 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// EamaShape (wwwroot/js/tablet.js): ZIP, Shapefile and .prj. Run with `node --test Tests/web/*.test.mjs`.
+// EamaShape (wwwroot/js/tablet-eama.js): ZIP, Shapefile and .prj. Run with `node --test Tests/web/*.test.mjs`.
 // Fixtures are synthetic, made by Tools/eama-test-shapefile.py.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { app } from './stubs.mjs';
 
-const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/js/tablet.js', import.meta.url), 'utf8');
 const block = app.slice(app.indexOf('// eama-shape:begin'), app.indexOf('// eama-shape:end'));
 const EamaShape = new Function(block + '\nreturn EamaShape;')();
 const fx = name => readFileSync(new URL('fixtures/' + name, import.meta.url));

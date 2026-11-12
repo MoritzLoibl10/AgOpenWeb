@@ -190,6 +190,10 @@ function updateAbCursorLabel(x, y) {
 // frame from drawPts (world→screen); cleared when the draw ends. DOM (CanvasKit has no text).
 function renderAbDotLabels() {
   if (!abDotLabelsEl) return;
+  // Fork (upstream issue draft 9): before CanvasKit is up there is no perspM; pw/w2s on null threw
+  // here, outside skFrame's try, and the frame loop stopped for good (map and status bar frozen)
+  // after a reload with an active line. No matrix yet: no letters this frame.
+  if (!perspM) { for (const s of abDotLabelsEl.children) s.style.display = 'none'; return; }
   // Letters for map-tap AND Drive-AB markers (drawMode may be null), else the active line's A/B.
   const active = activeAbPoints(), pts = drawPts.length ? drawPts : (active || []);
   const n = pts.length;

@@ -81,6 +81,29 @@ and a `<script src="/js/<name>.js">` in `index.html` at its place in the order. 
 file in `js/` or `css/` isn't loaded by `index.html`, or if `index.html` loads one that
 doesn't exist.
 
+## The fork's files (LM Steering Solutions)
+
+The fork's own client code is `js/tablet-*.js`, one file per area, loaded after upstream's
+scripts and **before `js/frame.js`** in the order `index.html` lists them, so the connection and the
+map start only once all of it is there (rule 2 above; with the fork after `frame.js`, the first map
+frame could run between two fork files). Its styles are `css/tablet.css`, linked after upstream's. `tablet-base.js` comes first: the helpers the others use while they load (presses made
+by code `tuiPress`, the language signal `tuiLang`/`onI18n`, the number formatters). A file may
+use what earlier files declare while it loads; anything in a later file is reached only from a
+callback and behind `typeof X !== 'undefined'` (a timer of an earlier file can fire before a later
+file is loaded). Nothing in the fork uses what `frame.js` declares. The blocks marked `// name:begin` / `// name:end` are what `Tests/web` cut out of
+the files joined in load order (`Tests/web/stubs.mjs`); `Tests/web/fork-files.test.mjs` checks
+the list, the order and that no block spans two files.
+
+| File | Area |
+|---|---|
+| `tablet-base.js` | shared helpers |
+| `tablet-ui.js`, `tablet-terminal.js`, `tablet-polish.js` | scale and sun theme; terminal layout, status bar, quick bar, menu and its pages; labels and German units |
+| `tablet-profiles.js`, `tablet-hosttext.js`, `tablet-brand.js` | vehicle and tool profiles; host texts in German; product look, help, info, diagnosis |
+| `tablet-direction.js`, `tablet-ready.js`, `tablet-steeroff.js` | heading check and direction card; ready light; steering off over every layer |
+| `tablet-work.js`, `tablet-firstsetup.js`, `tablet-explain.js` | start work; first setup; long press = explanation |
+| `tablet-worklog.js`, `tablet-acceptance.js`, `tablet-bench.js`, `tablet-backup.js` | work log; acceptance record; bench checklist; backup |
+| `tablet-demo.js`, `tablet-update.js`, `tablet-legal.js`, `tablet-startup.js` | demo mode and simulator access; update check; notice at first start; firewall warning, loading screen, image preloading |
+
 ## Adding a panel
 
 1. **Markup** in `index.html`, beside the panels it belongs with: a `<div class="ln-panel">` for

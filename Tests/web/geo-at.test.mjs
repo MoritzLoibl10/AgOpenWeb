@@ -2,15 +2,15 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// GeoAT (wwwroot/js/tablet.js) against PROJ: run with `node --test Tests/web/`.
+// GeoAT (wwwroot/js/tablet-eama.js) against PROJ: run with `node --test Tests/web/`.
 // Reference points from Tools/geo-at-refpoints.py (pyproj, same grid file).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { app } from './stubs.mjs';
 
 const root = new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/', import.meta.url);
-const app = readFileSync(new URL('js/tablet.js', root), 'utf8');
 const block = app.slice(app.indexOf('// geo-at:begin'), app.indexOf('// geo-at:end'));
 const fresh = () => new Function(block + '\nreturn GeoAT;')();
 const GeoAT = fresh();

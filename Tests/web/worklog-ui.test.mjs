@@ -2,18 +2,17 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// TabletWorkLog (wwwroot/js/tablet.js, worklog-ui:begin/end) with WorkLogCore: the recorder and the
+// TabletWorkLog (wwwroot/js/tablet-*.js, worklog-ui:begin/end) with WorkLogCore: the recorder and the
 // sync with the guidance computer (/worklog). A session left open when the ignition went off is
 // closed at the next start and delivered to the host as soon as this tablet holds control; the
 // merge with the host's copy makes no duplicates.
 // Run: node --test Tests/web/worklog-ui.test.mjs
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
-import { node } from './stubs.mjs';
+import { node, app } from './stubs.mjs';
 
-const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/js/tablet.js', import.meta.url), 'utf8');
 const cut = (a, b) => app.slice(app.indexOf(a), app.indexOf(b));
 const block = cut('// worklog:begin', '// worklog:end') + cut('// worklog-ui:begin', '// worklog-ui:end');
 

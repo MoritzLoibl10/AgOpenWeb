@@ -2,10 +2,11 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// TabletHostText (wwwroot/js/tablet.js, hosttext:begin/end): the host's English NTRIP texts in
+// TabletHostText (wwwroot/js/tablet-*.js, hosttext:begin/end): the host's English NTRIP texts in
 // German, the address and the caster's reply kept as written (tablet test moritz.31, point 8:
 // the Test button showed "Error: No answer from …"). The German comes from i18n/de.json.
 // Run: node --test Tests/web/hosttext.test.mjs
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

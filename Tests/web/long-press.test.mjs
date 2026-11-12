@@ -2,17 +2,17 @@
 // Copyright (C) 2024-2026 AgOpenWeb Contributors
 // SPDX-License-Identifier: Apache-2.0
 
-// TabletExplain (wwwroot/js/tablet.js, between explain:begin/end) in a real browser: a long press
+// TabletExplain (wwwroot/js/tablet-*.js, between explain:begin/end) in a real browser: a long press
 // explains, a short press acts on release, and the buttons that switch steering, sections or
 // outputs are left alone, so they act at once on touch. Needs Playwright with Chromium;
 // skipped where it isn't installed, except with AOW_REQUIRE_BROWSER=1 (CI), where that fails.
 // Run: node --test Tests/web/long-press.test.mjs
+
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { app } from './stubs.mjs';
 
-const app = readFileSync(new URL('../../Shared/AgOpenWeb.RemoteServer/wwwroot/js/tablet.js', import.meta.url), 'utf8');
 const block = app.slice(app.indexOf('// press:begin'), app.indexOf('// press:end'))
   + app.slice(app.indexOf('// explain:begin'), app.indexOf('// explain:end'));
 let chromium = null;
