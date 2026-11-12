@@ -54,6 +54,9 @@ Schritte der Prüfstand-Checkliste (`docs/Pruefstand-Checkliste.md`) wie bisher,
 ## 4. Im Feld
 ☐ Schlag öffnen, Auftrag starten, Linie wählen, Ampel grün, Lenkung selbst einschalten → lenkt wie vorher · #20/#22
 ☐ Wende am Vorgewende (falls genutzt) → wie vorher; Werte der Wende unverändert · #20
+☐ **Lenkung aus über jeder Ebene:** Lenkung ein, Menü öffnen → an der Stelle des Lenk-Knopfs liegt rot „Lenkung aus“; ein Tipp → Lenkung aus, sonst passiert nichts; dasselbe mit Einstellungen → Fahrzeug & Gerät offen und mit der Bildschirmtastatur · Review 1
+☐ Menü: erste Seite Arbeit starten, Schläge/Aufträge, Spuren, Arbeitsprotokoll, Hilfe, Einstellungen; unten „Service“; „← Menü“ führt zurück · Review 7
+☐ App mit offenem Schlag und Linie neu laden (Seite neu laden / App neu starten) → Karte und Statuszeile laufen weiter · Upstream-Entwurf 9
 ☐ Nach dem Arbeiten Auftrag schließen → Menü → Arbeitsprotokoll: Eintrag mit Datum, Zeit, Fläche (Host), Gerät, Breite · #24
 ☐ Eintrag antippen, Tätigkeit/Mittel/Menge/Bemerkung eintragen, speichern · #24
 ☐ „CSV kopieren“ → in Tabelle/E-Mail einfügen: Spalten mit „;“, Kommazahlen · #24

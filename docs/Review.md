@@ -266,3 +266,21 @@ auch im Host prüfen (als upstream-Beitrag); Richtungsfrage seltener stellen (nu
 - upstreams deutsche Texte nicht weiter umschreiben; Verbesserungen über upstreams Weblate einbringen.
 - Den Simulator nicht noch tiefer verstecken; besser deutlich kennzeichnen, wenn er läuft.
 - Sich nicht auf Messungen aus der VM verlassen, wenn es um Geschwindigkeit und Lesbarkeit geht.
+
+## Umsetzung (Stand 12.11.2026, develop)
+
+| Maßnahme | Stand |
+|---|---|
+| 1 Lenkung aus mit einem Tipp | erledigt: rote Aus-Fläche über jeder Ebene, nur `autosteer.off`; `Tools/steer-off-check.mjs` 42/42 Ebenen (ohne: 6/39) |
+| 2 Testtag am echten Kit | offen (Hardware); Prüfpunkte in `docs/Testtag.md` ergänzt |
+| 3 Rechtliche Prüfung | offen (extern) |
+| 4 Signal „Wörterbuch geladen“ | erledigt: `tuiLang()`/`onI18n`; englische Reste bei spätem Wörterbuch 11 → 0 |
+| 5 ui-sweep und sim-soak in der CI | erledigt: Pflichtschritte im Job `test` (Touch-Sweep, Lenkung aus, Neuladen, spätes Wörterbuch, 5 min Soak) |
+| 6 Installer signieren | offen |
+| 7 Menü teilen | erledigt: `docs/Menue-Aufteilung.md` |
+| 8 Zweige zusammenführen | erledigt: #20–#27 auf develop gemergt; #19 zieht develop nach |
+| 9 Upstream-Routine | offen; Entwurf Nr. 9 (Bildschleife bleibt stehen) neu |
+| 10 tablet.js teilen, CSS eigene Datei | erledigt: 21 Dateien `js/tablet-*.js` (dazu `tablet-eama.js` in #19), `css/tablet.css` |
+
+Beim Teilen gefunden: upstream hält die Bildschleife an, wenn nach dem Neuladen mit aktiver Linie
+CanvasKit langsamer ist als die ersten Daten (`docs/Upstream-Issues.md` Nr. 9); im Fork abgefangen.
