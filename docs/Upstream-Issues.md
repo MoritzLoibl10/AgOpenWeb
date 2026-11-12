@@ -15,6 +15,7 @@ Issues gibt, ließ sich aus der Fork-Sitzung nicht prüfen; vor dem Anlegen kurz
 | 6 | Simulator mit Teilbreiten: Bedienseite hängt bei jedem Abdeckungs-Update ~1 s, Totmann (1,5 s) nimmt die Bedienung weg, Lenkung geht aus | Entwurf fertig (30.10.2026), einreichen |
 | 7 | Tastenkürzel F (Schlagmenü) und V (Fahrzeug) wirken nur bei jedem zweiten Druck: der Geister-Druck-Filter (#465) verwirft den zweiten Druck mit pointerId 0 | Entwurf fertig (04.11.2026), einreichen |
 | 8 | NTRIP-Test (Knopf „Test“) schickt keine Position: ein VRS-Caster, der erst mit Position antwortet, ergibt nach 15 s „No answer“ | Entwurf fertig (04.11.2026), einreichen |
+| 9 | **Wichtig:** Neu laden mit aktiver Linie, CanvasKit langsamer als die ersten Daten → `renderAbDotLabels` wirft, die Bildschleife steht für immer (Karte und Statuszeile eingefroren) | Entwurf fertig (12.11.2026), einreichen |
 
 ## 1. IMU heading from PGN 253 (#357): AiO v26 sends 0 for "no IMU", which now goes into the heading fusion as a real heading
 
@@ -399,4 +400,50 @@ The test behaves like the connection: with a position when one is known.
 - Measured header limit: an answer after 14 s passes, after 16 s it is "No answer" (15 s).
 - Suggestion: pass the client's current GGA (the same source as `NtripClientService.NextGgaSentence`)
   to the tester; without a fix, say in the result that some casters need a position.
+~~~~
+
+## 9. Reload with an active line and a slow CanvasKit: the frame loop stops for good
+
+Stand: **Entwurf zum Einreichen**. Gefunden am 12.11.2026 beim Aufteilen von `js/tablet.js` (der
+Gesamtlauf zeigte einen Seitenfehler). Nachgestellt mit upstream `develop` 5a2c4251, unverändert
+gebaut, nur upstream-Befehle: Schlag, Grenze, AB-Linie; dann die Seite neu laden, die Datei
+`canvaskit.wasm` 3 s zurückgehalten (wie auf einem schwachen Tablet): 3 von 3 Mal steht die
+Bildschleife. In upstream `develop` 91c89807 ist die Stelle unverändert. Der Fork prüft jetzt in
+`renderAbDotLabels` auf `perspM` (eine Zeile, `js/tracks.js`), Test `Tests/web/ab-labels.test.mjs`
+und `Tools/reload-check.mjs` (in der CI).
+
+**Titel:**
+
+~~~~text
+Web client: with an active line, a reload before CanvasKit is ready stops the frame loop (map and status bar frozen)
+~~~~
+
+**Text:**
+
+~~~~markdown
+### Description
+`skFrame` (js/frame.js) updates the DOM overlays on every frame, outside the `try` around
+`renderSkia`. One of them, `renderAbDotLabels` (js/tracks.js), calls `pw()`/`w2s()` for the active
+line's A and B points. Before CanvasKit has loaded, `active3D()` is false and `perspM` is null, so
+`pw()` throws "Cannot read properties of null (reading '12')". The exception leaves `skFrame`
+before its `requestAnimationFrame(skFrame)`: the frame loop never runs again. Map, light bar,
+status bar, right nav (including the AutoSteer button's state) stay as they were until the page is
+reloaded.
+
+### Steps to reproduce (develop 5a2c4251; same code in 91c89807)
+1. Host headless, open the UI; `field.new|X`, a boundary, an AB line (any way), so the line is active.
+2. Reload the page with `/vendor/canvaskit.wasm` delayed by 3 s (DevTools request blocking/throttling,
+   or Playwright `page.route`). On a slow tablet the first scene simply arrives before CanvasKit.
+3. Watch `_frameLast` / the status bar clock.
+
+### Expected
+The A/B letters wait for CanvasKit; everything else keeps updating.
+
+### Actual
+One page error (`pw` → `renderAbDotLabels` → `skFrame`), then no more frames, 3 of 3 attempts.
+
+### Notes
+- Minimal fix: in `renderAbDotLabels`, `if (!perspM) { hide the letters; return; }`.
+- More robust: run the DOM overlays in `skFrame` inside a `try` too (or schedule the next frame
+  first), so one failing overlay can't freeze the whole screen.
 ~~~~

@@ -111,7 +111,8 @@ jobs:
 
       # Fork (review 10.11.2026, measures 1, 3, 4): the app driven as on the tablet, required
       # in this job: real touch on every menu tile and settings tab (Tools/ui-sweep.mjs --touch),
-      # steering off with one tap on every layer (Tools/steer-off-check.mjs), no English left
+      # steering off with one tap on every layer (Tools/steer-off-check.mjs), a reload with an active
+      # line and a slow CanvasKit (Tools/reload-check.mjs), no English left
       # when the dictionary comes late (Tools/i18n-late-check.mjs), and a 5-minute simulator run
       # (Tools/sim-soak.mjs; it starts its own host, so after the first host is gone). Playwright
       # comes from the web test step above. Results as an artifact.
@@ -119,7 +120,7 @@ jobs:
         run: dotnet build Platforms/AgOpenWeb.Desktop/AgOpenWeb.Desktop.csproj -p:DesktopOnly=true
 
       # One step: the headless app lives only as long as the step that started it.
-      - name: App checks (touch sweep, steering off on every layer, late dictionary)
+      - name: App checks (touch sweep, steering off on every layer, reload, late dictionary)
         shell: bash
         run: |
           export NODE_PATH="$RUNNER_TEMP/pw/node_modules"
@@ -131,6 +132,7 @@ jobs:
           rc=0
           node Tools/ui-sweep.mjs --touch --strict --out "$RUNNER_TEMP/checks/ui-sweep.json" || rc=1
           node Tools/steer-off-check.mjs --out "$RUNNER_TEMP/checks/steer-off.json" || rc=1
+          node Tools/reload-check.mjs || rc=1
           node Tools/i18n-late-check.mjs --out "$RUNNER_TEMP/checks/i18n-late.json" || rc=1
           kill $host; wait $host 2>/dev/null || true
           exit $rc
