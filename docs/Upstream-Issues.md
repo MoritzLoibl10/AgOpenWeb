@@ -16,6 +16,7 @@ Issues gibt, ließ sich aus der Fork-Sitzung nicht prüfen; vor dem Anlegen kurz
 | 7 | Tastenkürzel F (Schlagmenü) und V (Fahrzeug) wirken nur bei jedem zweiten Druck: der Geister-Druck-Filter (#465) verwirft den zweiten Druck mit pointerId 0 | Entwurf fertig (04.11.2026), einreichen |
 | 8 | NTRIP-Test (Knopf „Test“) schickt keine Position: ein VRS-Caster, der erst mit Position antwortet, ergibt nach 15 s „No answer“ | Entwurf fertig (04.11.2026), einreichen |
 | 9 | **Wichtig:** Neu laden mit aktiver Linie, CanvasKit langsamer als die ersten Daten → `renderAbDotLabels` wirft, die Bildschleife steht für immer (Karte und Statuszeile eingefroren) | Entwurf fertig (12.11.2026), einreichen |
+| 10 | Prüfsumme der Szene baut mit 10 Hz alle Fahrgassen-Linien als neue Objekte auf, nur um sie zu zählen: rund 180 MB/min kurzlebiger Speicher, Sägezahn im Host-Speicher; keine Verbindung zu Issue 6 messbar | Entwurf fertig (13.11.2026), einreichen |
 
 ## 1. IMU heading from PGN 253 (#357): AiO v26 sends 0 for "no IMU", which now goes into the heading fusion as a real heading
 
@@ -446,4 +447,100 @@ One page error (`pw` → `renderAbDotLabels` → `skFrame`), then no more frames
 - Minimal fix: in `renderAbDotLabels`, `if (!perspM) { hide the letters; return; }`.
 - More robust: run the DOM overlays in `skFrame` inside a `try` too (or schedule the next frame
   first), so one failing overlay can't freeze the whole screen.
+~~~~
+
+## 10. The scene fingerprint projects every tram line at 10 Hz just to count them
+
+Stand: **Entwurf zum Einreichen**. Gefunden am 13.11.2026 bei der Speicherprüfung
+(`docs/Speicher.md`).
+
+Die Annahme aus dem 3-Stunden-Lauf, die ganze Szene werde bei jeder Änderung neu gebaut,
+stimmte nicht. Der Mitschnitt mit Aufrufketten zeigt: `BuildScene` läuft selten. Die Last kommt
+aus `SceneFingerprint`, der Prüfsumme, die vor jedem Szenenaufbau läuft. Für die Zahl der
+Fahrgassen-Linien ruft sie den `TramLinesProvider` auf. Der baut bei jedem Aufruf alle Linien als
+neue `Vec2Dto`-Listen auf. Das geschieht 10-mal pro Sekunde, auch wenn sich nichts ändert.
+
+Fahrgassen-Linien gibt es auch bei ausgeschalteter Fahrgassen-Steuerung, sobald ein Schlag eine
+Grenze und eine AB-Linie hat (Altmodus in `MainViewModel`, `GenerateParallelTramLines`).
+
+Die vermutete Verbindung zu Issue 6 ließ sich nicht belegen:
+- Die GC-Pausen des Hosts sind kurz: höchstens 10,5 ms in 5 Minuten, höchstens 38 ms pro Minute
+  über 3 Stunden.
+- Die Tick-Lücken aus Issue 6 entstehen im Browser. Ein Client ohne Zeichnen bekam die Ticks
+  lückenlos.
+
+Gemessen mit dem Fork-Build develop bd9243c3 (Release, Prüfrechner x64). Die Stellen sind in
+upstream `develop` 243609b1 (12.11.2026) gleich:
+- `SceneProjector.cs:1044`
+- `RemoteServerWiring.cs:1116`
+- `MapBroadcaster.cs:230`
+
+Die zweite Stelle aus dem Mitschnitt hat upstream schon behoben (#604): `FieldOpsFingerprint`
+las bei jedem Tick alle Auftragsdateien von der Platte, 6,2 MB/min. Sie fehlt dem Fork bis zum
+nächsten Abgleich. Der Fork ändert am Host nichts.
+
+**Titel:**
+
+~~~~text
+Host: SceneFingerprint projects every tram line into new Vec2Dto lists at 10 Hz just to count them (~180 MB/min of garbage)
+~~~~
+
+**Text:**
+
+~~~~markdown
+### Description
+`MapBroadcaster` calls `SceneProjector.SceneFingerprint()` on every 100 ms tick
+(`MapBroadcaster.cs:230`). To detect tram-line changes the fingerprint does
+`h = h * 31 + (TramLinesProvider?.Invoke()?.Count ?? 0);` (`SceneProjector.cs:1044`). The provider,
+set in `RemoteServerWiring.cs` (local function `Add`, line 1116), copies every tram line into a new
+`List<Vec2Dto>` with a new `Vec2Dto` per point on each call. So all tram lines are copied ten times
+a second, only to read `.Count`. `BuildScene` copies them once more when the scene actually
+changes.
+
+Tram lines exist whenever a field has a boundary and an AB line, even with tram control off:
+`MainViewModel` generates them in the legacy path (`GenerateParallelTramLines(track, fieldWidth)` +
+`GenerateBoundaryTramTracks`).
+
+### Measurements
+Desktop head `--headless`, Release, x64 (4 cores, 16 GB). Simulator: field 240 × 480 m with
+boundary, 20 m headland, AB line + curve, sections, U-turns, 8 km/h.
+
+- `dotnet-trace`, `Microsoft-Windows-DotNETRuntime:0x1:5` (AllocationTick with stacks), 5 min:
+  - Total allocated: 238 MB/min.
+  - Through
+    `RemoteServerWiring.<Wire>g__Add <- TramLinesProvider <- SceneProjector.SceneFingerprint <- MapBroadcaster.RunAsync`:
+    176 MB/min, 74 % of the total. Of that, 140 MB/min is `Vec2Dto` and 36 MB/min is `Vec2Dto[]`.
+  - About 290 KB per call. That is roughly 7,600 points per call, assuming 32 bytes per
+    `Vec2Dto` (an estimate).
+  - `BuildScene` itself does not appear among the allocation sites.
+- `dotnet-counters` over 3 h: allocation rate 70–330 MB/min while driving.
+  - The process working set moves in a sawtooth between 317 and 636 MB: the GC lets garbage pile
+    up and releases it later.
+  - Live objects stay flat. Heap dumps at 15/60/120/180 min list 43.5/43.5/42.2/42.2 MB, of which
+    39.5 MB is the coverage display grid. So this is churn, not a leak.
+- GC pauses, from the same trace and counters:
+  - Gen0 1.3–1.8 per minute, gen1 rare.
+  - Longest single pause 10.5 ms in 5 min; at most 38 ms of pause in any minute over 3 h.
+  - CPU (sampled, 2 min): `SceneFingerprint` inclusive about 0.1 % of one core.
+
+### Relation to the 1 s tick gaps (separate issue, coverage painting)
+Checked, and not supported on this machine. Host GC pauses are two orders of magnitude shorter
+than the 0.8–1.2 s gaps. A WebSocket client without rendering received the ticks without gaps
+while the browser showed them. So those gaps come from the browser. On a low-memory ARM tablet
+the churn may cost more; that is not measured.
+
+### Expected
+A fingerprint that does no allocation proportional to the geometry on every tick. Tram lines
+are copied only when they changed.
+
+### Proposal
+- Give `ITramLineService` a change counter (incremented in `Clear`, `Generate*`, `AddTramLine`)
+  and fold that counter plus `Tram.DisplayMode` into the fingerprint, instead of
+  `TramLinesProvider().Count`.
+- Optionally cache the projected `List<Vec2Dto>` per counter value, so `BuildScene` reuses it.
+- Side effect: the counter also catches a regeneration that keeps the number of lines but moves
+  them. The current `.Count` misses that, unless another part of the fingerprint changes at the
+  same time.
+- The same pattern (`HeadlandSegsProvider?.Invoke()` in `SceneFingerprint`) builds a list per
+  tick too; it is small here (not in the top allocation sites).
 ~~~~

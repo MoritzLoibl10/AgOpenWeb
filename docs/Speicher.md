@@ -36,10 +36,10 @@ Belege:
 Woher der Sägezahn kommt:
 
 - Der Host fordert während der Fahrt rund 70–330 MB pro Minute an kurzlebigen Objekten an.
-  Laut 2-Minuten-Mitschnitt (`dotnet-trace`, Allocation-Ticks) ist das zu rund 70 % `Vec2Dto` und
-  `Vec2Dto[]`. `MapBroadcaster` baut mit 10 Hz die ganze Szene neu (`SceneProjector.BuildScene`:
-  Grenze, Vorgewende, Spuren, Leitlinie, Wendepfad), sobald sich ihr Fingerabdruck ändert.
-  Beim Fahren mit Wendungen ist das häufig der Fall.
+  Rund drei Viertel davon (176 von 238 MB/min, Mitschnitt vom 13.11.) stammen nicht aus dem
+  Szenenaufbau, wie hier zuerst vermutet. Sie stammen aus `SceneProjector.SceneFingerprint`: Die
+  Prüfsumme der Szene kopiert mit 10 Hz alle Fahrgassen-Linien in neue `Vec2Dto`-Listen, nur um
+  sie zu zählen. Upstream-Issue-Entwurf 10 in `docs/Upstream-Issues.md`.
 - Der LOH (Objekte ab 85 KB) wächst innerhalb eines Auftrags in Sprüngen von 55 auf bis zu
   314 MB. Er fällt erst, wenn die Laufzeit eine Gen2-Bereinigung macht; die nimmt sie bei reichlich
   freiem Speicher (Prüfrechner: 16 GB) selten vor. Welche Stelle die großen Blöcke anlegt, zeigte
@@ -51,10 +51,12 @@ Die Seite (Chromium, `performance.memory.usedJSHeapSize`) liegt im ganzen Lauf z
 42 MB. Am Ende sind es 15 MB, ohne Trend. Der Fork-Code hält also nichts fest, und im Fork gibt es
 nichts zu beheben.
 
-Upstream: Kein Leck, daher kein Issue-Entwurf. Die Szene wird bei jeder Änderung ganz neu gebaut,
-mit vielen kurzlebigen Objekten. Das ist Rechen- und Speicherbereinigungs-Last, auf schwachen
-Tablets womöglich spürbar. Es ist eine mögliche Verbesserung in upstream, kein Fehler. Gemessen
-nur auf dem Prüfrechner, nicht auf einem Tablet.
+Upstream: Es gibt kein Leck. Die unnötigen Kopien der Fahrgassen-Linien in der Prüfsumme sind
+Issue-Entwurf 10 (13.11.2026).
+- Die GC-Pausen des Hosts sind kurz: höchstens 10,5 ms in 5 Minuten, höchstens 38 ms pro Minute
+  über 3 Stunden.
+- Eine Verbindung zu den Tick-Lücken aus Issue 6 (0,8–1,2 s, im Browser) ist damit nicht belegt.
+- Gemessen nur auf dem Prüfrechner, nicht auf einem Tablet.
 
 ## Wie gemessen
 
